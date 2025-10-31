@@ -42,3 +42,4 @@
 /.vs
 /PasswordManager/.vs/PasswordManager
 /PasswordManager/PasswordManager/PasswordManager.vcxproj.user
+/PasswordManager/PasswordManager/x64/Debug
