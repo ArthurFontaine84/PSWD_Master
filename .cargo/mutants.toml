@@ -1,2 +1,7 @@
-# Le module `fuzz` n'est compilé qu'avec `--cfg fuzzing` : aucun test ne peut juger ses mutants.
-exclude_re = ["fuzz::"]
+exclude_re = [
+    # Le module `fuzz` n'est compilé qu'avec `--cfg fuzzing` : aucun test ne peut juger ses mutants.
+    "fuzz::",
+    # Mutant équivalent : à égalité, l'en-tête distant a les mêmes octets que l'en-tête local,
+    # l'adopter ou non ne change rien.
+    "replace > with >= in VaultFile::merge_remote",
+]

@@ -6,7 +6,7 @@ use std::fmt;
 use header::{Header, ParsedFile, PasswordEnvelope, RecoveryEnvelope};
 
 use crate::crypto::{self, CryptoError, KdfParams, Key, Salt};
-use crate::{RecoveryKey, Secret, Timestamp, Vault};
+use crate::{RecoveryKey, Secret, Timestamp, Vault, merge};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileError {
@@ -16,6 +16,7 @@ pub enum FileError {
     WrongPassword,
     WrongRecoveryKey,
     Corrupted,
+    DifferentVault,
     Internal,
     Crypto(CryptoError),
 }
@@ -31,6 +32,7 @@ impl fmt::Display for FileError {
             Self::WrongPassword => f.write_str("mot de passe maître incorrect"),
             Self::WrongRecoveryKey => f.write_str("clé de récupération incorrecte"),
             Self::Corrupted => f.write_str("coffre altéré ou corrompu"),
+            Self::DifferentVault => f.write_str("le fichier distant appartient à un autre coffre"),
             Self::Internal => f.write_str("erreur interne de sérialisation du coffre"),
             Self::Crypto(error) => error.fmt(f),
         }
@@ -80,6 +82,17 @@ pub mod fuzz {
     }
 }
 
+fn decrypt_payload(vault_key: &Key, parsed: &ParsedFile<'_>) -> Result<Vault, FileError> {
+    let json = crypto::open(
+        vault_key,
+        &parsed.payload_nonce,
+        parsed.payload,
+        parsed.header_bytes,
+    )
+    .map_err(|_| FileError::Corrupted)?;
+    payload::decode(&json)
+}
+
 /// Coffre déverrouillé : garde la clé du coffre et l'en-tête, pour réécrire le fichier sans
 /// redemander le mot de passe.
 pub struct VaultFile {
@@ -118,7 +131,7 @@ impl VaultFile {
     ) -> Result<(Self, Vault), FileError> {
         let parsed = ParsedFile::parse(file)?;
         let vault_key = parsed.header.password.open(password)?;
-        Self::decrypt(parsed, vault_key)
+        Self::unlocked(parsed, vault_key)
     }
 
     /// # Errors
@@ -131,23 +144,63 @@ impl VaultFile {
     ) -> Result<(Self, Vault), FileError> {
         let parsed = ParsedFile::parse(file)?;
         let vault_key = parsed.header.recovery.open(recovery_key.as_key())?;
-        Self::decrypt(parsed, vault_key)
+        Self::unlocked(parsed, vault_key)
     }
 
-    fn decrypt(parsed: ParsedFile<'_>, vault_key: Key) -> Result<(Self, Vault), FileError> {
-        let json = crypto::open(
-            &vault_key,
-            &parsed.payload_nonce,
-            parsed.payload,
-            parsed.header_bytes,
-        )
-        .map_err(|_| FileError::Corrupted)?;
-        let vault = payload::decode(&json)?;
+    fn unlocked(parsed: ParsedFile<'_>, vault_key: Key) -> Result<(Self, Vault), FileError> {
+        let vault = decrypt_payload(&vault_key, &parsed)?;
         let unlocked = Self {
             vault_key,
             header: parsed.header,
         };
         Ok((unlocked, vault))
+    }
+
+    /// Remplace le mot de passe maître : nouvelle enveloppe avec un nouveau sel. La clé du coffre
+    /// et l'enveloppe de récupération ne changent pas.
+    ///
+    /// # Errors
+    ///
+    /// [`FileError::Crypto`] si le générateur aléatoire échoue ; le coffre reste alors inchangé.
+    pub fn change_password(
+        &mut self,
+        password: &Secret,
+        params: KdfParams,
+        now: Timestamp,
+    ) -> Result<(), FileError> {
+        // EXTENSION(key-rotation): générer ici une nouvelle clé de coffre et refaire les deux
+        // enveloppes.
+        let salt = Salt::generate()?;
+        self.header.password = PasswordEnvelope::seal(&self.vault_key, password, params, salt)?;
+        // Toujours plus récent que l'en-tête actuel, même si l'horloge a reculé : la fusion doit
+        // retenir ce changement.
+        let after_current = self.header.keys_updated_at.as_millis().saturating_add(1);
+        self.header.keys_updated_at = now.max(Timestamp::from_millis(after_current));
+        Ok(())
+    }
+
+    /// Fusionne le fichier d'un autre appareil avec `local`.
+    ///
+    /// Les enveloppes retenues sont les plus récentes, ce qui propage un changement de mot de
+    /// passe. Celles du fichier distant ne sont adoptées qu'après son authentification par la clé
+    /// du coffre.
+    ///
+    /// # Errors
+    ///
+    /// [`FileError::Corrupted`] si le fichier distant est altéré ou chiffré par une autre clé,
+    /// [`FileError::DifferentVault`] s'il contient un autre coffre, ou une erreur de format.
+    pub fn merge_remote(&mut self, local: &Vault, remote_file: &[u8]) -> Result<Vault, FileError> {
+        let parsed = ParsedFile::parse(remote_file)?;
+        let remote = decrypt_payload(&self.vault_key, &parsed)?;
+        let merged = merge(local.clone(), remote).map_err(|_| FileError::DifferentVault)?;
+        // À date égale, les octets de l'en-tête départagent : tous les appareils convergent.
+        let current = self.header.encode();
+        if (parsed.header.keys_updated_at, parsed.header_bytes)
+            > (self.header.keys_updated_at, current.as_slice())
+        {
+            self.header = parsed.header;
+        }
+        Ok(merged)
     }
 
     /// Contenu complet du fichier `vault.enc` pour ce coffre.
@@ -310,6 +363,150 @@ mod tests {
         );
     }
 
+    fn at(millis: i64) -> Timestamp {
+        Timestamp::from_millis(millis)
+    }
+
+    fn note(title: &str) -> EntryContent {
+        EntryContent::new(EntryKind::Note, title.to_owned())
+    }
+
+    fn titles(vault: &Vault) -> Vec<&str> {
+        let mut titles: Vec<&str> = vault
+            .entries()
+            .map(|entry| entry.content().title.as_str())
+            .collect();
+        titles.sort_unstable();
+        titles
+    }
+
+    /// Deux appareils qui ont ouvert le même fichier.
+    fn two_devices() -> ((VaultFile, Vault), (VaultFile, Vault), RecoveryKey) {
+        let (file, recovery_key) = sample_file(&sample_vault());
+        let device = || VaultFile::unlock_with_password(&file, &password("maître")).unwrap();
+        (device(), device(), recovery_key)
+    }
+
+    #[test]
+    fn change_password_replaces_only_the_password() {
+        let vault = sample_vault();
+        let (file, recovery_key) = sample_file(&vault);
+        let (mut unlocked, _) =
+            VaultFile::unlock_with_password(&file, &password("maître")).unwrap();
+        unlocked
+            .change_password(&password("nouveau"), fast_params(), at(1_000))
+            .unwrap();
+        let file = unlocked.encrypt(&vault).unwrap();
+        assert_eq!(
+            VaultFile::unlock_with_password(&file, &password("maître")).err(),
+            Some(FileError::WrongPassword)
+        );
+        let (_, opened) = VaultFile::unlock_with_password(&file, &password("nouveau")).unwrap();
+        assert_eq!(opened, vault);
+        let (_, opened) = VaultFile::unlock_with_recovery_key(&file, &recovery_key).unwrap();
+        assert_eq!(opened, vault);
+    }
+
+    #[test]
+    fn recovery_key_allows_choosing_a_new_password() {
+        let vault = sample_vault();
+        let (file, recovery_key) = sample_file(&vault);
+        let (mut unlocked, opened) =
+            VaultFile::unlock_with_recovery_key(&file, &recovery_key).unwrap();
+        unlocked
+            .change_password(&password("retrouvé"), fast_params(), at(1_000))
+            .unwrap();
+        let file = unlocked.encrypt(&opened).unwrap();
+        let (_, reopened) = VaultFile::unlock_with_password(&file, &password("retrouvé")).unwrap();
+        assert_eq!(reopened, vault);
+    }
+
+    #[test]
+    fn keys_date_moves_forward_even_if_the_clock_goes_back() {
+        let ((mut unlocked, _), _, _) = two_devices();
+        unlocked
+            .change_password(&password("a"), fast_params(), at(2_000))
+            .unwrap();
+        assert_eq!(unlocked.header.keys_updated_at, at(2_000));
+        unlocked
+            .change_password(&password("b"), fast_params(), at(100))
+            .unwrap();
+        assert_eq!(unlocked.header.keys_updated_at, at(2_001));
+    }
+
+    #[test]
+    fn merge_remote_unites_entries_from_both_devices() {
+        let ((mut a, mut vault_a), (b, mut vault_b), _) = two_devices();
+        vault_a.add(note("de A"), at(2_000));
+        vault_b.add(note("de B"), at(2_000));
+        let merged = a
+            .merge_remote(&vault_a, &b.encrypt(&vault_b).unwrap())
+            .unwrap();
+        assert_eq!(titles(&merged), ["GitHub", "de A", "de B"]);
+    }
+
+    #[test]
+    fn newer_remote_password_is_adopted() {
+        let ((mut a, vault), (mut b, _), _) = two_devices();
+        b.change_password(&password("nouveau"), fast_params(), at(2_000))
+            .unwrap();
+        let merged = a.merge_remote(&vault, &b.encrypt(&vault).unwrap()).unwrap();
+        let file = a.encrypt(&merged).unwrap();
+        assert_eq!(
+            VaultFile::unlock_with_password(&file, &password("maître")).err(),
+            Some(FileError::WrongPassword)
+        );
+        assert!(VaultFile::unlock_with_password(&file, &password("nouveau")).is_ok());
+    }
+
+    #[test]
+    fn newer_local_password_is_kept() {
+        let ((mut a, vault), (b, _), _) = two_devices();
+        a.change_password(&password("nouveau"), fast_params(), at(2_000))
+            .unwrap();
+        let merged = a.merge_remote(&vault, &b.encrypt(&vault).unwrap()).unwrap();
+        let file = a.encrypt(&merged).unwrap();
+        assert!(VaultFile::unlock_with_password(&file, &password("nouveau")).is_ok());
+    }
+
+    #[test]
+    fn simultaneous_password_changes_converge() {
+        let ((mut a, vault), (mut b, _), _) = two_devices();
+        a.change_password(&password("pour A"), fast_params(), at(2_000))
+            .unwrap();
+        b.change_password(&password("pour B"), fast_params(), at(2_000))
+            .unwrap();
+        let file_a = a.encrypt(&vault).unwrap();
+        let file_b = b.encrypt(&vault).unwrap();
+        a.merge_remote(&vault, &file_b).unwrap();
+        b.merge_remote(&vault, &file_a).unwrap();
+        assert_eq!(a.header, b.header);
+    }
+
+    #[test]
+    fn file_of_another_vault_is_rejected() {
+        let ((mut a, vault), _, _) = two_devices();
+        let (other, _) = sample_file(&vault);
+        assert_eq!(
+            a.merge_remote(&vault, &other).err(),
+            Some(FileError::Corrupted)
+        );
+        assert_eq!(
+            a.merge_remote(&vault, b"").err(),
+            Some(FileError::Malformed)
+        );
+    }
+
+    #[test]
+    fn same_key_but_different_vault_id_is_rejected() {
+        let ((mut a, vault), _, _) = two_devices();
+        let foreign = a.encrypt(&Vault::new()).unwrap();
+        assert_eq!(
+            a.merge_remote(&vault, &foreign).err(),
+            Some(FileError::DifferentVault)
+        );
+    }
+
     #[test]
     fn errors_have_explicit_messages() {
         let messages = [
@@ -328,6 +525,10 @@ mod tests {
                 "clé de récupération incorrecte",
             ),
             (FileError::Corrupted, "coffre altéré ou corrompu"),
+            (
+                FileError::DifferentVault,
+                "le fichier distant appartient à un autre coffre",
+            ),
             (
                 FileError::Internal,
                 "erreur interne de sérialisation du coffre",
