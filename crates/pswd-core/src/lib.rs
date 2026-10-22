@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+pub mod crypto;
 mod entry;
 mod merge;
 mod secret;

@@ -51,7 +51,7 @@ Avec Git, `LocalStore` et `RemoteStore` visent le même clone local ; ils resten
 
 La crypto n'est **pas** un port : déterministe, sans E/S, identique partout.
 
-**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `rand` (`OsRng`), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `keyring`, `directories`, `toml`, `clap`. Librairie Git embarquée (`git2` ou `gix`, à trancher au démarrage ; critères : push HTTPS fiable et compilation Android). Jamais le binaire `git` du système.
+**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `keyring`, `directories`, `toml`, `clap`. Librairie Git embarquée (`git2` ou `gix`, à trancher au démarrage ; critères : push HTTPS fiable et compilation Android). Jamais le binaire `git` du système.
 
 ## 4. Modèle de données
 
@@ -107,7 +107,8 @@ payload          XChaCha20-Poly1305(vault_key, JSON du Vault), AAD = tout l'en-t
 
 Chaque enveloppe : `kind u8 | paramètres propres | nonce 24 o | XChaCha20-Poly1305(clé d'enveloppe, vault_key)`.
 
-- Paramètres Argon2id par défaut : 64 MiB, 3 itérations, parallélisme 1 (compatible mobile). Ils sont lus depuis le fichier, donc modifiables sans migration.
+- Paramètres Argon2id par défaut : 64 MiB, 3 itérations, parallélisme 1 (compatible mobile). Ils sont lus depuis le fichier, donc modifiables sans migration. Bornes acceptées (contre un fichier malveillant) : mémoire 8 MiB – 1 GiB, 1 à 10 itérations, parallélisme 1 à 8.
+- Aléa (clés, sels, nonces) : `getrandom` (générateur du système).
 - Clé de récupération : 32 octets aléatoires, affichés **une seule fois** à `init`, encodés en Base32 Crockford par groupes de 4 caractères.
 - Tout fichier mal formé, version inconnue ou échec d'authentification → erreur explicite, jamais de panique.
 - Le JSON déchiffré est stocké dans un buffer effacé (`zeroize`) après usage.
