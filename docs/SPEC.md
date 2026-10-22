@@ -54,7 +54,7 @@ Avec Git, `LocalStore` et `RemoteStore` visent le même clone local ; ils resten
 
 La crypto n'est **pas** un port : déterministe, sans E/S, identique partout.
 
-**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `keyring`, `directories`, `toml`, `clap`. Librairie Git embarquée : `git2` (libgit2), retenue pour son push HTTPS éprouvé ; `gix` ne sait pas encore pousser (à réévaluer, le port `RemoteStore` permet d'en changer). Sur Android, `git2` exige OpenSSL embarqué (`vendored-openssl`). Jamais le binaire `git` du système.
+**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `keyring-core` (+ un magasin par OS : Windows, macOS, Secret Service sous Linux), `directories`, `toml`, `clap`. Librairie Git embarquée : `git2` (libgit2), retenue pour son push HTTPS éprouvé ; `gix` ne sait pas encore pousser (à réévaluer, le port `RemoteStore` permet d'en changer). Sur Android, `git2` exige OpenSSL embarqué (`vendored-openssl`). Jamais le binaire `git` du système.
 
 ## 4. Modèle de données
 
