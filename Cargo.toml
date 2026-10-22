@@ -11,6 +11,7 @@ publish = false
 [workspace.dependencies]
 pswd-core = { path = "crates/pswd-core" }
 pswd-infra = { path = "crates/pswd-infra" }
+proptest = "1"
 uuid = { version = "1", features = ["v4"] }
 zeroize = "1"
 

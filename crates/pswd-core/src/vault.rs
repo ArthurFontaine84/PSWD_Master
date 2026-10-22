@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 
 use uuid::Uuid;
@@ -22,8 +23,8 @@ impl std::error::Error for VaultError {}
 /// Coffre déchiffré. Les entrées supprimées restent présentes sous forme de tombstones.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Vault {
-    id: Uuid,
-    entries: Vec<Entry>,
+    pub(crate) id: Uuid,
+    pub(crate) entries: BTreeMap<Uuid, Entry>,
 }
 
 impl Vault {
@@ -33,7 +34,7 @@ impl Vault {
     pub fn new() -> Self {
         Self {
             id: Uuid::new_v4(),
-            entries: Vec::new(),
+            entries: BTreeMap::new(),
         }
     }
 
@@ -42,25 +43,22 @@ impl Vault {
         self.id
     }
 
-    /// Toutes les entrées, tombstones comprises, dans l'ordre d'ajout.
-    #[must_use]
-    pub fn entries(&self) -> &[Entry] {
-        &self.entries
+    /// Toutes les entrées, tombstones comprises, triées par identifiant.
+    pub fn entries(&self) -> impl Iterator<Item = &Entry> {
+        self.entries.values()
     }
 
     /// Entrée non supprimée portant cet identifiant.
     #[must_use]
     pub fn get(&self, id: Uuid) -> Option<&Entry> {
-        self.entries
-            .iter()
-            .find(|entry| entry.id() == id && !entry.is_deleted())
+        self.entries.get(&id).filter(|entry| !entry.is_deleted())
     }
 
     /// Ajoute une entrée et renvoie son identifiant.
     pub fn add(&mut self, content: EntryContent, now: Timestamp) -> Uuid {
         let entry = Entry::new(content, now);
         let id = entry.id();
-        self.entries.push(entry);
+        self.entries.insert(id, entry);
         id
     }
 
@@ -87,8 +85,8 @@ impl Vault {
 
     fn live_entry_mut(&mut self, id: Uuid) -> Result<&mut Entry, VaultError> {
         self.entries
-            .iter_mut()
-            .find(|entry| entry.id() == id && !entry.is_deleted())
+            .get_mut(&id)
+            .filter(|entry| !entry.is_deleted())
             .ok_or(VaultError::EntryNotFound(id))
     }
 }
@@ -111,16 +109,20 @@ mod tests {
         let vault = Vault::new();
         assert_eq!(vault.id().get_version_num(), 4);
         assert_ne!(vault.id(), Vault::new().id());
-        assert_eq!(vault.entries(), []);
+        assert_eq!(vault.entries().count(), 0);
     }
 
     #[test]
-    fn added_entries_are_kept_in_order() {
+    fn entries_are_sorted_by_id() {
         let mut vault = Vault::new();
-        let first = vault.add(titled("a"), at(1_000));
-        let second = vault.add(titled("b"), at(2_000));
-        let ids: Vec<Uuid> = vault.entries().iter().map(Entry::id).collect();
-        assert_eq!(ids, [first, second]);
+        let mut ids = vec![
+            vault.add(titled("a"), at(1_000)),
+            vault.add(titled("b"), at(1_000)),
+            vault.add(titled("c"), at(1_000)),
+        ];
+        ids.sort();
+        let listed: Vec<Uuid> = vault.entries().map(Entry::id).collect();
+        assert_eq!(listed, ids);
     }
 
     #[test]
@@ -155,9 +157,9 @@ mod tests {
         let mut vault = Vault::new();
         let id = vault.add(titled("a"), at(1_000));
         vault.delete(id, at(2_000)).unwrap();
-        assert_eq!(vault.entries().len(), 1);
-        assert!(vault.entries()[0].is_deleted());
-        assert_eq!(vault.entries()[0].updated_at(), at(2_000));
+        let tombstone = vault.entries.get(&id).unwrap();
+        assert!(tombstone.is_deleted());
+        assert_eq!(tombstone.updated_at(), at(2_000));
     }
 
     #[test]
@@ -188,14 +190,13 @@ mod tests {
             vault.delete(id, at(3_000)),
             Err(VaultError::EntryNotFound(id))
         );
-        assert_eq!(vault.entries()[0].updated_at(), at(2_000));
+        assert_eq!(vault.entries.get(&id).unwrap().updated_at(), at(2_000));
     }
 
     #[test]
     fn error_message_names_the_entry() {
-        let id = Uuid::nil();
         assert_eq!(
-            VaultError::EntryNotFound(id).to_string(),
+            VaultError::EntryNotFound(Uuid::nil()).to_string(),
             "entrée introuvable : 00000000-0000-0000-0000-000000000000"
         );
     }

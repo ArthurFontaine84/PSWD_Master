@@ -2,9 +2,9 @@ use uuid::Uuid;
 
 use crate::{Secret, Tags, Timestamp};
 
-const HISTORY_LIMIT: usize = 10;
+pub(crate) const HISTORY_LIMIT: usize = 10;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum EntryKind {
     Login,
     Note,
@@ -35,6 +35,19 @@ impl EntryContent {
             tags: Tags::default(),
         }
     }
+
+    /// Ordre total sur le contenu, utilisé pour départager la fusion de façon déterministe.
+    pub(crate) fn sort_key(&self) -> impl Ord + '_ {
+        (
+            self.kind,
+            &self.title,
+            &self.username,
+            self.password.as_ref().map(Secret::expose),
+            &self.urls,
+            &self.notes,
+            self.tags.as_slice(),
+        )
+    }
 }
 
 /// Version précédente d'une entrée.
@@ -44,15 +57,23 @@ pub struct EntrySnapshot {
     pub updated_at: Timestamp,
 }
 
+impl EntrySnapshot {
+    pub(crate) fn sort_key(&self) -> impl Ord + '_ {
+        (self.updated_at, self.content.sort_key())
+    }
+}
+
 /// Les modifications passent par [`crate::Vault`], qui garantit que l'entrée n'est pas supprimée.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
-    id: Uuid,
-    content: EntryContent,
-    created_at: Timestamp,
-    updated_at: Timestamp,
-    deleted: bool,
-    history: Vec<EntrySnapshot>,
+    pub(crate) id: Uuid,
+    pub(crate) content: EntryContent,
+    pub(crate) created_at: Timestamp,
+    pub(crate) updated_at: Timestamp,
+    pub(crate) deleted: bool,
+    /// Date de la dernière suppression : les versions antérieures ne sont plus jamais conservées.
+    pub(crate) deleted_at: Option<Timestamp>,
+    pub(crate) history: Vec<EntrySnapshot>,
 }
 
 impl Entry {
@@ -63,6 +84,7 @@ impl Entry {
             created_at: now,
             updated_at: now,
             deleted: false,
+            deleted_at: None,
             history: Vec::new(),
         }
     }
@@ -116,12 +138,15 @@ impl Entry {
         self.content = EntryContent::new(self.content.kind, String::new());
         self.history.clear();
         self.deleted = true;
+        self.deleted_at = self.deleted_at.max(Some(now));
         self.updated_at = now;
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
+
     use super::*;
 
     fn github() -> EntryContent {
@@ -155,6 +180,61 @@ mod tests {
     }
 
     #[test]
+    fn sort_key_compares_every_field() {
+        let base = github();
+        let variants = [
+            EntryContent {
+                kind: EntryKind::Note,
+                ..base.clone()
+            },
+            EntryContent {
+                title: "Gitea".to_owned(),
+                ..base.clone()
+            },
+            EntryContent {
+                username: None,
+                ..base.clone()
+            },
+            EntryContent {
+                password: Some(Secret::new("other".to_owned())),
+                ..base.clone()
+            },
+            EntryContent {
+                urls: Vec::new(),
+                ..base.clone()
+            },
+            EntryContent {
+                notes: Some("note".to_owned()),
+                ..base.clone()
+            },
+            EntryContent {
+                tags: Tags::default(),
+                ..base.clone()
+            },
+        ];
+        for variant in variants {
+            assert_ne!(variant.sort_key().cmp(&base.sort_key()), Ordering::Equal);
+        }
+        assert_eq!(
+            base.clone().sort_key().cmp(&base.sort_key()),
+            Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn snapshot_sort_key_orders_by_date_first() {
+        let older = EntrySnapshot {
+            content: titled("z"),
+            updated_at: at(1),
+        };
+        let newer = EntrySnapshot {
+            content: titled("a"),
+            updated_at: at(2),
+        };
+        assert!(newer.sort_key() > older.sort_key());
+    }
+
+    #[test]
     fn new_entry_keeps_its_content() {
         let entry = Entry::new(github(), at(1_000));
         assert_eq!(entry.content(), &github());
@@ -171,6 +251,7 @@ mod tests {
     fn new_entry_is_live_without_history() {
         let entry = Entry::new(github(), at(1_000));
         assert!(!entry.is_deleted());
+        assert_eq!(entry.deleted_at, None);
         assert_eq!(entry.history(), []);
     }
 
@@ -199,7 +280,7 @@ mod tests {
             entry.history(),
             [EntrySnapshot {
                 content: titled("v1"),
-                updated_at: at(1_000),
+                updated_at: at(1_000)
             }]
         );
     }
@@ -238,10 +319,19 @@ mod tests {
         assert!(entry.is_deleted());
         assert_eq!(entry.id(), id);
         assert_eq!(entry.updated_at(), at(3_000));
+        assert_eq!(entry.deleted_at, Some(at(3_000)));
         assert_eq!(
             entry.content(),
             &EntryContent::new(EntryKind::Note, String::new())
         );
         assert_eq!(entry.history(), []);
+    }
+
+    #[test]
+    fn delete_never_moves_the_deletion_date_back() {
+        let mut entry = Entry::new(github(), at(1_000));
+        entry.deleted_at = Some(at(5_000));
+        entry.delete(at(3_000));
+        assert_eq!(entry.deleted_at, Some(at(5_000)));
     }
 }

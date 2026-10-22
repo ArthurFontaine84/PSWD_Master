@@ -70,10 +70,13 @@ struct Entry {
     created_at: Timestamp,       // UTC, millisecondes
     updated_at: Timestamp,
     deleted: bool,               // marqueur de suppression (tombstone)
+    deleted_at: Option<Timestamp>, // date de la dernière suppression (conservée si l'entrée revit)
     history: Vec<EntrySnapshot>, // versions précédentes, 10 max, plus récentes d'abord
 }
 
-struct Vault { vault_id: Uuid, entries: Vec<Entry> }
+struct EntrySnapshot { content: EntryContent, updated_at: Timestamp }
+
+struct Vault { vault_id: Uuid, entries: BTreeMap<Uuid, Entry> } // triées par id : ordre déterministe
 ```
 
 - `pswd-core` ne lit jamais l'horloge : l'heure courante est fournie par l'appelant.
@@ -111,13 +114,14 @@ Chaque enveloppe : `kind u8 | paramètres propres | nonce 24 o | XChaCha20-Poly1
 
 ## 6. Fusion
 
-Fonction pure `merge(local: Vault, remote: Vault) -> Vault` dans `pswd-core`.
+Fonction pure `merge(local: Vault, remote: Vault) -> Result<Vault, MergeError>` dans `pswd-core`. Refuse deux coffres d'identifiants différents.
 
 1. Union des entrées par `id`.
 2. Entrée présente d'un seul côté → conservée.
 3. Présente des deux côtés et identique → conservée.
-4. Sinon, la gagnante est celle dont `updated_at` est le plus grand ; en cas d'égalité, départage déterministe par comparaison du hash du contenu sérialisé. La perdante est ajoutée à l'historique de la gagnante (sauf si elle y est déjà ; une tombstone n'est pas historisée). Les historiques sont unis, dédupliqués, triés puis tronqués à 10.
-5. Une suppression suit la même règle : une modification postérieure à une suppression fait revivre l'entrée.
+4. Sinon, la gagnante est celle dont `updated_at` est le plus grand ; à date égale, une entrée vivante l'emporte sur une tombstone, puis départage déterministe par comparaison champ par champ du contenu (pas de hash : il devrait être stable entre versions du compilateur). `created_at` = le plus ancien, `deleted_at` = le plus récent.
+5. Historique = union des deux historiques + version perdante, puis : retrait des versions datées au plus `deleted_at` (une tombstone n'est donc jamais historisée et n'a pas d'historique) et de la version courante, tri (date puis contenu, plus récentes d'abord), dédoublonnage, troncature à 10.
+6. Une suppression suit la même règle : une modification postérieure à une suppression fait revivre l'entrée, sans ses versions antérieures à la suppression. `deleted_at` est nécessaire à l'associativité : sans lui, l'historique dépendrait de l'ordre des fusions.
 
 **Propriétés obligatoires** (testées avec `proptest`) : commutative, associative, idempotente ; aucune entrée non supprimée ne disparaît.
 
