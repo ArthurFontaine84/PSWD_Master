@@ -42,10 +42,13 @@ Workspace Cargo, architecture hexagonale :
 Futur : `pswd-mobile` (bindings UniFFI au-dessus de `pswd-core`, adaptateurs propres).
 
 **Ports (définis dans `pswd-core`)**
-- `LocalStore` : `load() -> bytes`, `save_atomic(bytes)` (fichier temporaire + renommage).
-- `RemoteStore` : `fetch() -> (bytes, version)`, `push(bytes, expected_version)` (échoue si le distant a bougé), `is_reachable()`.
+- `LocalStore` : `load() -> Option<bytes>` (`None` : pas de coffre local), `save_atomic(bytes)` (fichier temporaire + renommage).
+- `RemoteStore` : `fetch() -> Option<(bytes, version)>` (`None` : distant vide ; une erreur vaut « hors ligne », l'adaptateur borne lui-même l'attente), `push(bytes, expected_version)` (`Conflict` si le distant a bougé ; `expected = None` exige un distant vide).
 - `SecretStore` : lire / écrire le jeton d'accès distant d'un coffre.
 - `SecureClipboard` : `copy_secret(value, ttl)`.
+- Les erreurs des adaptateurs sont des `PortError` (un message, jamais de secret).
+
+**Session** (`pswd-core`) : coffre ouvert, déverrouillé par mot de passe ou clé de récupération (`Credentials`, extensible au fichier-clé). Elle applique le déroulé du §7 avec n'importe quels adaptateurs, ce qui la rend testable avec des magasins en mémoire et réutilisable sur mobile.
 
 Avec Git, `LocalStore` et `RemoteStore` visent le même clone local ; ils restent distincts pour permettre un transport sans Git.
 
@@ -150,6 +153,12 @@ Fonction pure `merge(local: Vault, remote: Vault) -> Result<Vault, MergeError>` 
 3. **Push rejeté** (le distant a bougé) : fetch → fusion → nouveau push, 3 tentatives max.
 4. **Verrouillage / fermeture** : nouvelle tentative de push s'il y a des modifications en attente.
 5. **`sync`** manuel à tout moment.
+
+Précisions :
+- Copie locale et distant ne sont réécrits que s'ils sont en retard sur la fusion : ouvrir un coffre à jour ne crée ni écriture ni commit, et une modification sans effet n'écrit rien.
+- Si l'écriture locale d'une modification échoue, le coffre en mémoire revient à son état précédent.
+- Un fichier distant inutilisable (altéré, autre coffre, version inconnue) n'est **jamais écrasé** : état « refusé », le coffre local reste utilisable.
+- États de synchro : à jour, hors ligne (avec le message de l'adaptateur), conflit persistant après 3 tentatives, distant refusé.
 
 ## 8. CLI
 

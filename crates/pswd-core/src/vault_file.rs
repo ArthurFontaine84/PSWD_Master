@@ -93,6 +93,16 @@ fn decrypt_payload(vault_key: &Key, parsed: &ParsedFile<'_>) -> Result<Vault, Fi
     payload::decode(&json)
 }
 
+/// Résultat de [`VaultFile::merge_remote`].
+#[derive(Debug)]
+pub struct RemoteMerge {
+    pub vault: Vault,
+    /// La copie locale doit être réécrite : entrées ou enveloppes reçues du distant.
+    pub local_outdated: bool,
+    /// Le distant doit être mis à jour : entrées ou enveloppes qu'il n'a pas.
+    pub remote_outdated: bool,
+}
+
 /// Coffre déverrouillé : garde la clé du coffre et l'en-tête, pour réécrire le fichier sans
 /// redemander le mot de passe.
 pub struct VaultFile {
@@ -189,18 +199,28 @@ impl VaultFile {
     ///
     /// [`FileError::Corrupted`] si le fichier distant est altéré ou chiffré par une autre clé,
     /// [`FileError::DifferentVault`] s'il contient un autre coffre, ou une erreur de format.
-    pub fn merge_remote(&mut self, local: &Vault, remote_file: &[u8]) -> Result<Vault, FileError> {
+    pub fn merge_remote(
+        &mut self,
+        local: &Vault,
+        remote_file: &[u8],
+    ) -> Result<RemoteMerge, FileError> {
         let parsed = ParsedFile::parse(remote_file)?;
         let remote = decrypt_payload(&self.vault_key, &parsed)?;
-        let merged = merge(local.clone(), remote).map_err(|_| FileError::DifferentVault)?;
+        let vault = merge(local.clone(), remote.clone()).map_err(|_| FileError::DifferentVault)?;
         // À date égale, les octets de l'en-tête départagent : tous les appareils convergent.
         let current = self.header.encode();
-        if (parsed.header.keys_updated_at, parsed.header_bytes)
-            > (self.header.keys_updated_at, current.as_slice())
-        {
+        let adopt_remote_keys = (parsed.header.keys_updated_at, parsed.header_bytes)
+            > (self.header.keys_updated_at, current.as_slice());
+        let merge = RemoteMerge {
+            local_outdated: adopt_remote_keys || vault != *local,
+            remote_outdated: (!adopt_remote_keys && parsed.header_bytes != current.as_slice())
+                || vault != remote,
+            vault,
+        };
+        if adopt_remote_keys {
             self.header = parsed.header;
         }
-        Ok(merged)
+        Ok(merge)
     }
 
     /// Contenu complet du fichier `vault.enc` pour ce coffre.
@@ -442,7 +462,33 @@ mod tests {
         let merged = a
             .merge_remote(&vault_a, &b.encrypt(&vault_b).unwrap())
             .unwrap();
-        assert_eq!(titles(&merged), ["GitHub", "de A", "de B"]);
+        assert_eq!(titles(&merged.vault), ["GitHub", "de A", "de B"]);
+        assert!(merged.local_outdated);
+        assert!(merged.remote_outdated);
+    }
+
+    #[test]
+    fn identical_files_need_no_update() {
+        let ((mut a, vault), (b, _), _) = two_devices();
+        let merged = a.merge_remote(&vault, &b.encrypt(&vault).unwrap()).unwrap();
+        assert_eq!(merged.vault, vault);
+        assert!(!merged.local_outdated);
+        assert!(!merged.remote_outdated);
+    }
+
+    #[test]
+    fn entry_missing_on_one_side_only_updates_that_side() {
+        let ((mut a, vault), (b, mut vault_b), _) = two_devices();
+        vault_b.add(note("de B"), at(2_000));
+        let file_b = b.encrypt(&vault_b).unwrap();
+        let merged = a.merge_remote(&vault, &file_b).unwrap();
+        assert!(merged.local_outdated);
+        assert!(!merged.remote_outdated);
+        let merged = a
+            .merge_remote(&vault_b, &b.encrypt(&vault).unwrap())
+            .unwrap();
+        assert!(!merged.local_outdated);
+        assert!(merged.remote_outdated);
     }
 
     #[test]
@@ -451,7 +497,9 @@ mod tests {
         b.change_password(&password("nouveau"), fast_params(), at(2_000))
             .unwrap();
         let merged = a.merge_remote(&vault, &b.encrypt(&vault).unwrap()).unwrap();
-        let file = a.encrypt(&merged).unwrap();
+        assert!(merged.local_outdated);
+        assert!(!merged.remote_outdated);
+        let file = a.encrypt(&merged.vault).unwrap();
         assert_eq!(
             VaultFile::unlock_with_password(&file, &password("maître")).err(),
             Some(FileError::WrongPassword)
@@ -465,7 +513,9 @@ mod tests {
         a.change_password(&password("nouveau"), fast_params(), at(2_000))
             .unwrap();
         let merged = a.merge_remote(&vault, &b.encrypt(&vault).unwrap()).unwrap();
-        let file = a.encrypt(&merged).unwrap();
+        assert!(!merged.local_outdated);
+        assert!(merged.remote_outdated);
+        let file = a.encrypt(&merged.vault).unwrap();
         assert!(VaultFile::unlock_with_password(&file, &password("nouveau")).is_ok());
     }
 
