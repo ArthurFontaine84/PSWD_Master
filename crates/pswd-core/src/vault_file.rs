@@ -6,7 +6,7 @@ use std::fmt;
 use header::{Header, ParsedFile, PasswordEnvelope, RecoveryEnvelope};
 
 use crate::crypto::{self, CryptoError, KdfParams, Key, Salt};
-use crate::{Secret, Timestamp, Vault};
+use crate::{RecoveryKey, Secret, Timestamp, Vault};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileError {
@@ -98,13 +98,13 @@ impl VaultFile {
         password: &Secret,
         params: KdfParams,
         now: Timestamp,
-    ) -> Result<(Self, Key), FileError> {
+    ) -> Result<(Self, RecoveryKey), FileError> {
         let vault_key = Key::generate()?;
-        let recovery_key = Key::generate()?;
+        let recovery_key = RecoveryKey::generate()?;
         let header = Header {
             keys_updated_at: now,
             password: PasswordEnvelope::seal(&vault_key, password, params, Salt::generate()?)?,
-            recovery: RecoveryEnvelope::seal(&vault_key, &recovery_key)?,
+            recovery: RecoveryEnvelope::seal(&vault_key, recovery_key.as_key())?,
         };
         Ok((Self { vault_key, header }, recovery_key))
     }
@@ -128,10 +128,10 @@ impl VaultFile {
     /// fichier est invalide.
     pub fn unlock_with_recovery_key(
         file: &[u8],
-        recovery_key: &Key,
+        recovery_key: &RecoveryKey,
     ) -> Result<(Self, Vault), FileError> {
         let parsed = ParsedFile::parse(file)?;
-        let vault_key = parsed.header.recovery.open(recovery_key)?;
+        let vault_key = parsed.header.recovery.open(recovery_key.as_key())?;
         Self::decrypt(parsed, vault_key)
     }
 
@@ -190,7 +190,7 @@ mod tests {
     }
 
     /// Fichier chiffré avec le mot de passe « maître », et sa clé de récupération.
-    fn sample_file(vault: &Vault) -> (Vec<u8>, Key) {
+    fn sample_file(vault: &Vault) -> (Vec<u8>, RecoveryKey) {
         let (unlocked, recovery_key) = VaultFile::create(
             &password("maître"),
             fast_params(),
@@ -213,6 +213,20 @@ mod tests {
         let vault = sample_vault();
         let (file, recovery_key) = sample_file(&vault);
         let (_, opened) = VaultFile::unlock_with_recovery_key(&file, &recovery_key).unwrap();
+        assert_eq!(opened, vault);
+    }
+
+    #[test]
+    fn displayed_recovery_key_unlocks_the_vault() {
+        let vault = sample_vault();
+        let (file, recovery_key) = sample_file(&vault);
+        let typed = recovery_key
+            .encode()
+            .expose()
+            .to_lowercase()
+            .replace('-', " ");
+        let parsed = RecoveryKey::parse(&typed).unwrap();
+        let (_, opened) = VaultFile::unlock_with_recovery_key(&file, &parsed).unwrap();
         assert_eq!(opened, vault);
     }
 
@@ -259,9 +273,13 @@ mod tests {
             VaultFile::unlock_with_password(&file, &password("maitre")).err(),
             Some(FileError::WrongPassword)
         );
-        assert_ne!(Key::generate().unwrap().as_bytes(), recovery_key.as_bytes());
+        let other_key = RecoveryKey::generate().unwrap();
+        assert_ne!(
+            other_key.as_key().as_bytes(),
+            recovery_key.as_key().as_bytes()
+        );
         assert_eq!(
-            VaultFile::unlock_with_recovery_key(&file, &Key::generate().unwrap()).err(),
+            VaultFile::unlock_with_recovery_key(&file, &other_key).err(),
             Some(FileError::WrongRecoveryKey)
         );
     }
@@ -288,7 +306,7 @@ mod tests {
             Some(FileError::Malformed)
         );
         assert_eq!(
-            VaultFile::unlock_with_recovery_key(b"", &Key::generate().unwrap()).err(),
+            VaultFile::unlock_with_recovery_key(b"", &RecoveryKey::generate().unwrap()).err(),
             Some(FileError::Malformed)
         );
     }

@@ -1,0 +1,2 @@
+# Le module `fuzz` n'est compilé qu'avec `--cfg fuzzing` : aucun test ne peut juger ses mutants.
+exclude_re = ["fuzz::"]

@@ -4,6 +4,7 @@
 pub mod crypto;
 mod entry;
 mod merge;
+mod recovery_key;
 mod secret;
 mod tags;
 mod timestamp;
@@ -12,6 +13,7 @@ mod vault_file;
 
 pub use entry::{Entry, EntryContent, EntryKind, EntrySnapshot};
 pub use merge::{MergeError, merge};
+pub use recovery_key::{RecoveryKey, RecoveryKeyError};
 pub use secret::Secret;
 pub use tags::Tags;
 pub use timestamp::Timestamp;
