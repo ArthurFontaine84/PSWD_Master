@@ -11,6 +11,7 @@ publish = false
 [workspace.dependencies]
 pswd-core = { path = "crates/pswd-core" }
 pswd-infra = { path = "crates/pswd-infra" }
+arboard = { version = "3", default-features = false }
 apple-native-keyring-store = { version = "1", features = ["keychain"] }
 argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
 chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc", "zeroize"] }

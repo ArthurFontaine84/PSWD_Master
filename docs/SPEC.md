@@ -204,7 +204,7 @@ Code Wi-Fi,note,,,,"Box: ABCD-1234",maison
 ## 9. Sécurité
 
 - Secrets (`password`, clés, mot de passe maître, JSON déchiffré) dans des types effacés à la libération (`zeroize` / `secrecy`) ; jamais dans les logs, `Debug` ni les messages d'erreur.
-- **Presse-papiers** : seulement les mots de passe d'entrées ; effacement après 20 s, uniquement s'il contient encore la valeur copiée. Le contenu doit être exclu de l'historique dès la copie :
+- **Presse-papiers** : seulement les mots de passe d'entrées ; effacement après 20 s, ou dès la fermeture du programme si elle survient avant, uniquement s'il contient encore la valeur copiée ; seul le minuteur de la dernière copie efface. Le contenu doit être exclu de l'historique dès la copie :
   - Windows : formats `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory = 0`, `CanUploadToCloudClipboard = 0` ;
   - Linux : type MIME `x-kde-passwordManagerHint = secret` (partiel : avertissement affiché) ;
   - Android 13+ (futur) : `EXTRA_IS_SENSITIVE` ; iOS (futur) : `localOnly` + `expirationDate`.
