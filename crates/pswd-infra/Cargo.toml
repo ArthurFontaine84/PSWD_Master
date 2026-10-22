@@ -7,9 +7,12 @@ publish.workspace = true
 
 [dependencies]
 arboard.workspace = true
+etcetera.workspace = true
 git2.workspace = true
 keyring-core.workspace = true
 pswd-core.workspace = true
+serde.workspace = true
+toml.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]

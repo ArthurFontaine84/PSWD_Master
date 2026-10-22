@@ -54,7 +54,7 @@ Avec Git, `LocalStore` et `RemoteStore` visent le même clone local ; ils resten
 
 La crypto n'est **pas** un port : déterministe, sans E/S, identique partout.
 
-**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `keyring-core` (+ un magasin par OS : Windows, macOS, Secret Service sous Linux), `directories`, `toml`, `clap`. Librairie Git embarquée : `git2` (libgit2), retenue pour son push HTTPS éprouvé ; `gix` ne sait pas encore pousser (à réévaluer, le port `RemoteStore` permet d'en changer). Sur Android, `git2` exige OpenSSL embarqué (`vendored-openssl`). Jamais le binaire `git` du système.
+**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `keyring-core` (+ un magasin par OS : Windows, macOS, Secret Service sous Linux), `etcetera` (dossiers standard, licence MIT/Apache, contrairement à `directories` qui tire du MPL-2.0), `toml`, `clap`, `arboard` (presse-papiers). Librairie Git embarquée : `git2` (libgit2), retenue pour son push HTTPS éprouvé ; `gix` ne sait pas encore pousser (à réévaluer, le port `RemoteStore` permet d'en changer). Sur Android, `git2` exige OpenSSL embarqué (`vendored-openssl`). Jamais le binaire `git` du système.
 
 ## 4. Modèle de données
 
@@ -140,11 +140,12 @@ Fonction pure `merge(local: Vault, remote: Vault) -> Result<Vault, MergeError>` 
 
 ## 7. Synchro et cycle de vie
 
-**Emplacements** (dossiers standard de l'OS, crate `directories`)
+**Emplacements** (dossiers standard de l'OS, crate `etcetera` : `AppData\Roaming` sous Windows, `~/.config` et `~/.local/share` ailleurs)
 - Config : `<config_dir>/pswd/config.toml`, contenant les coffres nommés (`[vaults.<nom>]` : URL du dépôt, chemin local) et `default_vault`, `auto_lock_minutes = 10`, `clipboard_clear_seconds = 20`.
 - Données : un dossier par coffre, `<data_dir>/pswd/vaults/<nom>/`, contenant `vault.enc` (copie locale, `FileStore`) et `repo.git/` (dépôt Git nu, cache du distant, `GitRemote`). Plusieurs coffres coexistent ; aucun ne remplace un autre.
 - Dépôt distant : branche `main`, fichier `vault.enc` à la racine ; les autres fichiers (README créé par GitHub) sont conservés. Chaque publication est un commit dont le parent est la version récupérée : le serveur refuse tout push qui n'est pas une avance rapide, ce qui garantit qu'aucune version n'est écrasée. Jeton présenté une seule fois par opération (utilisateur `x-access-token`).
 - Délai max de 5 s : à configurer à l'échelle du processus via les options de libgit2 (`set_server_connect_timeout_in_milliseconds`, fonction `unsafe`) lors du câblage de la CLI.
+- Nom d'un coffre : lettres ASCII, chiffres, `-` et `_`, 64 caractères au plus, hors noms réservés de Windows (`con`, `nul`…) ; il sert de nom de dossier et de compte dans le trousseau. Le premier coffre ajouté devient le coffre par défaut ; un nom n'est jamais réattribué.
 - Jeton d'accès : trousseau de l'OS, service `pswd`, compte `<nom>`. Jamais en clair sur le disque.
 
 **Hébergement** : 1 dépôt Git privé = 1 coffre. HTTPS + jeton GitHub *fine-grained* limité à ce seul dépôt (Contents : lecture/écriture). Plus tard, un serveur maison (Gitea…) avec un compte et un dépôt par personne.
