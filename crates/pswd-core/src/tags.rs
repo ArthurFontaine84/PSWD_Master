@@ -1,5 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 /// Liste de tags normalisée : sans espaces autour, en minuscules, sans vide, sans doublon, triée.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "Vec<String>")]
 pub struct Tags(Vec<String>);
 
 impl Tags {
@@ -21,6 +24,12 @@ impl Tags {
     #[must_use]
     pub fn as_slice(&self) -> &[String] {
         &self.0
+    }
+}
+
+impl From<Vec<String>> for Tags {
+    fn from(tags: Vec<String>) -> Self {
+        Self::new(tags)
     }
 }
 
@@ -49,6 +58,13 @@ mod tests {
     #[test]
     fn removes_duplicates_after_normalization() {
         assert_eq!(Tags::new(["dev", "DEV", " dev "]).as_slice(), ["dev"]);
+    }
+
+    #[test]
+    fn deserialization_normalizes() {
+        let tags: Tags = serde_json::from_str(r#"["Web", " dev", "web"]"#).unwrap();
+        assert_eq!(tags.as_slice(), ["dev", "web"]);
+        assert_eq!(serde_json::to_string(&tags).unwrap(), r#"["dev","web"]"#);
     }
 
     #[test]

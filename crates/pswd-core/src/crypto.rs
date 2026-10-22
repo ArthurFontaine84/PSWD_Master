@@ -5,7 +5,7 @@ use std::fmt;
 
 use zeroize::Zeroizing;
 
-pub use aead::{NONCE_LEN, Sealed, open, seal};
+pub use aead::{NONCE_LEN, Sealed, TAG_LEN, open, seal, unwrap_key, wrap_key};
 pub use kdf::{KdfParams, SALT_LEN, Salt, password_wrapping_key, recovery_wrapping_key};
 
 pub const KEY_LEN: usize = 32;

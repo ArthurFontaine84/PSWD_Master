@@ -2,9 +2,10 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use zeroize::Zeroizing;
 
-use super::{CryptoError, Key, fill_random, internal_error};
+use super::{CryptoError, KEY_LEN, Key, fill_random, internal_error};
 
 pub const NONCE_LEN: usize = 24;
+pub const TAG_LEN: usize = 16;
 
 /// Résultat d'un chiffrement : le nonce doit être conservé avec le chiffré.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +65,30 @@ pub fn open(
         .map_err(|_| CryptoError::Decryption)
 }
 
+/// Chiffre une clé avec une clé d'enveloppe.
+///
+/// # Errors
+///
+/// [`CryptoError::RandomUnavailable`] si le générateur aléatoire échoue.
+pub fn wrap_key(wrapping_key: &Key, key: &Key, aad: &[u8]) -> Result<Sealed, CryptoError> {
+    seal(wrapping_key, key.as_bytes(), aad)
+}
+
+/// # Errors
+///
+/// [`CryptoError::Decryption`] si l'enveloppe ne s'ouvre pas avec cette clé ou ne contient pas
+/// une clé.
+pub fn unwrap_key(wrapping_key: &Key, wrapped: &Sealed, aad: &[u8]) -> Result<Key, CryptoError> {
+    let opened = open(wrapping_key, &wrapped.nonce, &wrapped.ciphertext, aad)?;
+    let bytes: &[u8; KEY_LEN] = opened
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::Decryption)?;
+    let mut key = Zeroizing::new([0; KEY_LEN]);
+    key.copy_from_slice(bytes);
+    Ok(Key::from_bytes(key))
+}
+
 fn cipher(key: &Key) -> XChaCha20Poly1305 {
     XChaCha20Poly1305::new(key.as_bytes().into())
 }
@@ -73,7 +98,6 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::crypto::KEY_LEN;
     use crate::crypto::hex;
 
     fn key(fill: u8) -> Key {
@@ -119,6 +143,37 @@ mod tests {
         assert_eq!(
             open(&key(1), &sealed.nonce, &sealed.ciphertext, b"HEADER"),
             Err(CryptoError::Decryption)
+        );
+    }
+
+    #[test]
+    fn wrapped_key_round_trips() {
+        let vault_key = key(9);
+        let wrapped = wrap_key(&key(1), &vault_key, b"aad").unwrap();
+        assert_eq!(wrapped.ciphertext.len(), KEY_LEN + TAG_LEN);
+        let unwrapped = unwrap_key(&key(1), &wrapped, b"aad").unwrap();
+        assert_eq!(unwrapped.as_bytes(), vault_key.as_bytes());
+    }
+
+    #[test]
+    fn unwrap_rejects_a_wrong_key_or_aad() {
+        let wrapped = wrap_key(&key(1), &key(9), b"aad").unwrap();
+        assert_eq!(
+            unwrap_key(&key(2), &wrapped, b"aad").err(),
+            Some(CryptoError::Decryption)
+        );
+        assert_eq!(
+            unwrap_key(&key(1), &wrapped, b"other").err(),
+            Some(CryptoError::Decryption)
+        );
+    }
+
+    #[test]
+    fn unwrap_rejects_content_that_is_not_a_key() {
+        let sealed = seal(&key(1), b"too short", b"").unwrap();
+        assert_eq!(
+            unwrap_key(&key(1), &sealed, b"").err(),
+            Some(CryptoError::Decryption)
         );
     }
 

@@ -1,17 +1,20 @@
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{Secret, Tags, Timestamp};
 
 pub(crate) const HISTORY_LIMIT: usize = 10;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum EntryKind {
     Login,
     Note,
 }
 
 /// Contenu modifiable d'une entrée.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EntryContent {
     pub kind: EntryKind,
     pub title: String,
@@ -51,7 +54,8 @@ impl EntryContent {
 }
 
 /// Version précédente d'une entrée.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EntrySnapshot {
     pub content: EntryContent,
     pub updated_at: Timestamp,
@@ -64,7 +68,8 @@ impl EntrySnapshot {
 }
 
 /// Les modifications passent par [`crate::Vault`], qui garantit que l'entrée n'est pas supprimée.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Entry {
     pub(crate) id: Uuid,
     pub(crate) content: EntryContent,
