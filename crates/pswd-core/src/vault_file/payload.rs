@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
-use std::io;
 
 use serde::{Deserialize, Serialize, Serializer};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use super::{FileError, internal_error};
+use crate::buffer::write_exact;
 use crate::{Entry, Vault};
 
 #[derive(Serialize)]
@@ -36,13 +36,7 @@ pub(super) fn encode(vault: &Vault) -> Result<Zeroizing<Vec<u8>>, FileError> {
         vault_id: vault.id,
         entries: EntryList(&vault.entries),
     };
-    // La taille est calculée d'abord : le buffer n'est jamais réalloué, donc aucune copie du
-    // JSON n'est abandonnée en mémoire sans être effacée.
-    let mut counter = ByteCounter(0);
-    serde_json::to_writer(&mut counter, &payload).map_err(internal_error)?;
-    let mut json = Zeroizing::new(Vec::with_capacity(counter.0));
-    serde_json::to_writer(&mut *json, &payload).map_err(internal_error)?;
-    Ok(json)
+    write_exact(|out| serde_json::to_writer(out, &payload).map_err(internal_error))
 }
 
 pub(super) fn decode(json: &[u8]) -> Result<Vault, FileError> {
@@ -60,23 +54,8 @@ pub(super) fn decode(json: &[u8]) -> Result<Vault, FileError> {
     })
 }
 
-struct ByteCounter(usize);
-
-impl io::Write for ByteCounter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0 += buf.len();
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
-
     use proptest::collection::vec;
     use proptest::prelude::*;
 
@@ -153,14 +132,6 @@ mod tests {
             decode(br#"{"vault_id":"00000000-0000-0000-0000-000000000001"}"#),
             Err(FileError::Malformed)
         );
-    }
-
-    #[test]
-    fn counter_counts_written_bytes() {
-        let mut counter = ByteCounter(0);
-        counter.write_all(b"abc").unwrap();
-        counter.flush().unwrap();
-        assert_eq!(counter.0, 3);
     }
 
     fn arb_text() -> impl Strategy<Value = String> {

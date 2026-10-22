@@ -182,6 +182,12 @@ Code Wi-Fi,note,,,,"Box: ABCD-1234",maison
 ```
 `kind` ∈ {`login`, `note`} ; `urls` et `tags` séparés par `;`. RFC 4180 (guillemets, retours à la ligne dans les champs). Une ligne invalide fait échouer l'import avec son numéro de ligne ; rien n'est importé partiellement.
 
+- Listes (`urls`, `tags`) : `\;` et `\\` désignent un `;` et un `\` littéraux ; un `\` isolé est gardé tel quel ; les éléments vides sont ignorés.
+- Une cellule vide est un champ absent (`username`, `password`, `notes`). `kind` est lu sans tenir compte de la casse. Le BOM UTF-8 (Excel) est ignoré ; fins de ligne `\r\n`, `\n` ou `\r`.
+- L'en-tête doit être exactement celui ci-dessus. Les numéros de ligne sont ceux du fichier, y compris dans les champs sur plusieurs lignes ; ils sont calculés par `pswd-core` (ceux de la crate `csv` sont faux avec `\r\n` et les lignes vides). Les messages d'erreur ne citent jamais le contenu.
+- Export : entrées non supprimées, sans historique, triées par contenu, fins de ligne `\r\n`. Un champ commençant par `=`, `+`, `-` ou `@` n'est pas neutralisé (l'aller-retour serait perdu) : ouvrir l'export dans un tableur peut l'interpréter comme une formule.
+- Limite acceptée : les buffers internes de la crate `csv` ne sont pas effacés ; le fichier CSV est de toute façon en clair.
+
 ## 9. Sécurité
 
 - Secrets (`password`, clés, mot de passe maître, JSON déchiffré) dans des types effacés à la libération (`zeroize` / `secrecy`) ; jamais dans les logs, `Debug` ni les messages d'erreur.

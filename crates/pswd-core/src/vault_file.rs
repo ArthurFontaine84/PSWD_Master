@@ -53,8 +53,7 @@ fn internal_error<E>(_: E) -> FileError {
     FileError::Internal
 }
 
-/// Points d'entrée de `cargo fuzz`, compilés seulement avec `--cfg fuzzing` : ils exposent les
-/// parseurs sans passer par Argon2.
+/// Points d'entrée de `cargo fuzz` : ils exposent les parseurs sans passer par Argon2.
 #[cfg(fuzzing)]
 pub mod fuzz {
     use super::{ParsedFile, payload};
