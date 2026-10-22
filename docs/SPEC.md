@@ -42,16 +42,19 @@ Workspace Cargo, architecture hexagonale :
 Futur : `pswd-mobile` (bindings UniFFI au-dessus de `pswd-core`, adaptateurs propres).
 
 **Ports (définis dans `pswd-core`)**
-- `LocalStore` : `load() -> bytes`, `save_atomic(bytes)` (fichier temporaire + renommage).
-- `RemoteStore` : `fetch() -> (bytes, version)`, `push(bytes, expected_version)` (échoue si le distant a bougé), `is_reachable()`.
+- `LocalStore` : `load() -> Option<bytes>` (`None` : pas de coffre local), `save_atomic(bytes)` (fichier temporaire + renommage).
+- `RemoteStore` : `fetch() -> Option<(bytes, version)>` (`None` : distant vide ; une erreur vaut « hors ligne », l'adaptateur borne lui-même l'attente), `push(bytes, expected_version)` (`Conflict` si le distant a bougé ; `expected = None` exige un distant vide).
 - `SecretStore` : lire / écrire le jeton d'accès distant d'un coffre.
 - `SecureClipboard` : `copy_secret(value, ttl)`.
+- Les erreurs des adaptateurs sont des `PortError` (un message, jamais de secret).
+
+**Session** (`pswd-core`) : coffre ouvert, déverrouillé par mot de passe ou clé de récupération (`Credentials`, extensible au fichier-clé). Elle applique le déroulé du §7 avec n'importe quels adaptateurs, ce qui la rend testable avec des magasins en mémoire et réutilisable sur mobile.
 
 Avec Git, `LocalStore` et `RemoteStore` visent le même clone local ; ils restent distincts pour permettre un transport sans Git.
 
 La crypto n'est **pas** un port : déterministe, sans E/S, identique partout.
 
-**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `rand` (`OsRng`), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `keyring`, `directories`, `toml`, `clap`. Librairie Git embarquée (`git2` ou `gix`, à trancher au démarrage ; critères : push HTTPS fiable et compilation Android). Jamais le binaire `git` du système.
+**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `keyring`, `directories`, `toml`, `clap`. Librairie Git embarquée (`git2` ou `gix`, à trancher au démarrage ; critères : push HTTPS fiable et compilation Android). Jamais le binaire `git` du système.
 
 ## 4. Modèle de données
 
@@ -70,10 +73,13 @@ struct Entry {
     created_at: Timestamp,       // UTC, millisecondes
     updated_at: Timestamp,
     deleted: bool,               // marqueur de suppression (tombstone)
+    deleted_at: Option<Timestamp>, // date de la dernière suppression (conservée si l'entrée revit)
     history: Vec<EntrySnapshot>, // versions précédentes, 10 max, plus récentes d'abord
 }
 
-struct Vault { vault_id: Uuid, entries: Vec<Entry> }
+struct EntrySnapshot { content: EntryContent, updated_at: Timestamp }
+
+struct Vault { vault_id: Uuid, entries: BTreeMap<Uuid, Entry> } // triées par id : ordre déterministe
 ```
 
 - `pswd-core` ne lit jamais l'horloge : l'heure courante est fournie par l'appelant.
@@ -91,7 +97,7 @@ keys_updated_at  i64 (ms UTC)      date de la dernière modification des envelop
 envelope_count   u8
 envelopes[]      voir ci-dessous
 payload_nonce    24 o
-payload          XChaCha20-Poly1305(vault_key, JSON du Vault), AAD = tout l'en-tête qui précède
+payload          XChaCha20-Poly1305(vault_key, JSON du Vault), AAD = en-tête de `magic` à la fin des enveloppes
 ```
 
 **Clé du coffre** : 32 octets aléatoires, générée à `init`, chiffre le payload. Elle n'est jamais stockée en clair ; elle est « enveloppée » par une ou plusieurs clés d'enveloppe :
@@ -102,26 +108,33 @@ payload          XChaCha20-Poly1305(vault_key, JSON du Vault), AAD = tout l'en-t
 | 2 | Récupération | HKDF-SHA256(clé de récupération, info = `"pswd-recovery-v1"`) |
 | 3 | *Réservé* : mot de passe + fichier-clé | — |
 
-Chaque enveloppe : `kind u8 | paramètres propres | nonce 24 o | XChaCha20-Poly1305(clé d'enveloppe, vault_key)`.
+Chaque enveloppe : `kind u8 | paramètres propres | nonce 24 o | XChaCha20-Poly1305(clé d'enveloppe, vault_key)` (48 o). `kind` et les paramètres forment l'AAD de l'enveloppe. Paramètres du kind 1 : `m_cost u32 | t_cost u32 | p u32 | salt 16 o` ; le kind 2 n'en a pas.
 
-- Paramètres Argon2id par défaut : 64 MiB, 3 itérations, parallélisme 1 (compatible mobile). Ils sont lus depuis le fichier, donc modifiables sans migration.
-- Clé de récupération : 32 octets aléatoires, affichés **une seule fois** à `init`, encodés en Base32 Crockford par groupes de 4 caractères.
+En version 1, l'en-tête contient exactement une enveloppe 1 et une enveloppe 2, dans n'importe quel ordre. Un `kind` inconnu est refusé (sa taille est inconnue) ; une enveloppe absente ou en double rend le fichier mal formé. Limiter à une enveloppe mot de passe évite qu'un fichier piégé impose des centaines de calculs Argon2. Le fichier est entièrement découpé et validé avant toute dérivation de clé.
+
+- Paramètres Argon2id par défaut : 64 MiB, 3 itérations, parallélisme 1 (compatible mobile). Ils sont lus depuis le fichier, donc modifiables sans migration. Bornes acceptées (contre un fichier malveillant) : mémoire 8 MiB – 1 GiB, 1 à 10 itérations, parallélisme 1 à 8.
+- Aléa (clés, sels, nonces) : `getrandom` (générateur du système).
+- Clé de récupération : 32 octets aléatoires, affichés **une seule fois** à `init`, encodés en Base32 Crockford par groupes de 4 caractères : 52 caractères en 13 groupes séparés par `-`. À la saisie, tirets, espaces et casse sont ignorés, `O` est lu `0`, `I` et `L` sont lus `1` ; les 4 bits de complément doivent être nuls (une seule écriture par clé).
 - Tout fichier mal formé, version inconnue ou échec d'authentification → erreur explicite, jamais de panique.
-- Le JSON déchiffré est stocké dans un buffer effacé (`zeroize`) après usage.
+- Le JSON déchiffré est stocké dans un buffer effacé (`zeroize`) après usage. À l'écriture, sa taille est calculée d'abord pour que le buffer ne soit jamais réalloué (une réallocation laisserait une copie non effacée).
+- Payload : `{"vault_id": …, "entries": [Entry, …]}`, champs en `snake_case`, `kind` en minuscules, dates en millisecondes. Champ inconnu ou entrée en double → fichier mal formé (un champ inconnu serait sinon perdu à la réécriture). Les erreurs de lecture JSON ne reprennent jamais le détail de serde, qui peut citer le contenu.
 
 ## 6. Fusion
 
-Fonction pure `merge(local: Vault, remote: Vault) -> Vault` dans `pswd-core`.
+Fonction pure `merge(local: Vault, remote: Vault) -> Result<Vault, MergeError>` dans `pswd-core`. Refuse deux coffres d'identifiants différents.
 
 1. Union des entrées par `id`.
 2. Entrée présente d'un seul côté → conservée.
 3. Présente des deux côtés et identique → conservée.
-4. Sinon, la gagnante est celle dont `updated_at` est le plus grand ; en cas d'égalité, départage déterministe par comparaison du hash du contenu sérialisé. La perdante est ajoutée à l'historique de la gagnante (sauf si elle y est déjà ; une tombstone n'est pas historisée). Les historiques sont unis, dédupliqués, triés puis tronqués à 10.
-5. Une suppression suit la même règle : une modification postérieure à une suppression fait revivre l'entrée.
+4. Sinon, la gagnante est celle dont `updated_at` est le plus grand ; à date égale, une entrée vivante l'emporte sur une tombstone, puis départage déterministe par comparaison champ par champ du contenu (pas de hash : il devrait être stable entre versions du compilateur). `created_at` = le plus ancien, `deleted_at` = le plus récent.
+5. Historique = union des deux historiques + version perdante, puis : retrait des versions datées au plus `deleted_at` (une tombstone n'est donc jamais historisée et n'a pas d'historique) et de la version courante, tri (date puis contenu, plus récentes d'abord), dédoublonnage, troncature à 10.
+6. Une suppression suit la même règle : une modification postérieure à une suppression fait revivre l'entrée, sans ses versions antérieures à la suppression. `deleted_at` est nécessaire à l'associativité : sans lui, l'historique dépendrait de l'ordre des fusions.
 
 **Propriétés obligatoires** (testées avec `proptest`) : commutative, associative, idempotente ; aucune entrée non supprimée ne disparaît.
 
-**En-tête** : les enveloppes retenues sont celles du fichier dont `keys_updated_at` est le plus récent (propage un changement de mot de passe). La clé du coffre est identique des deux côtés, puisque `passwd` et `recover` ne la changent pas.
+**En-tête** : les enveloppes retenues sont celles du fichier dont `keys_updated_at` est le plus récent (propage un changement de mot de passe) ; à date égale, les octets de l'en-tête départagent, pour que tous les appareils convergent. Celles du fichier distant ne sont adoptées qu'après déchiffrement de son payload (l'en-tête est authentifié comme AAD). La clé du coffre est identique des deux côtés, puisque `passwd` et `recover` ne la changent pas ; un fichier chiffré par une autre clé est refusé comme altéré, un coffre d'un autre identifiant comme « autre coffre ».
+
+**Changement de mot de passe** (`passwd`, `recover`) : nouvelle enveloppe 1 avec un nouveau sel ; l'enveloppe 2 est conservée. `keys_updated_at` = max(maintenant, valeur actuelle + 1 ms), pour que le changement l'emporte même si l'horloge a reculé.
 
 **Limite acceptée** : `updated_at` dépend de l'horloge de l'appareil ; une horloge très décalée peut faire gagner la mauvaise version (la perdante reste dans l'historique).
 
@@ -140,6 +153,12 @@ Fonction pure `merge(local: Vault, remote: Vault) -> Vault` dans `pswd-core`.
 3. **Push rejeté** (le distant a bougé) : fetch → fusion → nouveau push, 3 tentatives max.
 4. **Verrouillage / fermeture** : nouvelle tentative de push s'il y a des modifications en attente.
 5. **`sync`** manuel à tout moment.
+
+Précisions :
+- Copie locale et distant ne sont réécrits que s'ils sont en retard sur la fusion : ouvrir un coffre à jour ne crée ni écriture ni commit, et une modification sans effet n'écrit rien.
+- Si l'écriture locale d'une modification échoue, le coffre en mémoire revient à son état précédent.
+- Un fichier distant inutilisable (altéré, autre coffre, version inconnue) n'est **jamais écrasé** : état « refusé », le coffre local reste utilisable.
+- États de synchro : à jour, hors ligne (avec le message de l'adaptateur), conflit persistant après 3 tentatives, distant refusé.
 
 ## 8. CLI
 
@@ -162,7 +181,7 @@ Aucune commande n'écrase un coffre existant.
 
 - **Verrouillage automatique** après 10 min d'inactivité : la clé est effacée de la mémoire à l'échéance, même si aucune commande n'est tapée.
 - **Recherche** : sans tenir compte de la casse, sur le titre, l'identifiant, les URLs et les tags ; les tombstones sont ignorés.
-- **Générateur** : `OsRng`, 24 caractères par défaut, majuscules, minuscules, chiffres et symboles ; au moins un caractère de chaque classe active.
+- **Générateur** : 24 caractères par défaut (8 à 128), majuscules, minuscules, chiffres et symboles `!#$%&()*+,-./:;<=>?@[]^_{|}~` (ni espace, ni guillemets, ni antislash, ni accent grave) ; au moins un caractère de chaque classe active, obtenu par rejet des candidats incomplets pour que tous les mots de passe valides restent équiprobables. `pswd-core` reçoit le générateur aléatoire en paramètre, contraint par le trait `CryptoRng` ; la CLI fournit `SysRng` (générateur du système, `rand` 0.10).
 - **Affichage** : mot de passe masqué par défaut ; le mot de passe maître n'est jamais affiché ni copié.
 
 **Format CSV (import et export, aller-retour sans perte)**
@@ -173,6 +192,12 @@ GitHub,login,arthur,xxxx,https://github.com,,dev;perso
 Code Wi-Fi,note,,,,"Box: ABCD-1234",maison
 ```
 `kind` ∈ {`login`, `note`} ; `urls` et `tags` séparés par `;`. RFC 4180 (guillemets, retours à la ligne dans les champs). Une ligne invalide fait échouer l'import avec son numéro de ligne ; rien n'est importé partiellement.
+
+- Listes (`urls`, `tags`) : `\;` et `\\` désignent un `;` et un `\` littéraux ; un `\` isolé est gardé tel quel ; les éléments vides sont ignorés.
+- Une cellule vide est un champ absent (`username`, `password`, `notes`). `kind` est lu sans tenir compte de la casse. Le BOM UTF-8 (Excel) est ignoré ; fins de ligne `\r\n`, `\n` ou `\r`.
+- L'en-tête doit être exactement celui ci-dessus. Les numéros de ligne sont ceux du fichier, y compris dans les champs sur plusieurs lignes ; ils sont calculés par `pswd-core` (ceux de la crate `csv` sont faux avec `\r\n` et les lignes vides). Les messages d'erreur ne citent jamais le contenu.
+- Export : entrées non supprimées, sans historique, triées par contenu, fins de ligne `\r\n`. Un champ commençant par `=`, `+`, `-` ou `@` n'est pas neutralisé (l'aller-retour serait perdu) : ouvrir l'export dans un tableur peut l'interpréter comme une formule.
+- Limite acceptée : les buffers internes de la crate `csv` ne sont pas effacés ; le fichier CSV est de toute façon en clair.
 
 ## 9. Sécurité
 

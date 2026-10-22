@@ -1,7 +1,10 @@
+use serde::{Deserialize, Serialize};
+
 /// Instant UTC en millisecondes depuis l'époque Unix.
 ///
 /// `pswd-core` ne lit jamais l'horloge : l'appelant fournit l'heure courante.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct Timestamp(i64);
 
 impl Timestamp {
