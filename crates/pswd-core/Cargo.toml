@@ -10,6 +10,7 @@ argon2.workspace = true
 chacha20poly1305.workspace = true
 getrandom.workspace = true
 hkdf.workspace = true
+rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -18,6 +19,7 @@ zeroize.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+rand = { workspace = true, features = ["std_rng"] }
 
 [lints]
 workspace = true

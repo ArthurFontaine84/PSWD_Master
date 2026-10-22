@@ -3,6 +3,7 @@
 
 pub mod crypto;
 mod entry;
+mod generator;
 mod merge;
 mod recovery_key;
 mod secret;
@@ -12,6 +13,7 @@ mod vault;
 mod vault_file;
 
 pub use entry::{Entry, EntryContent, EntryKind, EntrySnapshot};
+pub use generator::{GeneratorError, PasswordOptions, generate_password};
 pub use merge::{MergeError, merge};
 pub use recovery_key::{RecoveryKey, RecoveryKeyError};
 pub use secret::Secret;

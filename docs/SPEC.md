@@ -170,7 +170,7 @@ Aucune commande n'écrase un coffre existant.
 
 - **Verrouillage automatique** après 10 min d'inactivité : la clé est effacée de la mémoire à l'échéance, même si aucune commande n'est tapée.
 - **Recherche** : sans tenir compte de la casse, sur le titre, l'identifiant, les URLs et les tags ; les tombstones sont ignorés.
-- **Générateur** : `OsRng`, 24 caractères par défaut, majuscules, minuscules, chiffres et symboles ; au moins un caractère de chaque classe active.
+- **Générateur** : 24 caractères par défaut (8 à 128), majuscules, minuscules, chiffres et symboles `!#$%&()*+,-./:;<=>?@[]^_{|}~` (ni espace, ni guillemets, ni antislash, ni accent grave) ; au moins un caractère de chaque classe active, obtenu par rejet des candidats incomplets pour que tous les mots de passe valides restent équiprobables. `pswd-core` reçoit le générateur aléatoire en paramètre, contraint par le trait `CryptoRng` ; la CLI fournit `SysRng` (générateur du système, `rand` 0.10).
 - **Affichage** : mot de passe masqué par défaut ; le mot de passe maître n'est jamais affiché ni copié.
 
 **Format CSV (import et export, aller-retour sans perte)**
