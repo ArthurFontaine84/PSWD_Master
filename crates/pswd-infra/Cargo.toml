@@ -6,7 +6,26 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+arboard.workspace = true
+etcetera.workspace = true
+git2.workspace = true
+keyring-core.workspace = true
 pswd-core.workspace = true
+serde.workspace = true
+toml.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store.workspace = true
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+zbus-secret-service-keyring-store.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
