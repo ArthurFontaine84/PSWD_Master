@@ -54,7 +54,7 @@ Avec Git, `LocalStore` et `RemoteStore` visent le même clone local ; ils resten
 
 La crypto n'est **pas** un port : déterministe, sans E/S, identique partout.
 
-**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `keyring`, `directories`, `toml`, `clap`. Librairie Git embarquée (`git2` ou `gix`, à trancher au démarrage ; critères : push HTTPS fiable et compilation Android). Jamais le binaire `git` du système.
+**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `keyring`, `directories`, `toml`, `clap`. Librairie Git embarquée : `git2` (libgit2), retenue pour son push HTTPS éprouvé ; `gix` ne sait pas encore pousser (à réévaluer, le port `RemoteStore` permet d'en changer). Sur Android, `git2` exige OpenSSL embarqué (`vendored-openssl`). Jamais le binaire `git` du système.
 
 ## 4. Modèle de données
 
@@ -142,14 +142,16 @@ Fonction pure `merge(local: Vault, remote: Vault) -> Result<Vault, MergeError>` 
 
 **Emplacements** (dossiers standard de l'OS, crate `directories`)
 - Config : `<config_dir>/pswd/config.toml`, contenant les coffres nommés (`[vaults.<nom>]` : URL du dépôt, chemin local) et `default_vault`, `auto_lock_minutes = 10`, `clipboard_clear_seconds = 20`.
-- Données : `<data_dir>/pswd/vaults/<nom>/` = clone Git contenant `vault.enc`.
+- Données : un dossier par coffre, `<data_dir>/pswd/vaults/<nom>/`, contenant `vault.enc` (copie locale, `FileStore`) et `repo.git/` (dépôt Git nu, cache du distant, `GitRemote`). Plusieurs coffres coexistent ; aucun ne remplace un autre.
+- Dépôt distant : branche `main`, fichier `vault.enc` à la racine ; les autres fichiers (README créé par GitHub) sont conservés. Chaque publication est un commit dont le parent est la version récupérée : le serveur refuse tout push qui n'est pas une avance rapide, ce qui garantit qu'aucune version n'est écrasée. Jeton présenté une seule fois par opération (utilisateur `x-access-token`).
+- Délai max de 5 s : à configurer à l'échelle du processus via les options de libgit2 (`set_server_connect_timeout_in_milliseconds`, fonction `unsafe`) lors du câblage de la CLI.
 - Jeton d'accès : trousseau de l'OS, service `pswd`, compte `<nom>`. Jamais en clair sur le disque.
 
 **Hébergement** : 1 dépôt Git privé = 1 coffre. HTTPS + jeton GitHub *fine-grained* limité à ce seul dépôt (Contents : lecture/écriture). Plus tard, un serveur maison (Gitea…) avec un compte et un dépôt par personne.
 
 **Déroulé**
 1. **Ouverture** : `fetch` avec un délai max de 5 s. En cas de succès : déchiffrement, fusion, écriture locale. En cas d'échec : ouverture de la copie locale avec `⚠ Hors ligne — dernière synchro : <date>`.
-2. **Chaque modification** : écriture locale atomique + commit, puis tentative de push. En cas d'échec, l'état passe à « modifications en attente ».
+2. **Chaque modification** : écriture locale atomique, puis tentative de publication (commit + push dans le dépôt nu). En cas d'échec, l'état passe à « modifications en attente ».
 3. **Push rejeté** (le distant a bougé) : fetch → fusion → nouveau push, 3 tentatives max.
 4. **Verrouillage / fermeture** : nouvelle tentative de push s'il y a des modifications en attente.
 5. **`sync`** manuel à tout moment.
