@@ -1,0 +1,17 @@
+[package]
+name = "pswd-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "pswd"
+path = "src/main.rs"
+
+[dependencies]
+pswd-core.workspace = true
+pswd-infra.workspace = true
+
+[lints]
+workspace = true

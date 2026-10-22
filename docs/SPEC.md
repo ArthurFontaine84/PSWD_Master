@@ -66,7 +66,7 @@ struct Entry {
     password: Option<Secret>,
     urls: Vec<String>,
     notes: Option<String>,
-    tags: Vec<String>,           // normalisés : trim, minuscules, uniques, triés
+    tags: Tags,                  // normalisés : trim, minuscules, sans vide, uniques, triés
     created_at: Timestamp,       // UTC, millisecondes
     updated_at: Timestamp,
     deleted: bool,               // marqueur de suppression (tombstone)
@@ -76,6 +76,7 @@ struct Entry {
 struct Vault { vault_id: Uuid, entries: Vec<Entry> }
 ```
 
+- `pswd-core` ne lit jamais l'horloge : l'heure courante est fournie par l'appelant.
 - Supprimer une entrée : `deleted = true`, `updated_at` mis à jour, champs de contenu et historique vidés. Les tombstones sont conservés.
 - Toute modification pousse l'état précédent dans `history`.
 
