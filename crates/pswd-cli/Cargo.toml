@@ -18,8 +18,6 @@ rpassword.workspace = true
 shlex.workspace = true
 
 [dev-dependencies]
-git2.workspace = true
-keyring-core.workspace = true
 tempfile.workspace = true
 uuid.workspace = true
 

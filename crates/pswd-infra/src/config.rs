@@ -94,11 +94,10 @@ impl Locations {
     }
 }
 
-/// Un coffre : son dépôt distant et son dossier local.
+/// Un coffre : son dossier local.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VaultConfig {
-    pub url: String,
     pub path: PathBuf,
 }
 
@@ -106,11 +105,6 @@ impl VaultConfig {
     #[must_use]
     pub fn vault_file(&self) -> PathBuf {
         self.path.join("vault.enc")
-    }
-
-    #[must_use]
-    pub fn repo_dir(&self) -> PathBuf {
-        self.path.join("repo.git")
     }
 }
 
@@ -193,7 +187,7 @@ impl Config {
     }
 }
 
-/// Le nom sert de nom de dossier et de compte dans le trousseau : ni séparateur, ni `..`, ni
+/// Le nom sert de nom de dossier : ni séparateur, ni `..`, ni
 /// nom réservé par Windows.
 fn is_valid_vault_name(name: &str) -> bool {
     !name.is_empty()
@@ -260,7 +254,6 @@ mod tests {
 
     fn vault(path: &str) -> VaultConfig {
         VaultConfig {
-            url: format!("https://example.com/{path}.git"),
             path: PathBuf::from(path),
         }
     }
@@ -422,10 +415,9 @@ mod tests {
     }
 
     #[test]
-    fn vault_folder_holds_the_file_and_the_repository() {
+    fn vault_folder_holds_the_file() {
         let vault = vault("perso");
         assert_eq!(vault.vault_file(), Path::new("perso").join("vault.enc"));
-        assert_eq!(vault.repo_dir(), Path::new("perso").join("repo.git"));
     }
 
     #[test]

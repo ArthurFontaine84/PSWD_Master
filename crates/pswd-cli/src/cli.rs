@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-/// Gestionnaire de mots de passe local-first, synchronisé par Git.
+/// Gestionnaire de mots de passe local-first.
 #[derive(Debug, Parser)]
 #[command(name = "pswd", version)]
 pub struct Cli {
@@ -12,25 +12,13 @@ pub struct Cli {
 
 #[derive(Debug, PartialEq, Eq, Subcommand)]
 pub enum Command {
-    /// Crée un coffre et le publie sur un dépôt distant vide.
+    /// Crée un coffre local.
     Init {
         /// Nom du coffre (lettres, chiffres, - et _).
         name: String,
     },
-    /// Rattache cette machine à un coffre existant.
-    Join {
-        /// Nom local du coffre (lettres, chiffres, - et _).
-        name: String,
-        /// URL du dépôt distant.
-        url: String,
-    },
     /// Déverrouille un coffre et ouvre le shell interactif.
     Open {
-        /// Nom du coffre (par défaut : le coffre par défaut).
-        name: Option<String>,
-    },
-    /// Synchronise un coffre avec son dépôt distant.
-    Sync {
         /// Nom du coffre (par défaut : le coffre par défaut).
         name: Option<String>,
     },
@@ -77,15 +65,7 @@ mod tests {
                 name: "perso".to_owned()
             }
         );
-        assert_eq!(
-            parse(&["join", "travail", "https://example.com/coffre.git"]).unwrap(),
-            Command::Join {
-                name: "travail".to_owned(),
-                url: "https://example.com/coffre.git".to_owned()
-            }
-        );
         assert_eq!(parse(&["open"]).unwrap(), Command::Open { name: None });
-        assert_eq!(parse(&["sync"]).unwrap(), Command::Sync { name: None });
         assert_eq!(
             parse(&["passwd", "perso"]).unwrap(),
             Command::Passwd {
@@ -120,7 +100,7 @@ mod tests {
 
     #[test]
     fn missing_or_unknown_arguments_are_rejected() {
-        for args in [&[][..], &["init"], &["join", "travail"], &["inconnue"]] {
+        for args in [&[][..], &["init"], &["import"], &["sync"], &["inconnue"]] {
             assert!(parse(args).is_err(), "{args:?}");
         }
     }

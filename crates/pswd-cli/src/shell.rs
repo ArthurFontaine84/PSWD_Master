@@ -3,18 +3,18 @@
 use std::time::Duration;
 
 use clap::Parser;
-use pswd_core::ports::{SecretStore, SecureClipboard};
+use pswd_core::ports::SecureClipboard;
 use pswd_core::{Entry, EntryKind, PasswordOptions, Session, Vault, generate_password};
-use pswd_infra::{FileStore, GitRemote};
+use pswd_infra::FileStore;
 use rand::SeedableRng;
 use rand::rngs::{StdRng, SysRng};
 
-use crate::app::{App, CliError, describe};
+use crate::app::{App, CliError};
 use crate::commands::{Unlock, Unlocked};
 use crate::idle_lock::IdleLock;
 use crate::terminal::Terminal;
 
-pub(crate) type VaultSession = Session<FileStore, GitRemote>;
+pub(crate) type VaultSession = Session<FileStore>;
 
 /// Nombre de caractères d'identifiant affichés : assez pour désigner une entrée.
 const SHORT_ID_LEN: usize = 8;
@@ -102,14 +102,12 @@ enum ShellCommand {
     },
     /// Liste les tags.
     Tags,
-    /// Synchronise avec le dépôt distant.
-    Sync,
     /// Ferme le coffre.
     #[command(visible_aliases = ["exit", "lock"])]
     Quit,
 }
 
-impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
+impl<T: Terminal, C: SecureClipboard> App<T, C> {
     pub(crate) fn open(&mut self, name: Option<&str>) -> Result<(), CliError> {
         let Unlocked {
             name,
@@ -119,17 +117,12 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
         self.terminal.print(&format!(
             "Coffre « {name} » ouvert. Tapez help pour l'aide."
         ));
-        self.terminal.print(&describe(session.status()));
         let timeout = self.auto_lock.unwrap_or_else(|| config.auto_lock());
-        let guarded = IdleLock::new(session, timeout, publish_pending);
+        let guarded = IdleLock::new(session, timeout);
         self.shell(&name, &guarded, config.clipboard_clear())?;
-        let Some(mut session) = guarded.close() else {
+        if guarded.close().is_none() {
             self.terminal
                 .print("Coffre verrouillé pour inactivité : relancez pswd open.");
-            return Ok(());
-        };
-        if session.has_pending_changes() {
-            self.terminal.print(&describe(session.sync()?));
         }
         Ok(())
     }
@@ -211,10 +204,6 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
             ShellCommand::Rm { entry } => self.remove_entry(session, &entry)?,
             ShellCommand::History { entry } => self.show_history(session.vault(), &entry)?,
             ShellCommand::Tags => self.list_tags(session.vault()),
-            ShellCommand::Sync => {
-                let status = describe(session.sync()?);
-                self.terminal.print(&status);
-            }
             ShellCommand::Quit => return Ok(Flow::Quit),
         }
         Ok(Flow::Continue)
@@ -339,14 +328,6 @@ fn describe_entry(entry: &Entry, reveal: bool) -> String {
     lines.join("\n")
 }
 
-/// Au verrouillage automatique : dernière tentative de publication.
-fn publish_pending(session: &mut VaultSession) {
-    if session.has_pending_changes() {
-        // Au mieux : personne ne peut être averti d'un échec à ce moment-là.
-        let _ = session.sync();
-    }
-}
-
 /// Générateur cryptographique initialisé par l'aléa du système.
 pub(crate) fn system_rng() -> Result<StdRng, CliError> {
     StdRng::try_from_rng(&mut SysRng).map_err(random_unavailable)
@@ -415,11 +396,8 @@ mod tests {
         let mut app = env.app("a", &answers);
         app.run(open()).unwrap();
         let output = app.terminal.output();
-        let after_open = output.split_once("Tapez help pour l'aide.\n").unwrap().1;
-        after_open
-            .split_once('\n')
-            .map_or("", |(_, commands)| commands)
-            .to_owned()
+        let after_open = output.split_once("Tapez help pour l'aide.").unwrap().1;
+        after_open.trim_start_matches('\n').to_owned()
     }
 
     #[test]
@@ -429,7 +407,7 @@ mod tests {
         app.run(open()).unwrap();
         assert_eq!(
             app.terminal.output(),
-            "Coffre « perso » ouvert. Tapez help pour l'aide.\nSynchronisé avec le dépôt distant."
+            "Coffre « perso » ouvert. Tapez help pour l'aide."
         );
     }
 
@@ -619,13 +597,6 @@ mod tests {
     }
 
     #[test]
-    fn sync_reports_the_status() {
-        let env = env_with_entries();
-        let output = session_output(&env, &["sync"]);
-        assert_eq!(output, "Synchronisé avec le dépôt distant.");
-    }
-
-    #[test]
     fn invalid_lines_are_reported_and_the_shell_continues() {
         let env = env_with_entries();
         let output = session_output(
@@ -669,33 +640,12 @@ mod tests {
     }
 
     #[test]
-    fn pending_changes_are_published_when_locking() {
-        let env = env_with_entries();
-        let mut session = env.session("a");
-        env.take_remote_offline();
-        session
-            .edit(|vault| {
-                vault.add(
-                    EntryContent::new(EntryKind::Note, "x".to_owned()),
-                    Timestamp::from_millis(5),
-                )
-            })
-            .unwrap();
-        assert!(session.has_pending_changes());
-        env.bring_remote_online();
-        publish_pending(&mut session);
-        assert!(!session.has_pending_changes());
-        publish_pending(&mut session);
-        assert_eq!(session.status(), &pswd_core::SyncStatus::Synced);
-    }
-
-    #[test]
     fn help_lists_the_commands() {
         let env = env_with_entries();
         let output = session_output(&env, &["help"]);
         for command in [
             "list", "search", "show", "copy", "gen", "add", "edit", "rm", "history", "tags",
-            "sync", "quit", "lock",
+            "quit", "lock",
         ] {
             assert!(output.contains(command), "{command} : {output}");
         }

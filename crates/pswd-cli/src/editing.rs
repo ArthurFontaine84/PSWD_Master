@@ -2,20 +2,19 @@
 
 use std::collections::BTreeMap;
 
-use pswd_core::ports::{SecretStore, SecureClipboard};
+use pswd_core::ports::SecureClipboard;
 use pswd_core::{
-    EntryContent, EntryKind, PasswordOptions, Secret, SyncStatus, Tags, Timestamp, Vault,
-    generate_password,
+    EntryContent, EntryKind, PasswordOptions, Secret, Tags, Timestamp, Vault, generate_password,
 };
 
-use crate::app::{App, CliError, describe};
+use crate::app::{App, CliError};
 use crate::shell::{VaultSession, find_entry, system_rng};
 use crate::terminal::Terminal;
 
 /// Réponse qui efface un champ lors d'un `edit`.
 const CLEAR: &str = "-";
 
-impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
+impl<T: Terminal, C: SecureClipboard> App<T, C> {
     pub(crate) fn add_entry(
         &mut self,
         session: &mut VaultSession,
@@ -45,7 +44,7 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
         ));
         let title = content.title.clone();
         let now = (self.clock)();
-        self.apply(session, |vault| vault.add(content, now))?;
+        session.edit(|vault| vault.add(content, now))?;
         self.terminal.print(&format!("Entrée « {title} » ajoutée."));
         if generate {
             self.print_generated(&title);
@@ -89,8 +88,8 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
         content.tags = Tags::new(self.edit_list("Tags", content.tags.as_slice().to_vec())?);
         let title = content.title.clone();
         let now = (self.clock)();
-        self.apply(session, |vault| vault.update(id, content, now))?
-            .map_err(CliError::Vault)?;
+        let updated = session.edit(|vault| vault.update(id, content, now))?;
+        updated.map_err(CliError::Vault)?;
         self.terminal
             .print(&format!("Entrée « {title} » modifiée."));
         if generate {
@@ -111,8 +110,8 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
             return Ok(());
         }
         let now = (self.clock)();
-        self.apply(session, |vault| vault.delete(id, now))?
-            .map_err(CliError::Vault)?;
+        let deleted = session.edit(|vault| vault.delete(id, now))?;
+        deleted.map_err(CliError::Vault)?;
         self.terminal
             .print(&format!("Entrée « {title} » supprimée."));
         Ok(())
@@ -160,23 +159,6 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
         }
         for (tag, count) in counts {
             self.terminal.print(&format!("{tag} ({count})"));
-        }
-    }
-
-    /// Enregistre et publie la modification ; signale la synchronisation si elle a échoué.
-    fn apply<R>(
-        &mut self,
-        session: &mut VaultSession,
-        change: impl FnOnce(&mut Vault) -> R,
-    ) -> Result<R, CliError> {
-        let result = session.edit(change)?;
-        self.report_status(session.status());
-        Ok(result)
-    }
-
-    fn report_status(&mut self, status: &SyncStatus) {
-        if *status != SyncStatus::Synced {
-            self.terminal.print(&describe(status));
         }
     }
 
@@ -281,11 +263,8 @@ mod tests {
         let mut app = env.app("a", &answers);
         app.run(Command::Open { name: None }).unwrap();
         let output = app.terminal.output();
-        let after_open = output.split_once("Tapez help pour l'aide.\n").unwrap().1;
-        after_open
-            .split_once('\n')
-            .map_or("", |(_, commands)| commands)
-            .to_owned()
+        let after_open = output.split_once("Tapez help pour l'aide.").unwrap().1;
+        after_open.trim_start_matches('\n').to_owned()
     }
 
     fn entries(env: &TestEnv) -> Vec<Entry> {
@@ -510,18 +489,6 @@ mod tests {
         assert_eq!(output, "dev (1)\nperso (1)");
         session_output(&env, &["rm github", "o"]);
         assert_eq!(session_output(&env, &["tags"]), "Aucun tag.");
-    }
-
-    #[test]
-    fn offline_changes_are_retried_when_closing() {
-        let env = env_with_github();
-        env.take_remote_offline();
-        let output = session_output(&env, &["rm github", "o"]);
-        let lines: Vec<&str> = output.lines().collect();
-        assert!(lines[0].starts_with("⚠ Hors ligne"), "{output}");
-        assert_eq!(lines[1], "Entrée « GitHub » supprimée.");
-        assert!(lines[2].starts_with("⚠ Hors ligne"), "{output}");
-        assert_eq!(lines.len(), 3, "{output}");
     }
 
     #[test]

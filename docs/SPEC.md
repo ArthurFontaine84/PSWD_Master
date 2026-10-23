@@ -5,28 +5,32 @@ Référence de conception. Toute décision qui change ce document doit y être r
 ## 1. Objectif
 
 Gestionnaire de mots de passe personnel, local-first, pour remplacer un service tiers (NordPass).
-Le coffre est chiffré de bout en bout : aucun serveur (GitHub, puis serveur maison) ne voit jamais de données en clair ni de clé.
+L'utilisateur reste maître de ses données : elles vivent sur ses appareils, sur ses disques de sauvegarde et, s'il le souhaite, sur son propre serveur. Aucun service tiers n'intervient.
+Le coffre est chiffré de bout en bout : le serveur ne voit jamais de données en clair ni de clé.
 
-## 2. Périmètre
+## 2. Feuille de route
 
-**v1**
+**Étape 1 — local complet** (en cours)
 - CLI `pswd` sous Windows et Linux.
-- Plusieurs coffres indépendants (un mot de passe maître, une clé, un dépôt Git par coffre).
-- Accès hors ligne permanent ; synchro Git avec fusion entrée par entrée.
+- Plusieurs coffres indépendants et entièrement locaux (un mot de passe maître et une clé par coffre).
 - Entrées `Login` et `Note`, tags, historique des versions.
 - Générateur de mots de passe, copie sécurisée dans le presse-papiers.
 - Changement de mot de passe maître, clé de récupération.
 - Import / export CSV (format §8).
+- Sauvegarde et restauration sur disque externe, suppression d'un coffre (§7).
 
-**Hors v1 (le terrain doit être préparé, cf. §10)**
-- Application mobile (Android / iOS).
+**Étape 2 — interfaces graphiques** : application de bureau et application mobile (Android / iOS). Chaque appareil est autonome et entièrement local, avec les fonctionnalités de la CLI. Technologie choisie au début de l'étape.
+
+**Étape 3 — serveur maison** (§11) : `pswd-server`, comptes, coffres privés et communs, synchro entre appareils.
+
+La v1 synchronisait chaque coffre avec un dépôt Git privé (GitHub). Cette synchro a été retirée au profit du serveur maison ; son code reste dans l'historique du dépôt (jusqu'au commit `233f829`).
+
+**Hors feuille de route (le terrain doit être préparé, cf. §10)**
 - Fichier-clé comme second facteur.
 - Rotation de la clé du coffre.
-- Serveur Git maison (remplace GitHub, aucun changement de code attendu).
-- Adaptateur « dossier synchronisé » sans Git.
+- Partage par membre, synchro par dossier réseau, plusieurs serveurs par appareil.
 
 **Exclu**
-- Coffres partagés entre plusieurs personnes (chacun a son coffre).
 - Codes TOTP, champs personnalisés, extension navigateur / autofill.
 
 ## 3. Architecture
@@ -36,25 +40,22 @@ Workspace Cargo, architecture hexagonale :
 | Crate | Contenu | Contraintes |
 |---|---|---|
 | `pswd-core` | Modèles, fusion, format de fichier, crypto, générateur, CSV, ports (traits) | Aucune E/S, aucun appel OS, `#![forbid(unsafe_code)]`, compilable pour mobile |
-| `pswd-infra` | Adaptateurs desktop : `LocalStore` fichier, `RemoteStore` Git, trousseau, `SecureClipboard`, config | |
+| `pswd-infra` | Adaptateurs desktop : `LocalStore` fichier, `SecureClipboard`, config | |
 | `pswd-cli` | Binaire `pswd`, shell interactif, verrouillage automatique | `#![forbid(unsafe_code)]` |
 
-Futur : `pswd-mobile` (bindings UniFFI au-dessus de `pswd-core`, adaptateurs propres).
+Futur : les interfaces graphiques (étape 2) au-dessus de `pswd-core` ; `pswd-server` et l'adaptateur `RemoteStore` HTTP (étape 3).
 
 **Ports (définis dans `pswd-core`)**
 - `LocalStore` : `load() -> Option<bytes>` (`None` : pas de coffre local), `save_atomic(bytes)` (fichier temporaire + renommage).
-- `RemoteStore` : `fetch() -> Option<(bytes, version)>` (`None` : distant vide ; une erreur vaut « hors ligne », l'adaptateur borne lui-même l'attente), `push(bytes, expected_version)` (`Conflict` si le distant a bougé ; `expected = None` exige un distant vide).
-- `SecretStore` : lire / écrire le jeton d'accès distant d'un coffre.
+- `RemoteStore` (étape 3) : `fetch() -> Option<(bytes, version)>` (`None` : distant vide ; une erreur vaut « hors ligne », l'adaptateur borne lui-même l'attente), `push(bytes, expected_version)` (`Conflict` si le distant a bougé ; `expected = None` exige un distant vide).
 - `SecureClipboard` : `copy_secret(value, ttl)`.
 - Les erreurs des adaptateurs sont des `PortError` (un message, jamais de secret).
 
-**Session** (`pswd-core`) : coffre ouvert, déverrouillé par mot de passe ou clé de récupération (`Credentials`, extensible au fichier-clé). Elle applique le déroulé du §7 avec n'importe quels adaptateurs, ce qui la rend testable avec des magasins en mémoire et réutilisable sur mobile.
-
-Avec Git, `LocalStore` et `RemoteStore` visent le même clone local ; ils restent distincts pour permettre un transport sans Git.
+**Session** (`pswd-core`) : coffre ouvert, déverrouillé par mot de passe ou clé de récupération (`Credentials`, extensible au fichier-clé). Toute modification est enregistrée localement et marque le coffre comme ayant des modifications non publiées. La synchro (§7) est une opération distincte qui reçoit le distant en paramètre : une session n'a besoin d'aucun distant. Les magasins en mémoire la rendent testable, et elle sera réutilisée par les interfaces graphiques.
 
 La crypto n'est **pas** un port : déterministe, sans E/S, identique partout.
 
-**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `keyring-core` (+ un magasin par OS : Windows, macOS, Secret Service sous Linux), `etcetera` (dossiers standard, licence MIT/Apache, contrairement à `directories` qui tire du MPL-2.0), `toml`, `clap`, `arboard` (presse-papiers). Librairie Git embarquée : `git2` (libgit2), retenue pour son push HTTPS éprouvé ; `gix` ne sait pas encore pousser (à réévaluer, le port `RemoteStore` permet d'en changer). Sur Android, `git2` exige OpenSSL embarqué (`vendored-openssl`). Jamais le binaire `git` du système.
+**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `etcetera` (dossiers standard, licence MIT/Apache, contrairement à `directories` qui tire du MPL-2.0), `toml`, `clap`, `arboard` (presse-papiers).
 
 ## 4. Modèle de données
 
@@ -138,30 +139,39 @@ Fonction pure `merge(local: Vault, remote: Vault) -> Result<Vault, MergeError>` 
 
 **Limite acceptée** : `updated_at` dépend de l'horloge de l'appareil ; une horloge très décalée peut faire gagner la mauvaise version (la perdante reste dans l'historique).
 
-## 7. Synchro et cycle de vie
+**Restaurer n'est pas fusionner** : une ancienne copie (sauvegarde, version conservée par le serveur) n'est jamais fusionnée dans le coffre actuel. Ses entrées supprimées depuis seraient aussitôt ré-effacées par les tombstones, plus récentes. Une restauration crée toujours un nouveau coffre.
+
+## 7. Stockage, sauvegarde et synchro
 
 **Emplacements** (dossiers standard de l'OS, crate `etcetera` : `AppData\Roaming` sous Windows, `~/.config` et `~/.local/share` ailleurs)
-- Config : `<config_dir>/pswd/config.toml`, contenant les coffres nommés (`[vaults.<nom>]` : URL du dépôt, chemin local) et `default_vault`, `auto_lock_minutes = 10`, `clipboard_clear_seconds = 20`.
-- Données : un dossier par coffre, `<data_dir>/pswd/vaults/<nom>/`, contenant `vault.enc` (copie locale, `FileStore`) et `repo.git/` (dépôt Git nu, cache du distant, `GitRemote`). Plusieurs coffres coexistent ; aucun ne remplace un autre.
-- Dépôt distant : branche `main`, fichier `vault.enc` à la racine ; les autres fichiers (README créé par GitHub) sont conservés. Chaque publication est un commit dont le parent est la version récupérée : le serveur refuse tout push qui n'est pas une avance rapide, ce qui garantit qu'aucune version n'est écrasée. Jeton présenté une seule fois par opération (utilisateur `x-access-token`).
-- Délai max de 5 s, pour la connexion puis pour chaque réponse du serveur : options globales de libgit2, réglées une seule fois (`std::sync::Once`) avant le premier `GitRemote`. Ce sont des fonctions `unsafe` (variables globales C non synchronisées) : l'appel est isolé dans `pswd-infra`, justifié par un commentaire `SAFETY`, et `pswd-cli` reste en `forbid(unsafe_code)`.
-- Nom d'un coffre : lettres ASCII, chiffres, `-` et `_`, 64 caractères au plus, hors noms réservés de Windows (`con`, `nul`…) ; il sert de nom de dossier et de compte dans le trousseau. Le premier coffre ajouté devient le coffre par défaut ; un nom n'est jamais réattribué.
-- Jeton d'accès : trousseau de l'OS, service `pswd`, compte `<nom>`. Jamais en clair sur le disque.
+- Config : `<config_dir>/pswd/config.toml`, contenant les coffres nommés (`[vaults.<nom>]` : chemin local) et `default_vault`, `auto_lock_minutes = 10`, `clipboard_clear_seconds = 20`.
+- Données : un dossier par coffre, `<data_dir>/pswd/vaults/<nom>/`, contenant `vault.enc` (`FileStore`). Plusieurs coffres coexistent ; aucun ne remplace un autre.
+- Nom d'un coffre : lettres ASCII, chiffres, `-` et `_`, 64 caractères au plus, hors noms réservés de Windows (`con`, `nul`…) ; il sert de nom de dossier. Le premier coffre ajouté devient le coffre par défaut ; un nom déjà pris n'est jamais réattribué.
+- Les restes de la v1 (dossiers `repo.git/`, jetons `pswd` du trousseau) ne sont plus utilisés et peuvent être supprimés à la main ; une entrée `url` dans `config.toml` doit être retirée.
 
-**Hébergement** : 1 dépôt Git privé = 1 coffre. HTTPS + jeton GitHub *fine-grained* limité à ce seul dépôt (Contents : lecture/écriture). Plus tard, un serveur maison (Gitea…) avec un compte et un dépôt par personne.
+**Sauvegarde sur disque externe** (clé USB, disque dur)
+- Chaque sauvegarde crée un dossier daté : `<destination>/pswd-sauvegardes/<AAAA-MM-JJ_HH-MM-SS>/vaults/<nom>/vault.enc`, pour chaque coffre local.
+- Copie brute des fichiers chiffrés : aucun mot de passe demandé, rien de lisible sur le disque.
+- Une sauvegarde ne touche jamais aux précédentes. Les supprimer est laissé à l'utilisateur.
 
-**Déroulé**
-1. **Ouverture** : `fetch` avec un délai max de 5 s. En cas de succès : déchiffrement, fusion, écriture locale. En cas d'échec : ouverture de la copie locale avec `⚠ Hors ligne — dernière synchro : <date>`.
-2. **Chaque modification** : écriture locale atomique, puis tentative de publication (commit + push dans le dépôt nu). En cas d'échec, l'état passe à « modifications en attente ».
-3. **Push rejeté** (le distant a bougé) : fetch → fusion → nouveau push, 3 tentatives max.
-4. **Verrouillage / fermeture** : nouvelle tentative de push s'il y a des modifications en attente.
-5. **`sync`** manuel à tout moment.
+**Restauration**
+- L'utilisateur choisit une sauvegarde datée, puis un coffre.
+- Le coffre est restauré comme **nouveau coffre local** : sous son nom d'origine s'il est libre, sinon sous un nom distinct (`<nom>-sauvegarde-<AAAA-MM-JJ>`). Rien n'est jamais écrasé ni fusionné (§6).
+- Il s'ouvre avec le mot de passe en vigueur à la date de la sauvegarde.
+
+**Suppression d'un coffre** : confirmation explicite, puis retrait du dossier et de la configuration. À l'étape 3, un coffre privé propose « local seulement » ou « local et serveur » ; un coffre commun se quitte (§11).
+
+**Synchro** (algorithme de `pswd-core`, utilisé à partir de l'étape 3)
+1. `fetch`. Distant injoignable : état « hors ligne ».
+2. Distant présent : déchiffrement, fusion, écriture locale si la copie locale est en retard. Si le distant est à jour, fin.
+3. Publication avec la version récupérée. Rejetée (le distant a bougé) : retour en 1, 3 tentatives max.
 
 Précisions :
-- Copie locale et distant ne sont réécrits que s'ils sont en retard sur la fusion : ouvrir un coffre à jour ne crée ni écriture ni commit, et une modification sans effet n'écrit rien.
+- Copie locale et distant ne sont réécrits que s'ils sont en retard sur la fusion : synchroniser un coffre à jour n'écrit rien, et une modification sans effet n'écrit rien.
 - Si l'écriture locale d'une modification échoue, le coffre en mémoire revient à son état précédent.
 - Un fichier distant inutilisable (altéré, autre coffre, version inconnue) n'est **jamais écrasé** : état « refusé », le coffre local reste utilisable.
 - États de synchro : à jour, hors ligne (avec le message de l'adaptateur), conflit persistant après 3 tentatives, distant refusé.
+- Les moments de synchro (ouverture, modification, verrouillage) sont fixés avec le serveur (§11).
 
 ## 8. CLI
 
@@ -169,25 +179,24 @@ Précisions :
 
 | Commande | Effet |
 |---|---|
-| `pswd init <nom>` | Crée un coffre : mot de passe maître (saisi 2 fois), URL du dépôt, jeton, affichage unique de la clé de récupération, premier push. **Refuse** si un coffre existe déjà localement ou si le dépôt distant contient déjà `vault.enc` (et propose `join`). |
-| `pswd join <nom> <url>` | Clone un coffre existant, demande le jeton, vérifie le mot de passe maître. |
+| `pswd init <nom>` | Crée un coffre local : mot de passe maître (saisi 2 fois), affichage unique de la clé de récupération. **Refuse** si le nom est déjà pris. |
 | `pswd open [nom]` | Déverrouille et lance le shell interactif. |
-| `pswd sync [nom]` | Synchronise. |
 | `pswd passwd [nom]` | Change le mot de passe maître (ancien requis), refait l'enveloppe 1. |
 | `pswd recover [nom]` | Clé de récupération + nouveau mot de passe, refait l'enveloppe 1. |
 | `pswd import <fichier.csv> [--vault nom]` | Importe le format CSV ci-dessous (tout le fichier est validé avant d'ajouter quoi que ce soit), puis rappelle de supprimer le fichier. |
 | `pswd export <fichier.csv> [--vault nom]` | Export en clair : double confirmation + mot de passe maître redemandé. Un fichier existant n'est jamais écrasé. |
+| *à venir* | Sauvegarde, restauration et suppression (§7). |
 
 Aucune commande n'écrase un coffre existant.
 
-`init` et `join` vérifient le nom du coffre avant toute question. Un essai raté ne laisse rien derrière lui : dossier du coffre supprimé (s'il n'existait pas avant), configuration et trousseau inchangés. Le jeton est facultatif (saisie vide : aucun jeton, par exemple pour un dépôt local).
+`init` vérifie le nom du coffre avant toute question. Un essai raté ne laisse rien derrière lui : dossier du coffre supprimé (s'il n'existait pas avant), configuration inchangée.
 
-**Shell interactif** : `list [--tag t]`, `search <texte> [--tag t]`, `show <entrée> [--show]`, `copy <entrée>`, `add [--generate]`, `edit <entrée>`, `rm <entrée>`, `history <entrée>`, `tags`, `gen [--length N] [--no-symbols]`, `sync`, `lock`, `quit`.
+**Shell interactif** : `list [--tag t]`, `search <texte> [--tag t]`, `show <entrée> [--show]`, `copy <entrée>`, `add [--generate]`, `edit <entrée>`, `rm <entrée>`, `history <entrée>`, `tags`, `gen [--length N] [--no-symbols]`, `lock`, `quit`.
 
 - **Désigner une entrée** (`show`, `copy`…) : par son titre, sans tenir compte de la casse, ou par le début de son identifiant (affiché par `list`). Si plusieurs entrées correspondent, la commande refuse et les liste. Une erreur dans le shell est affichée et le shell continue ; fin de l'entrée standard = `quit`.
-- **`add` / `edit`** : questions champ par champ (une note n'a ni identifiant, ni mot de passe, ni URL) ; URLs et tags séparés par des espaces. Dans `edit`, la valeur actuelle est rappelée : réponse vide = inchangé, `-` = effacer. `--generate` crée le mot de passe sans l'afficher (`copy` pour le copier). `rm` demande confirmation (non par défaut). `history` date chaque version (UTC) et signale un mot de passe différent. En quittant, les modifications non publiées sont renvoyées.
+- **`add` / `edit`** : questions champ par champ (une note n'a ni identifiant, ni mot de passe, ni URL) ; URLs et tags séparés par des espaces. Dans `edit`, la valeur actuelle est rappelée : réponse vide = inchangé, `-` = effacer. `--generate` crée le mot de passe sans l'afficher (`copy` pour le copier). `rm` demande confirmation (non par défaut). `history` date chaque version (UTC) et signale un mot de passe différent.
 - **Presse-papiers** ouvert à la première copie : une machine sans presse-papiers peut utiliser toutes les autres commandes.
-- **Verrouillage automatique** après 10 min d'inactivité : la clé est effacée de la mémoire à l'échéance, même si aucune commande n'est tapée. Un thread de surveillance détient la session ; chaque commande repousse l'échéance ; à l'échéance, il retente la publication des modifications en attente, puis détruit la session. La saisie suivante affiche « Coffre verrouillé » et ferme le shell. `auto_lock_minutes = 0` désactive le verrouillage ; `lock` (alias de `quit`) verrouille tout de suite.
+- **Verrouillage automatique** après 10 min d'inactivité : la clé est effacée de la mémoire à l'échéance, même si aucune commande n'est tapée. Un thread de surveillance détient la session ; chaque commande repousse l'échéance ; à l'échéance, il détruit la session. La saisie suivante affiche « Coffre verrouillé » et ferme le shell. `auto_lock_minutes = 0` désactive le verrouillage ; `lock` (alias de `quit`) verrouille tout de suite.
 - **Copie sous Linux** : un avertissement rappelle que l'exclusion de l'historique dépend du gestionnaire de presse-papiers.
 - **Recherche** : sans tenir compte de la casse, sur le titre, l'identifiant, les URLs et les tags ; les tombstones sont ignorés.
 - **Générateur** : 24 caractères par défaut (8 à 128), majuscules, minuscules, chiffres et symboles `!#$%&()*+,-./:;<=>?@[]^_{|}~` (ni espace, ni guillemets, ni antislash, ni accent grave) ; au moins un caractère de chaque classe active, obtenu par rejet des candidats incomplets pour que tous les mots de passe valides restent équiprobables. `pswd-core` reçoit le générateur aléatoire en paramètre, contraint par le trait `CryptoRng` ; la CLI fournit un `StdRng` initialisé par `SysRng` (aléa du système, `rand` 0.10) : si l'aléa manque, une erreur est affichée, jamais de panique.
@@ -216,16 +225,56 @@ Code Wi-Fi,note,,,,"Box: ABCD-1234",maison
   - Linux : type MIME `x-kde-passwordManagerHint = secret` (partiel : avertissement affiché) ;
   - Android 13+ (futur) : `EXTRA_IS_SENSITIVE` ; iOS (futur) : `localOnly` + `expirationDate`.
 - Mot de passe maître **et** clé de récupération perdus = coffre perdu. Aucune récupération possible côté serveur.
-- **Historique Git** : après `passwd` / `recover`, l'ancien mot de passe ouvre toujours les anciennes versions du fichier présentes dans l'historique. Si le mot de passe a fuité, une rotation de clé est nécessaire (hors v1).
+- **Anciennes copies** : après `passwd` / `recover`, l'ancien mot de passe ouvre toujours les copies antérieures du fichier (sauvegardes externes, versions conservées par le serveur). Si le mot de passe a fuité, une rotation de clé est nécessaire (hors feuille de route).
 
 ## 10. Points d'extension à préparer
 
-Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): …` à l'endroit exact où il se branchera.
+Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): …` à l'endroit exact où il se branchera, dès que cet endroit existe.
 
-| Nom | Préparation en v1 |
+| Nom | Préparation |
 |---|---|
 | `keyfile` | `kind = 3` réservé dans les enveloppes ; dérivation de la clé d'enveloppe isolée pour accepter un second secret ; port de déverrouillage générique. |
 | `key-rotation` | Les enveloppes sont indépendantes du payload ; `pswd passwd --rotate-key` génèrera une nouvelle clé de coffre et rechiffrera. |
-| `mobile` | `pswd-core` sans E/S ; ports `SecureClipboard` / `SecretStore` à réimplémenter. |
-| `remote-transport` | `RemoteStore` abstrait ; adaptateur « dossier synchronisé » possible. |
-| `shared-vault` | Plusieurs enveloppes possibles par coffre (une par membre, à clé publique). Exclu pour l'instant, mais non bloqué par le format. |
+| `mobile` | `pswd-core` sans E/S ; port `SecureClipboard` à réimplémenter. |
+| `remote-transport` | `RemoteStore` abstrait : l'adaptateur HTTP de `pswd-server` s'y branche (étape 3). |
+| `partage-par-membre` | Plusieurs enveloppes possibles par coffre (une par membre, à clé publique) : ajouter ou retirer un membre sans partager de mot de passe. Les coffres communs de l'étape 3 utilisent un mot de passe partagé. |
+| `dossier-reseau` | Synchro par un partage réseau (NAS) sans `pswd-server`. Un dossier ne sait pas refuser une écriture concurrente : il faudrait un fichier par appareil, fusionnés à la lecture. |
+| `multi-serveurs` | Un appareil connecté à plusieurs serveurs : chaque coffre est rattaché à un serveur. |
+
+## 11. Serveur maison (étape 3)
+
+**Principe** : `pswd-server` est un exécutable Rust unique, sans dépendance, lancé sur une machine de l'utilisateur (serveur Linux, NAS, Raspberry Pi). C'est une passerelle : il stocke des fichiers `vault.enc` opaques et ne détient aucune clé. Toute la gestion se fait depuis l'application.
+
+**Transport** : HTTPS. Le serveur génère son propre certificat ; l'application l'**épingle** (n'accepte que lui). Écriture conditionnelle : une publication est refusée si le coffre a changé depuis la version lue, ce qui conserve le contrat `RemoteStore`. Le serveur identifie les coffres par son propre identifiant, jamais par leur nom.
+
+**Accès** : l'application retient une adresse locale et une adresse publique, essayées dans cet ordre (délai max 5 s). L'accès depuis l'extérieur (redirection de port, VPN) est documenté ; il n'y a pas de relais.
+
+**Administration**
+- Au premier démarrage, le serveur affiche une fois son adresse et une **clé administrateur**. Le premier appareil qui la présente devient administrateur ; personne d'autre ne le peut.
+- Secours : sur la machine, `pswd-server reset-admin` affiche une nouvelle clé administrateur.
+- Le panneau d'administration de l'application permet d'ajouter un membre, de supprimer un compte, de révoquer un appareil, de promouvoir un membre administrateur ou de lui retirer ce rôle, de supprimer un coffre, de rattacher quelqu'un à un coffre sans membre et de restaurer une version. Le dernier administrateur ne peut pas perdre son rôle ni être supprimé.
+
+**Comptes et appareils**
+- Ajouter un membre produit l'adresse du serveur et une clé à usage unique, à recopier dans l'application (ordinateur ou mobile). Cette clé contient aussi une partie de l'empreinte du certificat : l'application vérifie le serveur dès la première connexion, sans comparaison manuelle.
+- Chaque appareil reçoit son propre jeton, révocable individuellement. Le compte n'a pas de mot de passe serveur : rien ne se confond avec le mot de passe maître.
+- Un appareil est connecté à un seul serveur. Il peut s'en déconnecter (son jeton est révoqué) puis se connecter à nouveau.
+
+**Coffres**
+- Un coffre est **privé** ou **commun**. Un coffre commun est protégé par un mot de passe maître partagé, transmis hors du serveur.
+- Tout membre d'un coffre commun peut inviter un utilisateur du même serveur, qui accepte ou refuse, et peut quitter le coffre. Tous les membres sont égaux ; seul un administrateur retire quelqu'un. Après un départ, changer le mot de passe (`passwd`) est conseillé : l'ancien membre le connaît.
+- Être membre donne le droit de télécharger et de publier le fichier ; le lire exige le mot de passe du coffre.
+- Le serveur ne supprime jamais un coffre de lui-même, même sans membre. Depuis l'application, supprimer un coffre privé propose « local seulement » ou « local et serveur » ; un coffre commun se quitte. Supprimer un coffre sur le serveur ne touche pas aux copies locales des appareils.
+- Le serveur conserve les **15 dernières versions** de chaque coffre. Une restauration crée un nouveau coffre avec les mêmes membres (§6).
+
+**État d'un coffre sur un appareil**
+
+| État | Signification | Comportement |
+|---|---|---|
+| à publier | Créé ou restauré, inconnu du serveur | Publié comme nouveau coffre privé dès que le serveur est joignable |
+| publié | Présent sur le serveur, synchronisé | Synchro normale (§7) |
+| détaché | L'appareil s'est déconnecté du serveur | Utilisé en local ; synchro reprise à la reconnexion au même serveur (reconnu par son certificat) |
+| retiré | Le serveur l'a supprimé ou en a retiré l'utilisateur | Gardé en local, jamais republié automatiquement : seulement sur action volontaire, comme nouveau coffre |
+
+- À la déconnexion, l'application demande s'il faut garder une copie locale des coffres (oui par défaut). Sans copie, les données restent sur le serveur.
+- En se connectant à un **autre** serveur, les coffres détachés ne sont pas publiés automatiquement ; les coffres « à publier » le sont.
+- Le serveur distingue « coffre inconnu » de « coffre retiré » : `RemoteStore` reçoit pour cela une erreur dédiée.

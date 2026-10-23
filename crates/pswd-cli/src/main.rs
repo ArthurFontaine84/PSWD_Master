@@ -19,14 +19,14 @@ use clap::Parser;
 use pswd_core::Secret;
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecureClipboard};
-use pswd_infra::{KeyringStore, Locations, SystemClipboard, TimedClipboard};
+use pswd_infra::{Locations, SystemClipboard, TimedClipboard};
 
 use crate::app::{App, CliError, system_clock};
 use crate::cli::Cli;
 use crate::terminal::StdTerminal;
 
 // Exclu de la couverture : point d'entrée du processus, qui branche les vrais adaptateurs
-// (console, trousseau, presse-papiers, dossiers de l'utilisateur) ; les commandes sont testées
+// (console, presse-papiers, dossiers de l'utilisateur) ; les commandes sont testées
 // via `App`.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn main() -> ExitCode {
@@ -44,7 +44,6 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<(), CliError> {
     let mut app = App {
         terminal: StdTerminal,
-        keyring: KeyringStore::system()?,
         clipboard: LazyClipboard(None),
         locations: Locations::system()?,
         kdf: KdfParams::DEFAULT,

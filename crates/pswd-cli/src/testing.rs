@@ -8,7 +8,7 @@ use std::time::Duration;
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecureClipboard};
 use pswd_core::{Credentials, FileError, Secret, Session, Timestamp, Vault, VaultFile};
-use pswd_infra::{Config, ConfigFile, FileStore, GitRemote, KeyringStore, Locations};
+use pswd_infra::{Config, ConfigFile, FileStore, Locations};
 use tempfile::TempDir;
 
 use crate::app::{App, CliError};
@@ -86,32 +86,23 @@ impl SecureClipboard for FakeClipboard {
     }
 }
 
-pub type TestApp = App<ScriptedTerminal, KeyringStore, FakeClipboard>;
+pub type TestApp = App<ScriptedTerminal, FakeClipboard>;
 
-/// Un dépôt distant nu et des « appareils », chacun avec ses propres dossiers.
+/// Des « appareils », chacun avec ses propres dossiers.
 pub struct TestEnv {
     pub dir: TempDir,
-    pub url: String,
-    keyring: Arc<keyring_core::mock::Store>,
     clipboard: FakeClipboard,
 }
 
 impl TestEnv {
     pub fn new() -> Self {
-        let dir = TempDir::new().unwrap();
-        let remote = dir.path().join("remote.git");
-        git2::Repository::init_bare(&remote).unwrap();
-        let url = remote.to_str().unwrap().to_owned();
-        let keyring = keyring_core::mock::Store::new().unwrap();
         Self {
-            dir,
-            url,
-            keyring,
+            dir: TempDir::new().unwrap(),
             clipboard: FakeClipboard::default(),
         }
     }
 
-    /// Coffre `perso` créé sur l'appareil `a`, sans jeton, mot de passe « maître ».
+    /// Coffre `perso` créé sur l'appareil `a`, mot de passe « maître ».
     pub fn with_vault() -> Self {
         Self::with_vault_and_recovery_key().0
     }
@@ -119,7 +110,7 @@ impl TestEnv {
     /// Comme [`TestEnv::with_vault`], avec la clé de récupération affichée.
     pub fn with_vault_and_recovery_key() -> (Self, String) {
         let env = Self::new();
-        let mut app = env.app("a", &[&env.url, "", "maître", "maître"]);
+        let mut app = env.app("a", &["maître", "maître"]);
         app.run(Command::Init {
             name: "perso".to_owned(),
         })
@@ -134,7 +125,7 @@ impl TestEnv {
         (env, key)
     }
 
-    /// Le coffre `perso` tel qu'il est enregistré sur l'appareil, sans synchroniser.
+    /// Le coffre `perso` tel qu'il est enregistré sur l'appareil.
     pub fn local_vault(&self, device: &str, password: &str) -> Vault {
         self.local_vault_result(device, password).unwrap()
     }
@@ -157,7 +148,6 @@ impl TestEnv {
                 answers: answers.iter().map(|&answer| answer.to_owned()).collect(),
                 output: Vec::new(),
             },
-            keyring: KeyringStore::with_store(self.keyring.clone()),
             clipboard: self.clipboard.clone(),
             locations: self.locations(device),
             kdf: KdfParams::new(8 * 1024, 1, 1).unwrap(),
@@ -176,29 +166,17 @@ impl TestEnv {
         self.locations(device).vault_dir(name)
     }
 
-    /// Modifie le coffre `perso` depuis l'appareil `device`, puis le publie.
+    /// Modifie le coffre `perso` de l'appareil `device`.
     pub fn edit_vault(&self, device: &str, change: impl FnOnce(&mut Vault)) {
         self.session(device).edit(change).unwrap();
     }
 
-    /// Le dépôt distant devient injoignable.
-    pub fn take_remote_offline(&self) {
-        std::fs::rename(&self.url, self.dir.path().join("hors-ligne.git")).unwrap();
-    }
-
-    /// Le dépôt distant redevient joignable.
-    pub fn bring_remote_online(&self) {
-        std::fs::rename(self.dir.path().join("hors-ligne.git"), &self.url).unwrap();
-    }
-
     /// Session ouverte sur le coffre `perso` de l'appareil, mot de passe « maître ».
-    pub fn session(&self, device: &str) -> Session<FileStore, GitRemote> {
+    pub fn session(&self, device: &str) -> Session<FileStore> {
         let vault = self.config(device).vault(Some("perso")).unwrap().1.clone();
-        let remote = GitRemote::open(&vault.repo_dir(), &vault.url, None).unwrap();
         let password = Secret::new("maître".to_owned());
         Session::open(
             FileStore::new(vault.vault_file()),
-            remote,
             Credentials::Password(&password),
         )
         .unwrap()
@@ -210,15 +188,5 @@ impl TestEnv {
 
     pub fn break_clipboard(&self) {
         self.clipboard.0.lock().unwrap().broken = true;
-    }
-
-    pub fn remote_has_vault(&self) -> bool {
-        let repo = git2::Repository::open_bare(&self.url).unwrap();
-        let tree = repo
-            .find_reference("refs/heads/main")
-            .unwrap()
-            .peel_to_tree()
-            .unwrap();
-        tree.get_name("vault.enc").is_some()
     }
 }

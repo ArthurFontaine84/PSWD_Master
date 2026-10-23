@@ -2,10 +2,8 @@ use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pswd_core::crypto::KdfParams;
-use pswd_core::ports::{PortError, SecretStore, SecureClipboard};
-use pswd_core::{
-    CsvError, GeneratorError, RecoveryKeyError, SessionError, SyncStatus, Timestamp, VaultError,
-};
+use pswd_core::ports::{PortError, SecureClipboard};
+use pswd_core::{CsvError, GeneratorError, RecoveryKeyError, SessionError, Timestamp, VaultError};
 use pswd_infra::{ConfigError, Locations};
 
 use crate::cli::Command;
@@ -92,9 +90,8 @@ impl From<GeneratorError> for CliError {
 }
 
 /// Tout ce dont les commandes ont besoin : remplacé par des doublures dans les tests.
-pub struct App<T, K, C> {
+pub struct App<T, C> {
     pub terminal: T,
-    pub keyring: K,
     pub clipboard: C,
     pub locations: Locations,
     pub kdf: KdfParams,
@@ -103,16 +100,14 @@ pub struct App<T, K, C> {
     pub auto_lock: Option<Duration>,
 }
 
-impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
+impl<T: Terminal, C: SecureClipboard> App<T, C> {
     /// # Errors
     ///
     /// Toute erreur de la commande, à afficher à l'utilisateur.
     pub fn run(&mut self, command: Command) -> Result<(), CliError> {
         match command {
             Command::Init { name } => self.init(&name),
-            Command::Join { name, url } => self.join(&name, &url),
             Command::Open { name } => self.open(name.as_deref()),
-            Command::Sync { name } => self.sync(name.as_deref()),
             Command::Passwd { name } => self.change_password(name.as_deref(), Unlock::Password),
             Command::Recover { name } => self.change_password(name.as_deref(), Unlock::RecoveryKey),
             Command::Import { file, vault } => self.import(&file, vault.as_deref()),
@@ -131,47 +126,14 @@ pub fn system_clock() -> Timestamp {
     Timestamp::from_millis(millis)
 }
 
-/// Phrase décrivant l'état de la synchronisation.
-pub fn describe(status: &SyncStatus) -> String {
-    match status {
-        SyncStatus::Synced => "Synchronisé avec le dépôt distant.".to_owned(),
-        SyncStatus::Offline(error) => format!(
-            "⚠ Hors ligne ({error}) : les modifications sont enregistrées localement et seront \
-             publiées à la prochaine synchronisation."
-        ),
-        SyncStatus::Conflict => "⚠ Le dépôt distant change sans cesse : les modifications \
-                                 seront publiées à la prochaine synchronisation."
-            .to_owned(),
-        SyncStatus::Rejected(error) => format!(
-            "⚠ Fichier distant refusé ({error}) : il n'a pas été modifié, le coffre local reste \
-             utilisable."
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use pswd_core::FileError;
-
     use super::*;
 
     #[test]
     fn system_clock_gives_the_current_time() {
         // 1ᵉʳ janvier 2026 en millisecondes.
         assert!(system_clock() > Timestamp::from_millis(1_767_225_600_000));
-    }
-
-    #[test]
-    fn every_status_is_described() {
-        let offline = describe(&SyncStatus::Offline(PortError::new("réseau coupé")));
-        assert!(offline.contains("réseau coupé"), "{offline}");
-        assert_eq!(
-            describe(&SyncStatus::Synced),
-            "Synchronisé avec le dépôt distant."
-        );
-        assert!(describe(&SyncStatus::Conflict).starts_with("⚠ Le dépôt distant change"));
-        let rejected = describe(&SyncStatus::Rejected(FileError::Corrupted));
-        assert!(rejected.contains("coffre altéré ou corrompu"), "{rejected}");
     }
 
     #[test]
@@ -182,12 +144,12 @@ mod tests {
                 "aucun coffre par défaut : préciser son nom ou utiliser init",
             ),
             (
-                CliError::Session(SessionError::RemoteEmpty),
-                "le dépôt distant ne contient aucun coffre : utiliser init",
+                CliError::Session(SessionError::NoLocalVault),
+                "aucun coffre local : utiliser init",
             ),
             (
-                CliError::Port(PortError::new("trousseau : verrouillé")),
-                "trousseau : verrouillé",
+                CliError::Port(PortError::new("presse-papiers indisponible")),
+                "presse-papiers indisponible",
             ),
             (
                 CliError::Input("console absente".to_owned()),

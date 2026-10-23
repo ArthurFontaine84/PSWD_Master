@@ -1,15 +1,14 @@
-//! Commandes ponctuelles sur un coffre existant : `sync`, `passwd`, `recover`, `import`,
-//! `export`.
+//! Commandes ponctuelles sur un coffre existant : `passwd`, `recover`, `import`, `export`.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
-use pswd_core::ports::{SecretStore, SecureClipboard};
+use pswd_core::ports::SecureClipboard;
 use pswd_core::{Credentials, RecoveryKey, Session, Vault, export_csv, import_csv};
-use pswd_infra::{Config, ConfigFile, FileStore, GitRemote};
+use pswd_infra::{Config, ConfigFile, FileStore};
 
-use crate::app::{App, CliError, describe};
+use crate::app::{App, CliError};
 use crate::shell::VaultSession;
 use crate::terminal::Terminal;
 
@@ -27,8 +26,8 @@ pub(crate) struct Unlocked {
     pub config: Config,
 }
 
-impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
-    /// Ouvre le coffre `name` (ou celui par défaut) et le synchronise.
+impl<T: Terminal, C: SecureClipboard> App<T, C> {
+    /// Déverrouille le coffre `name` (ou celui par défaut).
     pub(crate) fn unlock(
         &mut self,
         name: Option<&str>,
@@ -37,18 +36,16 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
         let config = ConfigFile::new(self.locations.config_file()).load()?;
         let (name, vault) = config.vault(name)?;
         let (name, vault) = (name.to_owned(), vault.clone());
-        let token = self.keyring.token(&name)?;
-        let remote = GitRemote::open(&vault.repo_dir(), &vault.url, token)?;
         let local = FileStore::new(vault.vault_file());
         let session = match unlock {
             Unlock::Password => {
                 let password = self.terminal.prompt_secret("Mot de passe maître : ")?;
-                Session::open(local, remote, Credentials::Password(&password))?
+                Session::open(local, Credentials::Password(&password))?
             }
             Unlock::RecoveryKey => {
                 let text = self.terminal.prompt_secret("Clé de récupération : ")?;
                 let key = RecoveryKey::parse(text.expose()).map_err(CliError::RecoveryKey)?;
-                Session::open(local, remote, Credentials::RecoveryKey(&key))?
+                Session::open(local, Credentials::RecoveryKey(&key))?
             }
         };
         Ok(Unlocked {
@@ -56,12 +53,6 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
             session,
             config,
         })
-    }
-
-    pub(crate) fn sync(&mut self, name: Option<&str>) -> Result<(), CliError> {
-        let unlocked = self.unlock(name, Unlock::Password)?;
-        self.terminal.print(&describe(unlocked.session.status()));
-        Ok(())
     }
 
     /// `passwd` (ancien mot de passe) et `recover` (clé de récupération).
@@ -79,7 +70,6 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
             "Mot de passe maître de « {} » changé.",
             unlocked.name
         ));
-        self.terminal.print(&describe(unlocked.session.status()));
         Ok(())
     }
 
@@ -99,7 +89,6 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
             "{count} entrée(s) importée(s) dans « {} ».",
             unlocked.name
         ));
-        self.terminal.print(&describe(unlocked.session.status()));
         self.terminal.print(&format!(
             "⚠ {} contient vos mots de passe en clair : supprimez-le.",
             file.display()
@@ -163,10 +152,6 @@ mod tests {
 
     use super::*;
 
-    fn sync() -> Command {
-        Command::Sync { name: None }
-    }
-
     fn note(title: &str) -> EntryContent {
         EntryContent::new(EntryKind::Note, title.to_owned())
     }
@@ -186,47 +171,28 @@ mod tests {
         Wi-Fi,note,,,,ABCD,maison\r\n";
 
     #[test]
-    fn sync_brings_changes_from_another_device() {
-        let env = TestEnv::with_vault();
-        let mut app = env.app("b", &["", "maître"]);
-        app.run(Command::Join {
-            name: "perso".to_owned(),
-            url: env.url.clone(),
-        })
-        .unwrap();
-        env.edit_vault("a", |vault| {
-            vault.add(note("depuis A"), Timestamp::from_millis(1));
-        });
-        let mut app = env.app("b", &["maître"]);
-        app.run(sync()).unwrap();
-        assert_eq!(app.terminal.output(), "Synchronisé avec le dépôt distant.");
-        assert_eq!(titles(&env.local_vault("b", "maître")), ["depuis A"]);
-    }
-
-    #[test]
-    fn sync_requires_the_right_password() {
-        let env = TestEnv::with_vault();
-        let mut app = env.app("a", &["autre"]);
-        assert_eq!(
-            app.run(sync()),
-            Err(CliError::Session(SessionError::File(
-                FileError::WrongPassword
-            )))
-        );
-    }
-
-    #[test]
     fn passwd_replaces_the_master_password() {
         let env = TestEnv::with_vault();
         let mut app = env.app("a", &["maître", "nouveau", "nouveau"]);
         app.run(Command::Passwd { name: None }).unwrap();
-        let output = app.terminal.output();
-        assert!(
-            output.starts_with("Mot de passe maître de « perso » changé.\n"),
-            "{output}"
+        assert_eq!(
+            app.terminal.output(),
+            "Mot de passe maître de « perso » changé."
         );
         assert!(env.local_vault_result("a", "maître").is_err());
         env.local_vault("a", "nouveau");
+    }
+
+    #[test]
+    fn passwd_requires_the_current_password() {
+        let env = TestEnv::with_vault();
+        let mut app = env.app("a", &["autre"]);
+        assert_eq!(
+            app.run(Command::Passwd { name: None }),
+            Err(CliError::Session(SessionError::File(
+                FileError::WrongPassword
+            )))
+        );
     }
 
     #[test]

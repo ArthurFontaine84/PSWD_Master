@@ -3,14 +3,6 @@ all-features = true
 
 [advisories]
 yanked = "deny"
-# zbus_names, zvariant et zvariant_derive ont été fusionnés dans zbus 6 : ce ne sont pas des
-# failles. Ils viennent du magasin Linux (secret-service, encore sur zbus 5).
-# À retirer dès que secret-service passe à zbus 6.
-ignore = [
-    { id = "RUSTSEC-2026-0370", reason = "zvariant fusionné dans zbus 6" },
-    { id = "RUSTSEC-2026-0371", reason = "zbus_names fusionné dans zbus 6" },
-    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive fusionné dans zbus 6" },
-]
 
 [licenses]
 allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "ISC", "Unicode-3.0", "Zlib"]

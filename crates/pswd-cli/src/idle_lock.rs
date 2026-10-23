@@ -20,8 +20,8 @@ pub(crate) struct IdleLock<S> {
 }
 
 impl<S: Send + 'static> IdleLock<S> {
-    /// `on_lock` est appelé juste avant la destruction. Un délai nul désactive le verrouillage.
-    pub fn new(session: S, timeout: Duration, on_lock: fn(&mut S)) -> Self {
+    /// Un délai nul désactive le verrouillage.
+    pub fn new(session: S, timeout: Duration) -> Self {
         let shared: Shared<S> = Arc::new((
             Mutex::new(State {
                 session: Some(session),
@@ -32,7 +32,7 @@ impl<S: Send + 'static> IdleLock<S> {
         ));
         if !timeout.is_zero() {
             let watched = Arc::clone(&shared);
-            thread::spawn(move || watch(&watched, on_lock));
+            thread::spawn(move || watch(&watched));
         }
         Self { shared, timeout }
     }
@@ -55,18 +55,14 @@ impl<S: Send + 'static> IdleLock<S> {
 }
 
 /// Dort jusqu'à l'échéance ; une utilisation l'a peut-être repoussée entre-temps.
-fn watch<S>(shared: &(Mutex<State<S>>, Condvar), on_lock: fn(&mut S)) {
+fn watch<S>(shared: &(Mutex<State<S>>, Condvar)) {
     let (mutex, wakeup) = shared;
     let mut state = lock(mutex);
     while !state.closed {
         let now = Instant::now();
         if now >= state.deadline {
             // La session est détruite ici : sa clé est effacée de la mémoire.
-            state
-                .session
-                .take()
-                .into_iter()
-                .for_each(|mut session| on_lock(&mut session));
+            state.session = None;
             return;
         }
         let remaining = state.deadline - now;
@@ -94,13 +90,9 @@ mod tests {
         }
     }
 
-    fn on_lock(session: &mut Fake) {
-        session.0.lock().unwrap().push("verrouillage");
-    }
-
     fn guarded(timeout: Duration) -> (IdleLock<Fake>, Arc<Mutex<Vec<&'static str>>>) {
         let log = Arc::new(Mutex::new(Vec::new()));
-        (IdleLock::new(Fake(Arc::clone(&log)), timeout, on_lock), log)
+        (IdleLock::new(Fake(Arc::clone(&log)), timeout), log)
     }
 
     fn events(log: &Mutex<Vec<&'static str>>) -> Vec<&'static str> {
@@ -119,7 +111,7 @@ mod tests {
     fn idle_session_is_locked_then_destroyed() {
         let (guarded, log) = guarded(Duration::from_millis(30));
         thread::sleep(Duration::from_millis(300));
-        assert_eq!(events(&log), ["verrouillage", "détruite"]);
+        assert_eq!(events(&log), ["détruite"]);
         assert_eq!(guarded.with(|_| ()), None);
         assert!(guarded.close().is_none());
     }
