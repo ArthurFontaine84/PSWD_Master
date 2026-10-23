@@ -3,10 +3,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecretStore, SecureClipboard};
-use pswd_core::{GeneratorError, SessionError, SyncStatus, Timestamp, VaultError};
+use pswd_core::{
+    CsvError, GeneratorError, RecoveryKeyError, SessionError, SyncStatus, Timestamp, VaultError,
+};
 use pswd_infra::{ConfigError, Locations};
 
 use crate::cli::Command;
+use crate::commands::Unlock;
 use crate::terminal::Terminal;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +29,9 @@ pub enum CliError {
     EmptyTitle,
     UnknownKind(String),
     Vault(VaultError),
+    RecoveryKey(RecoveryKeyError),
+    Csv(CsvError),
+    File(String),
 }
 
 impl fmt::Display for CliError {
@@ -52,6 +58,9 @@ impl fmt::Display for CliError {
             Self::EmptyTitle => f.write_str("le titre ne peut pas être vide"),
             Self::UnknownKind(kind) => write!(f, "type inconnu « {kind} » : login ou note"),
             Self::Vault(error) => error.fmt(f),
+            Self::RecoveryKey(error) => error.fmt(f),
+            Self::Csv(error) => error.fmt(f),
+            Self::File(message) => f.write_str(message),
         }
     }
 }
@@ -101,6 +110,11 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
             Command::Init { name } => self.init(&name),
             Command::Join { name, url } => self.join(&name, &url),
             Command::Open { name } => self.open(name.as_deref()),
+            Command::Sync { name } => self.sync(name.as_deref()),
+            Command::Passwd { name } => self.change_password(name.as_deref(), Unlock::Password),
+            Command::Recover { name } => self.change_password(name.as_deref(), Unlock::RecoveryKey),
+            Command::Import { file, vault } => self.import(&file, vault.as_deref()),
+            Command::Export { file, vault } => self.export(&file, vault.as_deref()),
         }
     }
 }
@@ -214,6 +228,18 @@ mod tests {
             (
                 CliError::Vault(VaultError::EntryNotFound(uuid::Uuid::nil())),
                 "entrée introuvable : 00000000-0000-0000-0000-000000000000",
+            ),
+            (
+                CliError::RecoveryKey(RecoveryKeyError::WrongLength),
+                "la clé de récupération doit compter 52 caractères",
+            ),
+            (
+                CliError::Csv(CsvError::InvalidHeader),
+                "en-tête CSV attendu : title,kind,username,password,urls,notes,tags",
+            ),
+            (
+                CliError::File("écriture de a.csv impossible : disque plein".to_owned()),
+                "écriture de a.csv impossible : disque plein",
             ),
         ];
         for (error, message) in messages {

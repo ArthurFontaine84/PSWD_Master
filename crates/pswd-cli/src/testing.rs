@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecureClipboard};
-use pswd_core::{Credentials, Secret, Session, Timestamp, Vault};
+use pswd_core::{Credentials, FileError, Secret, Session, Timestamp, Vault, VaultFile};
 use pswd_infra::{Config, ConfigFile, FileStore, GitRemote, KeyringStore, Locations};
 use tempfile::TempDir;
 
@@ -102,13 +102,37 @@ impl TestEnv {
 
     /// Coffre `perso` créé sur l'appareil `a`, sans jeton, mot de passe « maître ».
     pub fn with_vault() -> Self {
+        Self::with_vault_and_recovery_key().0
+    }
+
+    /// Comme [`TestEnv::with_vault`], avec la clé de récupération affichée.
+    pub fn with_vault_and_recovery_key() -> (Self, String) {
         let env = Self::new();
         let mut app = env.app("a", &[&env.url, "", "maître", "maître"]);
         app.run(Command::Init {
             name: "perso".to_owned(),
         })
         .unwrap();
-        env
+        let output = app.terminal.output();
+        let key = output
+            .lines()
+            .find(|line| line.starts_with("    "))
+            .unwrap()
+            .trim()
+            .to_owned();
+        (env, key)
+    }
+
+    /// Le coffre `perso` tel qu'il est enregistré sur l'appareil, sans synchroniser.
+    pub fn local_vault(&self, device: &str, password: &str) -> Vault {
+        self.local_vault_result(device, password).unwrap()
+    }
+
+    pub fn local_vault_result(&self, device: &str, password: &str) -> Result<Vault, FileError> {
+        let vault = self.config(device).vault(Some("perso")).unwrap().1.clone();
+        let file = std::fs::read(vault.vault_file()).unwrap();
+        VaultFile::unlock_with_password(&file, &Secret::new(password.to_owned()))
+            .map(|(_, vault)| vault)
     }
 
     fn locations(&self, device: &str) -> Locations {

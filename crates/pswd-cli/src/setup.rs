@@ -89,7 +89,7 @@ impl<T: Terminal, K: SecretStore, C> App<T, K, C> {
         Ok((!token.expose().is_empty()).then_some(token))
     }
 
-    fn new_master_password(&mut self) -> Result<Secret, CliError> {
+    pub(crate) fn new_master_password(&mut self) -> Result<Secret, CliError> {
         let password = self
             .terminal
             .prompt_secret("Nouveau mot de passe maître : ")?;

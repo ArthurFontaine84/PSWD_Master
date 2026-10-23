@@ -4,14 +4,13 @@ use std::time::Duration;
 
 use clap::Parser;
 use pswd_core::ports::{SecretStore, SecureClipboard};
-use pswd_core::{
-    Credentials, Entry, EntryKind, PasswordOptions, Session, Vault, generate_password,
-};
-use pswd_infra::{ConfigFile, FileStore, GitRemote};
+use pswd_core::{Entry, EntryKind, PasswordOptions, Session, Vault, generate_password};
+use pswd_infra::{FileStore, GitRemote};
 use rand::SeedableRng;
 use rand::rngs::{StdRng, SysRng};
 
 use crate::app::{App, CliError, describe};
+use crate::commands::{Unlock, Unlocked};
 use crate::terminal::Terminal;
 
 pub(crate) type VaultSession = Session<FileStore, GitRemote>;
@@ -104,22 +103,16 @@ enum ShellCommand {
 
 impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
     pub(crate) fn open(&mut self, name: Option<&str>) -> Result<(), CliError> {
-        let config = ConfigFile::new(self.locations.config_file()).load()?;
-        let (name, vault) = config.vault(name)?;
-        let token = self.keyring.token(name)?;
-        let password = self.terminal.prompt_secret("Mot de passe maître : ")?;
-        let remote = GitRemote::open(&vault.repo_dir(), &vault.url, token)?;
-        let mut session = Session::open(
-            FileStore::new(vault.vault_file()),
-            remote,
-            Credentials::Password(&password),
-        )?;
-        drop(password);
+        let Unlocked {
+            name,
+            mut session,
+            config,
+        } = self.unlock(name, Unlock::Password)?;
         self.terminal.print(&format!(
             "Coffre « {name} » ouvert. Tapez help pour l'aide."
         ));
         self.terminal.print(&describe(session.status()));
-        self.shell(name, &mut session, config.clipboard_clear())?;
+        self.shell(&name, &mut session, config.clipboard_clear())?;
         if session.has_pending_changes() {
             self.terminal.print(&describe(session.sync()?));
         }

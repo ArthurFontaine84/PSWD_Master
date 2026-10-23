@@ -106,10 +106,7 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
     ) -> Result<(), CliError> {
         let entry = find_entry(session.vault(), reference)?;
         let (id, title) = (entry.id(), entry.content().title.clone());
-        let answer = self
-            .terminal
-            .prompt(&format!("Supprimer « {title} » ? (o/N) : "))?;
-        if !matches!(answer.trim().to_lowercase().as_str(), "o" | "oui") {
+        if !self.confirm(&format!("Supprimer « {title} » ? (o/N) : "))? {
             self.terminal.print("Suppression annulée.");
             return Ok(());
         }

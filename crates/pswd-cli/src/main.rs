@@ -3,6 +3,7 @@
 
 mod app;
 mod cli;
+mod commands;
 mod editing;
 mod setup;
 mod shell;

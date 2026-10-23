@@ -175,8 +175,8 @@ Précisions :
 | `pswd sync [nom]` | Synchronise. |
 | `pswd passwd [nom]` | Change le mot de passe maître (ancien requis), refait l'enveloppe 1. |
 | `pswd recover [nom]` | Clé de récupération + nouveau mot de passe, refait l'enveloppe 1. |
-| `pswd import pass <fichier.csv> [--vault nom]` | Importe le format CSV ci-dessous, puis rappelle de supprimer le fichier. |
-| `pswd export <fichier.csv> [--vault nom]` | Export en clair : double confirmation + mot de passe maître redemandé. |
+| `pswd import <fichier.csv> [--vault nom]` | Importe le format CSV ci-dessous (tout le fichier est validé avant d'ajouter quoi que ce soit), puis rappelle de supprimer le fichier. |
+| `pswd export <fichier.csv> [--vault nom]` | Export en clair : double confirmation + mot de passe maître redemandé. Un fichier existant n'est jamais écrasé. |
 
 Aucune commande n'écrase un coffre existant.
 
