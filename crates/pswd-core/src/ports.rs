@@ -44,7 +44,7 @@ pub trait LocalStore {
     fn save_atomic(&mut self, file: &[u8]) -> Result<(), PortError>;
 }
 
-/// Identifiant opaque d'une version du fichier distant (un commit, avec Git).
+/// Identifiant opaque d'une version du fichier distant, attribué par le distant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteVersion(pub String);
 
@@ -62,7 +62,7 @@ pub enum PushError {
 }
 
 /// Copie distante du coffre.
-// EXTENSION(remote-transport): un adaptateur « dossier synchronisé » peut remplacer Git.
+// EXTENSION(remote-transport): l'adaptateur HTTP de `pswd-server` (étape 3).
 pub trait RemoteStore {
     /// `None` si le distant ne contient pas encore de coffre. L'adaptateur limite lui-même la
     /// durée d'attente.
@@ -79,19 +79,6 @@ pub trait RemoteStore {
     ///
     /// [`PushError::Conflict`] si le distant a bougé, [`PushError::Failed`] sinon.
     fn push(&mut self, file: &[u8], expected: Option<&RemoteVersion>) -> Result<(), PushError>;
-}
-
-/// Jeton d'accès au dépôt distant, rangé dans le trousseau du système.
-pub trait SecretStore {
-    /// # Errors
-    ///
-    /// Si le trousseau est inaccessible.
-    fn token(&self, vault_name: &str) -> Result<Option<Secret>, PortError>;
-
-    /// # Errors
-    ///
-    /// Si le trousseau est inaccessible.
-    fn set_token(&mut self, vault_name: &str, token: &Secret) -> Result<(), PortError>;
 }
 
 /// Presse-papiers qui s'efface tout seul.
@@ -112,8 +99,8 @@ mod tests {
     #[test]
     fn port_error_displays_its_message() {
         assert_eq!(
-            PortError::new("dépôt injoignable").to_string(),
-            "dépôt injoignable"
+            PortError::new("serveur injoignable").to_string(),
+            "serveur injoignable"
         );
     }
 }

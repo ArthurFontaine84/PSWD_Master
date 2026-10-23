@@ -31,7 +31,6 @@ pub enum SyncStatus {
 pub enum SessionError {
     NoLocalVault,
     LocalVaultExists,
-    RemoteVaultExists,
     RemoteEmpty,
     Local(PortError),
     Remote(PortError),
@@ -41,16 +40,11 @@ pub enum SessionError {
 impl fmt::Display for SessionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoLocalVault => f.write_str("aucun coffre local : utiliser init ou join"),
+            Self::NoLocalVault => f.write_str("aucun coffre local : utiliser init"),
             Self::LocalVaultExists => f.write_str("un coffre existe déjà à cet emplacement local"),
-            Self::RemoteVaultExists => {
-                f.write_str("le dépôt distant contient déjà un coffre : utiliser join")
-            }
-            Self::RemoteEmpty => {
-                f.write_str("le dépôt distant ne contient aucun coffre : utiliser init")
-            }
+            Self::RemoteEmpty => f.write_str("le distant ne contient aucun coffre"),
             Self::Local(error) => write!(f, "copie locale : {error}"),
-            Self::Remote(error) => write!(f, "dépôt distant : {error}"),
+            Self::Remote(error) => write!(f, "distant : {error}"),
             Self::File(error) => error.fmt(f),
         }
     }
@@ -64,43 +58,34 @@ impl From<FileError> for SessionError {
     }
 }
 
-/// Coffre ouvert : toute modification est enregistrée localement puis publiée.
-pub struct Session<L, R> {
+/// Coffre ouvert : toute modification est enregistrée localement, la publication se fait par
+/// [`Session::sync`].
+pub struct Session<L> {
     local: L,
-    remote: R,
     file: VaultFile,
     vault: Vault,
     pending: bool,
-    status: SyncStatus,
 }
 
-impl<L: LocalStore, R: RemoteStore> Session<L, R> {
-    /// Crée un coffre vide, l'enregistre localement puis le publie. Renvoie aussi sa clé de
-    /// récupération, à montrer une seule fois.
-    ///
-    /// Le distant doit être joignable : c'est le seul moyen de vérifier qu'il est vide.
+impl<L: LocalStore> Session<L> {
+    /// Crée un coffre vide et l'enregistre localement. Renvoie aussi sa clé de récupération, à
+    /// montrer une seule fois. Le coffre n'est publié nulle part.
     ///
     /// # Errors
     ///
-    /// [`SessionError::LocalVaultExists`] ou [`SessionError::RemoteVaultExists`] si un coffre
-    /// existe déjà (rien n'est alors écrit), [`SessionError::Remote`] si le distant est
-    /// injoignable, ou une erreur d'écriture locale.
+    /// [`SessionError::LocalVaultExists`] si un coffre existe déjà (rien n'est alors écrit), ou
+    /// une erreur d'écriture locale.
     pub fn create(
         local: L,
-        mut remote: R,
         password: &Secret,
         params: KdfParams,
         now: Timestamp,
     ) -> Result<(Self, RecoveryKey), SessionError> {
         ensure_no_local_vault(&local)?;
-        if remote.fetch().map_err(SessionError::Remote)?.is_some() {
-            return Err(SessionError::RemoteVaultExists);
-        }
         let (file, recovery_key) = VaultFile::create(password, params, now)?;
-        let mut session = Self::new(local, remote, file, Vault::new());
+        let mut session = Self::new(local, file, Vault::new());
         session.save_local()?;
         session.pending = true;
-        session.sync()?;
         Ok((session, recovery_key))
     }
 
@@ -114,7 +99,7 @@ impl<L: LocalStore, R: RemoteStore> Session<L, R> {
     /// ou est injoignable, une erreur de déverrouillage ou d'écriture locale.
     pub fn join(
         mut local: L,
-        mut remote: R,
+        remote: &mut impl RemoteStore,
         credentials: Credentials<'_>,
     ) -> Result<Self, SessionError> {
         ensure_no_local_vault(&local)?;
@@ -126,35 +111,30 @@ impl<L: LocalStore, R: RemoteStore> Session<L, R> {
         local
             .save_atomic(&remote_file.file)
             .map_err(SessionError::Local)?;
-        Ok(Self::new(local, remote, file, vault))
+        Ok(Self::new(local, file, vault))
     }
 
-    /// Déverrouille la copie locale puis tente une synchronisation. Si elle échoue, le coffre
-    /// reste utilisable et [`Session::status`] indique pourquoi.
+    /// Déverrouille la copie locale.
     ///
     /// # Errors
     ///
     /// [`SessionError::NoLocalVault`] s'il n'y a pas de copie locale, sinon une erreur de
-    /// lecture, de déverrouillage ou d'écriture locale.
-    pub fn open(local: L, remote: R, credentials: Credentials<'_>) -> Result<Self, SessionError> {
+    /// lecture ou de déverrouillage.
+    pub fn open(local: L, credentials: Credentials<'_>) -> Result<Self, SessionError> {
         let file = local
             .load()
             .map_err(SessionError::Local)?
             .ok_or(SessionError::NoLocalVault)?;
         let (file, vault) = unlock(&file, credentials)?;
-        let mut session = Self::new(local, remote, file, vault);
-        session.sync()?;
-        Ok(session)
+        Ok(Self::new(local, file, vault))
     }
 
-    fn new(local: L, remote: R, file: VaultFile, vault: Vault) -> Self {
+    fn new(local: L, file: VaultFile, vault: Vault) -> Self {
         Self {
             local,
-            remote,
             file,
             vault,
             pending: false,
-            status: SyncStatus::Synced,
         }
     }
 
@@ -163,18 +143,13 @@ impl<L: LocalStore, R: RemoteStore> Session<L, R> {
         &self.vault
     }
 
-    #[must_use]
-    pub fn status(&self) -> &SyncStatus {
-        &self.status
-    }
-
     /// Des modifications enregistrées localement n'ont pas encore été publiées.
     #[must_use]
     pub fn has_pending_changes(&self) -> bool {
         self.pending
     }
 
-    /// Applique `change`. Si le coffre a changé, il est enregistré localement puis publié.
+    /// Applique `change`. Si le coffre a changé, il est enregistré localement.
     ///
     /// # Errors
     ///
@@ -196,7 +171,6 @@ impl<L: LocalStore, R: RemoteStore> Session<L, R> {
             return Err(error);
         }
         self.pending = true;
-        self.sync()?;
         Ok(())
     }
 
@@ -212,7 +186,6 @@ impl<L: LocalStore, R: RemoteStore> Session<L, R> {
         self.file.change_password(password, params, now)?;
         self.save_local()?;
         self.pending = true;
-        self.sync()?;
         Ok(())
     }
 
@@ -222,17 +195,17 @@ impl<L: LocalStore, R: RemoteStore> Session<L, R> {
     ///
     /// Seulement si l'écriture locale ou le chiffrement échoue ; un distant injoignable ou
     /// inutilisable est signalé par le [`SyncStatus`] renvoyé.
-    pub fn sync(&mut self) -> Result<&SyncStatus, SessionError> {
-        self.status = self.try_sync()?;
-        if self.status == SyncStatus::Synced {
+    pub fn sync(&mut self, remote: &mut impl RemoteStore) -> Result<SyncStatus, SessionError> {
+        let status = self.try_sync(remote)?;
+        if status == SyncStatus::Synced {
             self.pending = false;
         }
-        Ok(&self.status)
+        Ok(status)
     }
 
-    fn try_sync(&mut self) -> Result<SyncStatus, SessionError> {
+    fn try_sync(&mut self, remote: &mut impl RemoteStore) -> Result<SyncStatus, SessionError> {
         for _ in 0..MAX_SYNC_ATTEMPTS {
-            let expected = match self.remote.fetch() {
+            let expected = match remote.fetch() {
                 Err(error) => return Ok(SyncStatus::Offline(error)),
                 Ok(None) => None,
                 Ok(Some(RemoteFile { file, version })) => {
@@ -251,7 +224,7 @@ impl<L: LocalStore, R: RemoteStore> Session<L, R> {
                 }
             };
             let file = self.file.encrypt(&self.vault)?;
-            match self.remote.push(&file, expected.as_ref()) {
+            match remote.push(&file, expected.as_ref()) {
                 Ok(()) => return Ok(SyncStatus::Synced),
                 Err(PushError::Conflict) => {}
                 Err(PushError::Failed(error)) => return Ok(SyncStatus::Offline(error)),
@@ -325,6 +298,13 @@ mod tests {
     }
 
     impl FakeRemote {
+        fn holding(file: &[u8]) -> Self {
+            Self {
+                file: Some(file.to_vec()),
+                ..Self::default()
+            }
+        }
+
         fn current_version(&self) -> Option<RemoteVersion> {
             self.file
                 .as_ref()
@@ -408,32 +388,28 @@ mod tests {
             .1
     }
 
-    fn stores(file: &[u8]) -> (FakeLocal, FakeRemote) {
-        let local = FakeLocal {
+    fn local_holding(file: &[u8]) -> FakeLocal {
+        FakeLocal {
             file: Some(file.to_vec()),
             ..FakeLocal::default()
-        };
-        let remote = FakeRemote {
-            file: Some(file.to_vec()),
-            ..FakeRemote::default()
-        };
-        (local, remote)
+        }
     }
 
-    fn open(local: FakeLocal, remote: FakeRemote) -> Session<FakeLocal, FakeRemote> {
-        Session::open(local, remote, Credentials::Password(&secret("maître"))).unwrap()
+    fn open(local: FakeLocal) -> Session<FakeLocal> {
+        Session::open(local, Credentials::Password(&secret("maître"))).unwrap()
+    }
+
+    /// Session ouverte sur le coffre « départ », et un distant qui en a la même version.
+    fn synced() -> (Session<FakeLocal>, FakeRemote, Vec<u8>) {
+        let (file, _) = initial_file();
+        (open(local_holding(&file)), FakeRemote::holding(&file), file)
     }
 
     #[test]
     fn open_requires_a_readable_local_vault_and_the_right_password() {
         let (file, _) = initial_file();
         let open_with = |local: FakeLocal, password: &str| {
-            Session::open(
-                local,
-                FakeRemote::default(),
-                Credentials::Password(&secret(password)),
-            )
-            .err()
+            Session::open(local, Credentials::Password(&secret(password))).err()
         };
         assert_eq!(
             open_with(FakeLocal::default(), "maître"),
@@ -448,195 +424,59 @@ mod tests {
             Some(SessionError::Local(PortError::new("disque illisible")))
         );
         assert_eq!(
-            open_with(stores(&file).0, "autre"),
+            open_with(local_holding(&file), "autre"),
             Some(SessionError::File(FileError::WrongPassword))
         );
     }
 
     #[test]
+    fn open_reads_the_local_copy_without_writing() {
+        let (file, _) = initial_file();
+        let session = open(local_holding(&file));
+        assert_eq!(titles(session.vault()), ["départ"]);
+        assert!(!session.has_pending_changes());
+        assert_eq!(session.local.saves, 0);
+    }
+
+    #[test]
     fn recovery_key_opens_the_vault() {
         let (file, recovery_key) = initial_file();
-        let (local, remote) = stores(&file);
-        let session =
-            Session::open(local, remote, Credentials::RecoveryKey(&recovery_key)).unwrap();
+        let session = Session::open(
+            local_holding(&file),
+            Credentials::RecoveryKey(&recovery_key),
+        )
+        .unwrap();
         assert_eq!(titles(session.vault()), ["départ"]);
     }
 
     #[test]
-    fn offline_open_uses_the_local_copy() {
+    fn edit_saves_locally_and_marks_the_change_as_pending() {
         let (file, _) = initial_file();
-        let (local, mut remote) = stores(&file);
-        remote.offline = true;
-        let session = open(local, remote);
-        assert_eq!(titles(session.vault()), ["départ"]);
-        assert_eq!(
-            session.status(),
-            &SyncStatus::Offline(PortError::new("hors ligne"))
-        );
-        assert!(!session.has_pending_changes());
-    }
-
-    #[test]
-    fn open_with_an_identical_remote_writes_nothing() {
-        let (file, _) = initial_file();
-        let (local, remote) = stores(&file);
-        let session = open(local, remote);
-        assert_eq!(session.status(), &SyncStatus::Synced);
-        assert_eq!(session.local.saves, 0);
-        assert_eq!(session.remote.pushes, 0);
-    }
-
-    #[test]
-    fn open_brings_remote_changes_locally() {
-        let (file, _) = initial_file();
-        let (local, mut remote) = stores(&file);
-        remote.file = Some(changed_elsewhere(&file, "distante"));
-        let session = open(local, remote);
-        assert_eq!(titles(session.vault()), ["distante", "départ"]);
-        let saved = session.local.file.as_deref().unwrap();
-        assert_eq!(titles(&decrypt(saved, "maître")), ["distante", "départ"]);
-        assert_eq!(session.remote.pushes, 0);
-    }
-
-    #[test]
-    fn open_publishes_to_an_empty_remote() {
-        let (file, _) = initial_file();
-        let (local, _) = stores(&file);
-        let session = open(local, FakeRemote::default());
-        assert_eq!(session.status(), &SyncStatus::Synced);
-        let published = session.remote.file.as_deref().unwrap();
-        assert_eq!(titles(&decrypt(published, "maître")), ["départ"]);
-    }
-
-    #[test]
-    fn edit_saves_locally_and_publishes() {
-        let (file, _) = initial_file();
-        let (local, remote) = stores(&file);
-        let mut session = open(local, remote);
+        let mut session = open(local_holding(&file));
         let id = session
             .edit(|vault| vault.add(note("nouvelle"), at(3)))
             .unwrap();
         assert!(session.vault().get(id).is_some());
-        assert_eq!(session.status(), &SyncStatus::Synced);
-        assert!(!session.has_pending_changes());
+        assert!(session.has_pending_changes());
         let saved = session.local.file.as_deref().unwrap();
-        let published = session.remote.file.as_deref().unwrap();
         assert_eq!(titles(&decrypt(saved, "maître")), ["départ", "nouvelle"]);
-        assert_eq!(
-            titles(&decrypt(published, "maître")),
-            ["départ", "nouvelle"]
-        );
     }
 
     #[test]
     fn edit_without_change_writes_nothing() {
         let (file, _) = initial_file();
-        let (local, remote) = stores(&file);
-        let mut session = open(local, remote);
+        let mut session = open(local_holding(&file));
         let unknown = Uuid::nil();
         let result = session.edit(|vault| vault.delete(unknown, at(3))).unwrap();
         assert_eq!(result, Err(VaultError::EntryNotFound(unknown)));
         assert_eq!(session.local.saves, 0);
-        assert_eq!(session.remote.pushes, 0);
-    }
-
-    #[test]
-    fn offline_changes_stay_pending_until_the_next_sync() {
-        let (file, _) = initial_file();
-        let (local, remote) = stores(&file);
-        let mut session = open(local, remote);
-        session.remote.offline = true;
-        session
-            .edit(|vault| vault.add(note("hors ligne"), at(3)))
-            .unwrap();
-        assert!(session.has_pending_changes());
-        assert_eq!(session.local.saves, 1);
-        assert!(matches!(session.status(), SyncStatus::Offline(_)));
-
-        session.remote.offline = false;
-        assert_eq!(session.sync().unwrap(), &SyncStatus::Synced);
         assert!(!session.has_pending_changes());
-        let published = session.remote.file.as_deref().unwrap();
-        assert_eq!(
-            titles(&decrypt(published, "maître")),
-            ["départ", "hors ligne"]
-        );
-    }
-
-    #[test]
-    fn concurrent_publication_is_merged_then_retried() {
-        let (file, _) = initial_file();
-        let (local, remote) = stores(&file);
-        let mut session = open(local, remote);
-        session.remote.concurrent = vec![changed_elsewhere(&file, "concurrente")];
-        session
-            .edit(|vault| vault.add(note("locale"), at(3)))
-            .unwrap();
-        assert_eq!(session.status(), &SyncStatus::Synced);
-        assert_eq!(titles(session.vault()), ["concurrente", "départ", "locale"]);
-        let published = session.remote.file.as_deref().unwrap();
-        assert_eq!(
-            titles(&decrypt(published, "maître")),
-            ["concurrente", "départ", "locale"]
-        );
-    }
-
-    #[test]
-    fn sync_gives_up_after_three_conflicts() {
-        let (file, _) = initial_file();
-        let (local, remote) = stores(&file);
-        let mut session = open(local, remote);
-        session.remote.concurrent = ["a", "b", "c"]
-            .iter()
-            .map(|title| changed_elsewhere(&file, title))
-            .collect();
-        session
-            .edit(|vault| vault.add(note("locale"), at(3)))
-            .unwrap();
-        assert_eq!(session.status(), &SyncStatus::Conflict);
-        assert!(session.has_pending_changes());
-        assert_eq!(session.remote.pushes, 0);
-    }
-
-    #[test]
-    fn refused_push_is_reported_as_offline() {
-        let (file, _) = initial_file();
-        let (local, remote) = stores(&file);
-        let mut session = open(local, remote);
-        session.remote.push_fails = true;
-        session
-            .edit(|vault| vault.add(note("locale"), at(3)))
-            .unwrap();
-        assert_eq!(
-            session.status(),
-            &SyncStatus::Offline(PortError::new("accès refusé"))
-        );
-        assert!(session.has_pending_changes());
-    }
-
-    #[test]
-    fn unusable_remote_is_never_overwritten() {
-        let (file, _) = initial_file();
-        let (foreign, _) = initial_file();
-        let (local, mut remote) = stores(&file);
-        remote.file = Some(foreign.clone());
-        let mut session = open(local, remote);
-        assert_eq!(
-            session.status(),
-            &SyncStatus::Rejected(FileError::Corrupted)
-        );
-        session
-            .edit(|vault| vault.add(note("locale"), at(3)))
-            .unwrap();
-        assert_eq!(session.remote.file, Some(foreign));
-        assert!(session.has_pending_changes());
     }
 
     #[test]
     fn failed_local_save_restores_the_vault() {
         let (file, _) = initial_file();
-        let (local, remote) = stores(&file);
-        let mut session = open(local, remote);
+        let mut session = open(local_holding(&file));
         session.local.broken = true;
         let result = session.edit(|vault| vault.add(note("perdue"), at(3)));
         assert_eq!(
@@ -644,89 +484,43 @@ mod tests {
             Some(SessionError::Local(PortError::new("disque plein")))
         );
         assert_eq!(titles(session.vault()), ["départ"]);
-        assert_eq!(session.remote.pushes, 0);
+        assert!(!session.has_pending_changes());
     }
 
     #[test]
-    fn changed_password_is_saved_and_published() {
+    fn changed_password_is_saved_and_pending() {
         let (file, _) = initial_file();
-        let (local, remote) = stores(&file);
-        let mut session = open(local, remote);
+        let mut session = open(local_holding(&file));
         session
             .change_password(&secret("nouveau"), fast_params(), at(3))
             .unwrap();
-        assert_eq!(session.status(), &SyncStatus::Synced);
+        assert!(session.has_pending_changes());
         let saved = session.local.file.as_deref().unwrap();
-        let published = session.remote.file.as_deref().unwrap();
         assert_eq!(titles(&decrypt(saved, "nouveau")), ["départ"]);
-        assert_eq!(titles(&decrypt(published, "nouveau")), ["départ"]);
     }
 
-    fn create(
-        local: FakeLocal,
-        remote: FakeRemote,
-    ) -> Result<(Session<FakeLocal, FakeRemote>, RecoveryKey), SessionError> {
-        Session::create(local, remote, &secret("maître"), fast_params(), at(0))
-    }
-
-    fn join(
-        local: FakeLocal,
-        remote: FakeRemote,
-        password: &str,
-    ) -> Result<Session<FakeLocal, FakeRemote>, SessionError> {
-        Session::join(local, remote, Credentials::Password(&secret(password)))
+    fn create(local: FakeLocal) -> Result<(Session<FakeLocal>, RecoveryKey), SessionError> {
+        Session::create(local, &secret("maître"), fast_params(), at(0))
     }
 
     #[test]
-    fn create_saves_then_publishes_an_empty_vault() {
-        let (session, recovery_key) = create(FakeLocal::default(), FakeRemote::default()).unwrap();
+    fn create_saves_an_empty_vault_waiting_for_publication() {
+        let (session, recovery_key) = create(FakeLocal::default()).unwrap();
         assert_eq!(session.vault().entries().count(), 0);
-        assert_eq!(session.status(), &SyncStatus::Synced);
-        assert!(!session.has_pending_changes());
+        assert!(session.has_pending_changes());
         let saved = session.local.file.as_deref().unwrap();
-        let published = session.remote.file.as_deref().unwrap();
         assert_eq!(decrypt(saved, "maître").id(), session.vault().id());
-        assert_eq!(decrypt(published, "maître").id(), session.vault().id());
-        let (_, recovered) = VaultFile::unlock_with_recovery_key(published, &recovery_key).unwrap();
+        let (_, recovered) = VaultFile::unlock_with_recovery_key(saved, &recovery_key).unwrap();
         assert_eq!(recovered.id(), session.vault().id());
     }
 
     #[test]
     fn create_never_replaces_an_existing_vault() {
         let (file, _) = initial_file();
-        let (local, remote) = stores(&file);
         assert_eq!(
-            create(local, FakeRemote::default()).err(),
+            create(local_holding(&file)).err(),
             Some(SessionError::LocalVaultExists)
         );
-        assert_eq!(
-            create(FakeLocal::default(), remote).err(),
-            Some(SessionError::RemoteVaultExists)
-        );
-    }
-
-    #[test]
-    fn create_requires_a_reachable_remote() {
-        let remote = FakeRemote {
-            offline: true,
-            ..FakeRemote::default()
-        };
-        assert_eq!(
-            create(FakeLocal::default(), remote).err(),
-            Some(SessionError::Remote(PortError::new("hors ligne")))
-        );
-    }
-
-    #[test]
-    fn create_keeps_the_vault_pending_if_publication_fails() {
-        let remote = FakeRemote {
-            push_fails: true,
-            ..FakeRemote::default()
-        };
-        let (session, _) = create(FakeLocal::default(), remote).unwrap();
-        assert!(session.has_pending_changes());
-        assert_eq!(session.local.saves, 1);
-        assert_eq!(session.remote.file, None);
     }
 
     #[test]
@@ -734,7 +528,6 @@ mod tests {
         assert_eq!(
             Session::create(
                 BrokenOnSave(FakeLocal::default()),
-                FakeRemote::default(),
                 &secret("maître"),
                 fast_params(),
                 at(0)
@@ -758,23 +551,179 @@ mod tests {
     }
 
     #[test]
+    fn sync_with_an_identical_remote_writes_nothing() {
+        let (mut session, mut remote, _) = synced();
+        assert_eq!(session.sync(&mut remote).unwrap(), SyncStatus::Synced);
+        assert_eq!(session.local.saves, 0);
+        assert_eq!(remote.pushes, 0);
+    }
+
+    #[test]
+    fn sync_brings_remote_changes_locally() {
+        let (mut session, mut remote, file) = synced();
+        remote.file = Some(changed_elsewhere(&file, "distante"));
+        assert_eq!(session.sync(&mut remote).unwrap(), SyncStatus::Synced);
+        assert_eq!(titles(session.vault()), ["distante", "départ"]);
+        let saved = session.local.file.as_deref().unwrap();
+        assert_eq!(titles(&decrypt(saved, "maître")), ["distante", "départ"]);
+        assert_eq!(remote.pushes, 0);
+    }
+
+    #[test]
+    fn sync_publishes_to_an_empty_remote() {
+        let (mut session, _, _) = synced();
+        let mut remote = FakeRemote::default();
+        assert_eq!(session.sync(&mut remote).unwrap(), SyncStatus::Synced);
+        let published = remote.file.as_deref().unwrap();
+        assert_eq!(titles(&decrypt(published, "maître")), ["départ"]);
+    }
+
+    #[test]
+    fn sync_publishes_pending_changes() {
+        let (mut session, mut remote, _) = synced();
+        session
+            .edit(|vault| vault.add(note("nouvelle"), at(3)))
+            .unwrap();
+        assert_eq!(session.sync(&mut remote).unwrap(), SyncStatus::Synced);
+        assert!(!session.has_pending_changes());
+        let published = remote.file.as_deref().unwrap();
+        assert_eq!(
+            titles(&decrypt(published, "maître")),
+            ["départ", "nouvelle"]
+        );
+    }
+
+    #[test]
+    fn offline_changes_stay_pending_until_the_next_sync() {
+        let (mut session, mut remote, _) = synced();
+        remote.offline = true;
+        session
+            .edit(|vault| vault.add(note("hors ligne"), at(3)))
+            .unwrap();
+        assert_eq!(
+            session.sync(&mut remote).unwrap(),
+            SyncStatus::Offline(PortError::new("hors ligne"))
+        );
+        assert!(session.has_pending_changes());
+
+        remote.offline = false;
+        assert_eq!(session.sync(&mut remote).unwrap(), SyncStatus::Synced);
+        assert!(!session.has_pending_changes());
+        let published = remote.file.as_deref().unwrap();
+        assert_eq!(
+            titles(&decrypt(published, "maître")),
+            ["départ", "hors ligne"]
+        );
+    }
+
+    #[test]
+    fn concurrent_publication_is_merged_then_retried() {
+        let (mut session, mut remote, file) = synced();
+        remote.concurrent = vec![changed_elsewhere(&file, "concurrente")];
+        session
+            .edit(|vault| vault.add(note("locale"), at(3)))
+            .unwrap();
+        assert_eq!(session.sync(&mut remote).unwrap(), SyncStatus::Synced);
+        assert_eq!(titles(session.vault()), ["concurrente", "départ", "locale"]);
+        let published = remote.file.as_deref().unwrap();
+        assert_eq!(
+            titles(&decrypt(published, "maître")),
+            ["concurrente", "départ", "locale"]
+        );
+    }
+
+    #[test]
+    fn sync_gives_up_after_three_conflicts() {
+        let (mut session, mut remote, file) = synced();
+        remote.concurrent = ["a", "b", "c"]
+            .iter()
+            .map(|title| changed_elsewhere(&file, title))
+            .collect();
+        session
+            .edit(|vault| vault.add(note("locale"), at(3)))
+            .unwrap();
+        assert_eq!(session.sync(&mut remote).unwrap(), SyncStatus::Conflict);
+        assert!(session.has_pending_changes());
+        assert_eq!(remote.pushes, 0);
+    }
+
+    #[test]
+    fn refused_push_is_reported_as_offline() {
+        let (mut session, mut remote, _) = synced();
+        remote.push_fails = true;
+        session
+            .edit(|vault| vault.add(note("locale"), at(3)))
+            .unwrap();
+        assert_eq!(
+            session.sync(&mut remote).unwrap(),
+            SyncStatus::Offline(PortError::new("accès refusé"))
+        );
+        assert!(session.has_pending_changes());
+    }
+
+    #[test]
+    fn unusable_remote_is_never_overwritten() {
+        let (mut session, _, _) = synced();
+        let (foreign, _) = initial_file();
+        let mut remote = FakeRemote::holding(&foreign);
+        session
+            .edit(|vault| vault.add(note("locale"), at(3)))
+            .unwrap();
+        assert_eq!(
+            session.sync(&mut remote).unwrap(),
+            SyncStatus::Rejected(FileError::Corrupted)
+        );
+        assert_eq!(remote.file, Some(foreign));
+        assert!(session.has_pending_changes());
+    }
+
+    #[test]
+    fn sync_reports_a_local_write_failure() {
+        let (mut session, mut remote, file) = synced();
+        remote.file = Some(changed_elsewhere(&file, "distante"));
+        session.local.broken = true;
+        assert_eq!(
+            session.sync(&mut remote).err(),
+            Some(SessionError::Local(PortError::new("disque plein")))
+        );
+    }
+
+    #[test]
+    fn changed_password_is_published() {
+        let (mut session, mut remote, _) = synced();
+        session
+            .change_password(&secret("nouveau"), fast_params(), at(3))
+            .unwrap();
+        assert_eq!(session.sync(&mut remote).unwrap(), SyncStatus::Synced);
+        let published = remote.file.as_deref().unwrap();
+        assert_eq!(titles(&decrypt(published, "nouveau")), ["départ"]);
+    }
+
+    fn join(
+        local: FakeLocal,
+        remote: &mut FakeRemote,
+        password: &str,
+    ) -> Result<Session<FakeLocal>, SessionError> {
+        Session::join(local, remote, Credentials::Password(&secret(password)))
+    }
+
+    #[test]
     fn join_copies_the_remote_vault_locally() {
         let (file, _) = initial_file();
-        let (_, remote) = stores(&file);
-        let session = join(FakeLocal::default(), remote, "maître").unwrap();
+        let mut remote = FakeRemote::holding(&file);
+        let session = join(FakeLocal::default(), &mut remote, "maître").unwrap();
         assert_eq!(titles(session.vault()), ["départ"]);
-        assert_eq!(session.status(), &SyncStatus::Synced);
+        assert!(!session.has_pending_changes());
         assert_eq!(session.local.file.as_deref(), Some(file.as_slice()));
-        assert_eq!(session.remote.pushes, 0);
+        assert_eq!(remote.pushes, 0);
     }
 
     #[test]
     fn join_with_the_recovery_key() {
         let (file, recovery_key) = initial_file();
-        let (_, remote) = stores(&file);
         let session = Session::join(
             FakeLocal::default(),
-            remote,
+            &mut FakeRemote::holding(&file),
             Credentials::RecoveryKey(&recovery_key),
         )
         .unwrap();
@@ -784,9 +733,13 @@ mod tests {
     #[test]
     fn join_never_replaces_a_local_vault() {
         let (file, _) = initial_file();
-        let (local, remote) = stores(&file);
         assert_eq!(
-            join(local, remote, "maître").err(),
+            join(
+                local_holding(&file),
+                &mut FakeRemote::holding(&file),
+                "maître"
+            )
+            .err(),
             Some(SessionError::LocalVaultExists)
         );
     }
@@ -794,15 +747,15 @@ mod tests {
     #[test]
     fn join_requires_a_remote_vault() {
         assert_eq!(
-            join(FakeLocal::default(), FakeRemote::default(), "maître").err(),
+            join(FakeLocal::default(), &mut FakeRemote::default(), "maître").err(),
             Some(SessionError::RemoteEmpty)
         );
-        let offline = FakeRemote {
+        let mut offline = FakeRemote {
             offline: true,
             ..FakeRemote::default()
         };
         assert_eq!(
-            join(FakeLocal::default(), offline, "maître").err(),
+            join(FakeLocal::default(), &mut offline, "maître").err(),
             Some(SessionError::Remote(PortError::new("hors ligne")))
         );
     }
@@ -810,9 +763,9 @@ mod tests {
     #[test]
     fn join_with_a_wrong_password_writes_nothing() {
         let (file, _) = initial_file();
-        let (_, remote) = stores(&file);
+        let local = FakeLocal::default();
         assert_eq!(
-            join(FakeLocal::default(), remote, "autre").err(),
+            join(local, &mut FakeRemote::holding(&file), "autre").err(),
             Some(SessionError::File(FileError::WrongPassword))
         );
     }
@@ -820,10 +773,14 @@ mod tests {
     #[test]
     fn join_reports_a_local_write_failure() {
         let (file, _) = initial_file();
-        let (_, remote) = stores(&file);
         let local = BrokenOnSave(FakeLocal::default());
         assert_eq!(
-            Session::join(local, remote, Credentials::Password(&secret("maître"))).err(),
+            Session::join(
+                local,
+                &mut FakeRemote::holding(&file),
+                Credentials::Password(&secret("maître"))
+            )
+            .err(),
             Some(SessionError::Local(PortError::new("disque plein")))
         );
     }
@@ -833,23 +790,19 @@ mod tests {
         let messages = [
             (
                 SessionError::NoLocalVault,
-                "aucun coffre local : utiliser init ou join",
+                "aucun coffre local : utiliser init",
             ),
             (
                 SessionError::LocalVaultExists,
                 "un coffre existe déjà à cet emplacement local",
             ),
             (
-                SessionError::RemoteVaultExists,
-                "le dépôt distant contient déjà un coffre : utiliser join",
-            ),
-            (
                 SessionError::RemoteEmpty,
-                "le dépôt distant ne contient aucun coffre : utiliser init",
+                "le distant ne contient aucun coffre",
             ),
             (
                 SessionError::Remote(PortError::new("hors ligne")),
-                "dépôt distant : hors ligne",
+                "distant : hors ligne",
             ),
             (
                 SessionError::Local(PortError::new("disque plein")),

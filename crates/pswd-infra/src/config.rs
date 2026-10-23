@@ -94,11 +94,10 @@ impl Locations {
     }
 }
 
-/// Un coffre : son dépôt distant et son dossier local.
+/// Un coffre : son dossier local.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VaultConfig {
-    pub url: String,
     pub path: PathBuf,
 }
 
@@ -106,11 +105,6 @@ impl VaultConfig {
     #[must_use]
     pub fn vault_file(&self) -> PathBuf {
         self.path.join("vault.enc")
-    }
-
-    #[must_use]
-    pub fn repo_dir(&self) -> PathBuf {
-        self.path.join("repo.git")
     }
 }
 
@@ -154,19 +148,29 @@ impl Config {
             .ok_or_else(|| ConfigError::UnknownVault(name.to_owned()))
     }
 
-    /// Ajoute un coffre ; le premier devient le coffre par défaut.
+    /// Vérifie qu'un nouveau coffre peut porter ce nom.
     ///
     /// # Errors
     ///
     /// [`ConfigError::InvalidVaultName`] si le nom ne peut pas servir de nom de dossier,
     /// [`ConfigError::VaultExists`] s'il est déjà pris.
-    pub fn add_vault(&mut self, name: &str, vault: VaultConfig) -> Result<(), ConfigError> {
+    pub fn ensure_available(&self, name: &str) -> Result<(), ConfigError> {
         if !is_valid_vault_name(name) {
             return Err(ConfigError::InvalidVaultName(name.to_owned()));
         }
         if self.vaults.contains_key(name) {
             return Err(ConfigError::VaultExists(name.to_owned()));
         }
+        Ok(())
+    }
+
+    /// Ajoute un coffre ; le premier devient le coffre par défaut.
+    ///
+    /// # Errors
+    ///
+    /// Comme [`Config::ensure_available`].
+    pub fn add_vault(&mut self, name: &str, vault: VaultConfig) -> Result<(), ConfigError> {
+        self.ensure_available(name)?;
         self.vaults.insert(name.to_owned(), vault);
         self.default_vault.get_or_insert_with(|| name.to_owned());
         Ok(())
@@ -183,7 +187,7 @@ impl Config {
     }
 }
 
-/// Le nom sert de nom de dossier et de compte dans le trousseau : ni séparateur, ni `..`, ni
+/// Le nom sert de nom de dossier : ni séparateur, ni `..`, ni
 /// nom réservé par Windows.
 fn is_valid_vault_name(name: &str) -> bool {
     !name.is_empty()
@@ -250,7 +254,6 @@ mod tests {
 
     fn vault(path: &str) -> VaultConfig {
         VaultConfig {
-            url: format!("https://example.com/{path}.git"),
             path: PathBuf::from(path),
         }
     }
@@ -412,10 +415,9 @@ mod tests {
     }
 
     #[test]
-    fn vault_folder_holds_the_file_and_the_repository() {
+    fn vault_folder_holds_the_file() {
         let vault = vault("perso");
         assert_eq!(vault.vault_file(), Path::new("perso").join("vault.enc"));
-        assert_eq!(vault.repo_dir(), Path::new("perso").join("repo.git"));
     }
 
     #[test]

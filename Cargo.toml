@@ -12,26 +12,28 @@ publish = false
 pswd-core = { path = "crates/pswd-core" }
 pswd-infra = { path = "crates/pswd-infra" }
 arboard = { version = "3", default-features = false }
-apple-native-keyring-store = { version = "1", features = ["keychain"] }
 argon2 = { version = "0.6", default-features = false, features = ["alloc", "zeroize"] }
 chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc", "zeroize"] }
+clap = { version = "4", features = ["derive"] }
 csv = "1"
 etcetera = "0.11"
 getrandom = "0.4"
-git2 = { version = "0.21", default-features = false, features = ["https"] }
 hkdf = "0.13"
-keyring-core = "1"
 proptest = "1"
 rand = { version = "0.10", default-features = false }
+rpassword = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = { version = "0.11", default-features = false }
+shlex = "2"
 tempfile = "3"
 toml = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
-windows-native-keyring-store = "1"
-zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 zeroize = "1"
+
+# Pas d'informations de débogage pour les dépendances : elles doublaient la taille de `target/`.
+[profile.dev.package."*"]
+debug = false
 
 # Argon2 est trop lent sans optimisation : les tests en debug prendraient des minutes.
 [profile.dev.package.argon2]
