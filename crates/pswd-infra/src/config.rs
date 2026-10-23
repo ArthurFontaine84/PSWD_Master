@@ -154,19 +154,29 @@ impl Config {
             .ok_or_else(|| ConfigError::UnknownVault(name.to_owned()))
     }
 
-    /// Ajoute un coffre ; le premier devient le coffre par défaut.
+    /// Vérifie qu'un nouveau coffre peut porter ce nom.
     ///
     /// # Errors
     ///
     /// [`ConfigError::InvalidVaultName`] si le nom ne peut pas servir de nom de dossier,
     /// [`ConfigError::VaultExists`] s'il est déjà pris.
-    pub fn add_vault(&mut self, name: &str, vault: VaultConfig) -> Result<(), ConfigError> {
+    pub fn ensure_available(&self, name: &str) -> Result<(), ConfigError> {
         if !is_valid_vault_name(name) {
             return Err(ConfigError::InvalidVaultName(name.to_owned()));
         }
         if self.vaults.contains_key(name) {
             return Err(ConfigError::VaultExists(name.to_owned()));
         }
+        Ok(())
+    }
+
+    /// Ajoute un coffre ; le premier devient le coffre par défaut.
+    ///
+    /// # Errors
+    ///
+    /// Comme [`Config::ensure_available`].
+    pub fn add_vault(&mut self, name: &str, vault: VaultConfig) -> Result<(), ConfigError> {
+        self.ensure_available(name)?;
         self.vaults.insert(name.to_owned(), vault);
         self.default_vault.get_or_insert_with(|| name.to_owned());
         Ok(())
