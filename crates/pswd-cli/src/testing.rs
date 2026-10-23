@@ -131,7 +131,7 @@ impl TestEnv {
     }
 
     pub fn local_vault_result(&self, device: &str, password: &str) -> Result<Vault, FileError> {
-        let vault = self.config(device).vault(Some("perso")).unwrap().1.clone();
+        let vault = self.config(device).vault("perso").unwrap().clone();
         let file = std::fs::read(vault.vault_file()).unwrap();
         VaultFile::unlock_with_password(&file, &Secret::new(password.to_owned()))
             .map(|(_, vault)| vault)
@@ -173,7 +173,7 @@ impl TestEnv {
 
     /// Session ouverte sur le coffre `perso` de l'appareil, mot de passe « maître ».
     pub fn session(&self, device: &str) -> Session<FileStore> {
-        let vault = self.config(device).vault(Some("perso")).unwrap().1.clone();
+        let vault = self.config(device).vault("perso").unwrap().clone();
         let password = Secret::new("maître".to_owned());
         Session::open(
             FileStore::new(vault.vault_file()),

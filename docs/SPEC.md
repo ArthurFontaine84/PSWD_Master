@@ -144,22 +144,29 @@ Fonction pure `merge(local: Vault, remote: Vault) -> Result<Vault, MergeError>` 
 ## 7. Stockage, sauvegarde et synchro
 
 **Emplacements** (dossiers standard de l'OS, crate `etcetera` : `AppData\Roaming` sous Windows, `~/.config` et `~/.local/share` ailleurs)
-- Config : `<config_dir>/pswd/config.toml`, contenant les coffres nommés (`[vaults.<nom>]` : chemin local) et `default_vault`, `auto_lock_minutes = 10`, `clipboard_clear_seconds = 20`.
+- Config : `<config_dir>/pswd/config.toml`, contenant les coffres nommés (`[vaults.<nom>]` : chemin local), `auto_lock_minutes = 10`, `clipboard_clear_seconds = 20`.
 - Données : un dossier par coffre, `<data_dir>/pswd/vaults/<nom>/`, contenant `vault.enc` (`FileStore`). Plusieurs coffres coexistent ; aucun ne remplace un autre.
-- Nom d'un coffre : lettres ASCII, chiffres, `-` et `_`, 64 caractères au plus, hors noms réservés de Windows (`con`, `nul`…) ; il sert de nom de dossier. Le premier coffre ajouté devient le coffre par défaut ; un nom déjà pris n'est jamais réattribué.
-- Les restes de la v1 (dossiers `repo.git/`, jetons `pswd` du trousseau) ne sont plus utilisés et peuvent être supprimés à la main ; une entrée `url` dans `config.toml` doit être retirée.
+- Nom d'un coffre : lettres ASCII, chiffres, `-` et `_`, 64 caractères au plus, hors noms réservés de Windows (`con`, `nul`…) ; il sert de nom de dossier. Un nom pris est refusé tant que le coffre existe. Il n'y a pas de coffre par défaut : chaque commande nomme son coffre.
+- Les restes de la v1 (dossiers `repo.git/`, jetons `pswd` du trousseau) ne sont plus utilisés et peuvent être supprimés à la main ; les entrées `url` et `default_vault` de `config.toml` doivent être retirées.
 
 **Sauvegarde sur disque externe** (clé USB, disque dur)
-- Chaque sauvegarde crée un dossier daté : `<destination>/pswd-sauvegardes/<AAAA-MM-JJ_HH-MM-SS>/vaults/<nom>/vault.enc`, pour chaque coffre local.
-- Copie brute des fichiers chiffrés : aucun mot de passe demandé, rien de lisible sur le disque.
-- Une sauvegarde ne touche jamais aux précédentes. Les supprimer est laissé à l'utilisateur.
+- Chaque sauvegarde crée un dossier daté (UTC) : `<destination>/pswd-sauvegardes/<AAAA-MM-JJ_HH-MM-SS>/vaults/<nom>/vault.enc`, pour chaque coffre local (ou un seul, au choix).
+- La destination doit exister : sinon, une clé débranchée donnerait une sauvegarde sur le disque de la machine (sous Linux, le point de montage est un dossier ordinaire).
+- Copie brute des fichiers chiffrés : aucun mot de passe demandé, rien de lisible sur le disque. Chaque fichier est écrit sur le disque (`sync_all`) avant la fin de la commande.
+- Une sauvegarde ne touche jamais aux précédentes (même dossier daté : refus). Une copie ratée retire la sauvegarde incomplète. Supprimer les anciennes sauvegardes est laissé à l'utilisateur.
 
 **Restauration**
-- L'utilisateur choisit une sauvegarde datée, puis un coffre.
-- Le coffre est restauré comme **nouveau coffre local** : sous son nom d'origine s'il est libre, sinon sous un nom distinct (`<nom>-sauvegarde-<AAAA-MM-JJ>`). Rien n'est jamais écrasé ni fusionné (§6).
+- L'utilisateur donne une sauvegarde datée et, au choix, un coffre ; sinon les coffres de la sauvegarde sont listés et le nom est demandé.
+- Le fichier est vérifié (structure, version) avant toute écriture ; un fichier altéré à l'intérieur du chiffrement ne se voit qu'à l'ouverture.
+- Le coffre est restauré comme **nouveau coffre local** : sous son nom d'origine s'il est libre, sinon sous un nom distinct (`<nom>-sauvegarde-<AAAA-MM-JJ>`, refusé s'il est pris à son tour). Rien n'est jamais écrasé ni fusionné (§6).
 - Il s'ouvre avec le mot de passe en vigueur à la date de la sauvegarde.
 
-**Suppression d'un coffre** : confirmation explicite, puis retrait du dossier et de la configuration. À l'étape 3, un coffre privé propose « local seulement » ou « local et serveur » ; un coffre commun se quitte (§11).
+**Suppression d'un coffre**
+- Le nom du coffre doit être retapé ; un rappel propose de faire une sauvegarde avant.
+- Seuls `vault.enc` et un éventuel `vault.enc.tmp` sont supprimés, puis le dossier s'il est vide : le chemin vient de `config.toml`, modifiable à la main, donc un dossier n'est jamais effacé en entier.
+- Fichiers d'abord, configuration ensuite : un échec de suppression ne change rien.
+- Le nom redevient libre.
+- À l'étape 3, un coffre privé propose « local seulement » ou « local et serveur » ; un coffre commun se quitte (§11).
 
 **Synchro** (algorithme de `pswd-core`, utilisé à partir de l'étape 3)
 1. `fetch`. Distant injoignable : état « hors ligne ».
@@ -180,12 +187,14 @@ Précisions :
 | Commande | Effet |
 |---|---|
 | `pswd init <nom>` | Crée un coffre local : mot de passe maître (saisi 2 fois), affichage unique de la clé de récupération. **Refuse** si le nom est déjà pris. |
-| `pswd open [nom]` | Déverrouille et lance le shell interactif. |
-| `pswd passwd [nom]` | Change le mot de passe maître (ancien requis), refait l'enveloppe 1. |
-| `pswd recover [nom]` | Clé de récupération + nouveau mot de passe, refait l'enveloppe 1. |
-| `pswd import <fichier.csv> [--vault nom]` | Importe le format CSV ci-dessous (tout le fichier est validé avant d'ajouter quoi que ce soit), puis rappelle de supprimer le fichier. |
-| `pswd export <fichier.csv> [--vault nom]` | Export en clair : double confirmation + mot de passe maître redemandé. Un fichier existant n'est jamais écrasé. |
-| *à venir* | Sauvegarde, restauration et suppression (§7). |
+| `pswd open <nom>` | Déverrouille et lance le shell interactif. |
+| `pswd passwd <nom>` | Change le mot de passe maître (ancien requis), refait l'enveloppe 1. |
+| `pswd recover <nom>` | Clé de récupération + nouveau mot de passe, refait l'enveloppe 1. |
+| `pswd import <nom> <fichier.csv>` | Importe le format CSV ci-dessous (tout le fichier est validé avant d'ajouter quoi que ce soit), puis rappelle de supprimer le fichier. |
+| `pswd export <nom> <fichier.csv>` | Export en clair : double confirmation + mot de passe maître redemandé. Un fichier existant n'est jamais écrasé. |
+| `pswd backup <destination> [--vault nom]` | Sauvegarde tous les coffres (ou un seul) dans un nouveau dossier daté (§7). |
+| `pswd restore <sauvegarde> [nom]` | Restaure un coffre d'une sauvegarde datée comme nouveau coffre local (§7). |
+| `pswd delete <nom>` | Supprime un coffre de cette machine, après avoir retapé son nom (§7). |
 
 Aucune commande n'écrase un coffre existant.
 

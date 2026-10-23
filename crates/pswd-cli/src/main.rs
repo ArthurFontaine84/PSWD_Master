@@ -2,6 +2,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 mod app;
+mod backup;
 mod cli;
 mod commands;
 mod editing;
@@ -11,6 +12,7 @@ mod shell;
 mod terminal;
 #[cfg(test)]
 mod testing;
+mod utc;
 
 use std::process::ExitCode;
 use std::time::Duration;

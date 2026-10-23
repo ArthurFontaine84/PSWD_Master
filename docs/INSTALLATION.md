@@ -52,16 +52,14 @@ Le coffre est créé et chiffré. La **clé de récupération** s'affiche alors,
     000G-40R4-0M30-E209-185G-R38E-1W81-24GK-2GAH-C5RR-34D1-P70X-3RFG
 ```
 
-Recopier cette clé sur papier et la ranger en lieu sûr, à l'écart du mot de passe. Elle permet de choisir un nouveau mot de passe maître en cas d'oubli (`pswd recover`).
+Recopier cette clé sur papier et la ranger en lieu sûr, à l'écart du mot de passe. Elle permet de choisir un nouveau mot de passe maître en cas d'oubli (`pswd recover perso`).
 
 > ⚠ Mot de passe maître **et** clé de récupération perdus = coffre perdu. Personne ne peut le déchiffrer.
-
-Le premier coffre créé devient le coffre par défaut : les commandes sans nom l'utilisent.
 
 ## 4. Utiliser le coffre
 
 ```sh
-pswd open
+pswd open perso
 ```
 
 Après le mot de passe maître, un shell s'ouvre (`help` pour l'aide) :
@@ -85,13 +83,33 @@ Une entrée se désigne par son titre (`show github`, `show "code wi-fi"`) ou pa
 Commandes ponctuelles :
 
 ```sh
-pswd passwd                      # changer le mot de passe maître
-pswd recover                     # nouveau mot de passe grâce à la clé de récupération
-pswd import fichier.csv          # importer (format : docs/SPEC.md § 8)
-pswd export sauvegarde.csv       # exporter en clair (double confirmation)
+pswd passwd perso                # changer le mot de passe maître
+pswd recover perso               # nouveau mot de passe grâce à la clé de récupération
+pswd import perso fichier.csv    # importer (format : docs/SPEC.md § 8)
+pswd export perso export.csv     # exporter en clair (double confirmation)
+pswd delete essai                # supprimer un coffre (nom à retaper)
 ```
 
-## 5. Où sont les fichiers
+## 5. Sauvegarder sur une clé USB
+
+Brancher la clé (ici `E:`), puis :
+
+```sh
+pswd backup E:\                  # tous les coffres ; --vault perso pour un seul
+```
+
+Les coffres sont copiés, toujours chiffrés, dans un nouveau dossier daté : `E:\pswd-sauvegardes\2026-10-23_14-30-00\` (heure UTC). Les sauvegardes précédentes ne sont jamais modifiées ; supprimer les plus anciennes est à faire à la main.
+
+Pour restaurer, sur cette machine ou une autre :
+
+```sh
+pswd restore E:\pswd-sauvegardes\2026-10-23_14-30-00          # liste les coffres et demande lequel
+pswd restore E:\pswd-sauvegardes\2026-10-23_14-30-00 perso    # directement
+```
+
+Le coffre est ajouté comme nouveau coffre. Si le nom est déjà pris, il devient `perso-sauvegarde-2026-10-23` : le coffre existant n'est jamais remplacé. Il s'ouvre avec le mot de passe maître en vigueur au moment de la sauvegarde.
+
+## 6. Où sont les fichiers
 
 | Élément | Windows | Linux / macOS |
 |---|---|---|
@@ -100,14 +118,14 @@ pswd export sauvegarde.csv       # exporter en clair (double confirmation)
 
 Chaque dossier de coffre contient `vault.enc`, le coffre chiffré. Dans `config.toml`, on peut régler `auto_lock_minutes` (0 = jamais) et `clipboard_clear_seconds`.
 
-**Venant de la version synchronisée par Git** : retirer les lignes `url = …` de `config.toml` (sinon : `configuration invalide`). Les dossiers `repo.git` et les jetons `pswd` du trousseau ne servent plus et peuvent être supprimés.
+**Venant d'une version précédente** : retirer les lignes `url = …` et `default_vault = …` de `config.toml` (sinon : `configuration invalide`). Les dossiers `repo.git` et les jetons `pswd` du trousseau ne servent plus et peuvent être supprimés.
 
-## 6. En cas de problème
+## 7. En cas de problème
 
 | Message | Cause et solution |
 |---|---|
 | `un coffre nommé … existe déjà` | Ce nom est pris sur cette machine : en choisir un autre. |
-| `mot de passe maître incorrect` | Réessayer, ou `pswd recover` avec la clé de récupération. |
-| ``configuration invalide : unknown field `url` `` | Configuration de la version Git : voir § 5. |
+| `mot de passe maître incorrect` | Réessayer, ou `pswd recover <nom>` avec la clé de récupération. |
+| ``configuration invalide : unknown field `url` `` (ou `default_vault`) | Configuration d'une version précédente : voir § 6. |
 
-**Supprimer un coffre de cette machine** (aucune commande pour l'instant) : supprimer son dossier et retirer sa section `[vaults.<nom>]` de `config.toml`.
+**Supprimer un coffre de cette machine** : `pswd delete <nom>`, puis retaper le nom pour confirmer. Faire d'abord une sauvegarde (§ 5) pour pouvoir le restaurer.

@@ -157,6 +157,16 @@ impl VaultFile {
         Self::unlocked(parsed, vault_key)
     }
 
+    /// Vérifie la structure du fichier sans le déchiffrer : aucun secret n'est nécessaire, mais
+    /// une altération du contenu chiffré n'est pas détectée.
+    ///
+    /// # Errors
+    ///
+    /// Une erreur de format si le fichier n'est pas un coffre lisible par cette version.
+    pub fn check_format(file: &[u8]) -> Result<(), FileError> {
+        ParsedFile::parse(file).map(|_| ())
+    }
+
     fn unlocked(parsed: ParsedFile<'_>, vault_key: Key) -> Result<(Self, Vault), FileError> {
         let vault = decrypt_payload(&vault_key, &parsed)?;
         let unlocked = Self {
@@ -380,6 +390,19 @@ mod tests {
         assert_eq!(
             VaultFile::unlock_with_recovery_key(b"", &RecoveryKey::generate().unwrap()).err(),
             Some(FileError::Malformed)
+        );
+    }
+
+    #[test]
+    fn format_is_checked_without_any_secret() {
+        let (file, _) = sample_file(&sample_vault());
+        assert_eq!(VaultFile::check_format(&file), Ok(()));
+        assert_eq!(VaultFile::check_format(b""), Err(FileError::Malformed));
+        let mut future = file.clone();
+        future[4] = 2;
+        assert_eq!(
+            VaultFile::check_format(&future),
+            Err(FileError::UnsupportedVersion(2))
         );
     }
 

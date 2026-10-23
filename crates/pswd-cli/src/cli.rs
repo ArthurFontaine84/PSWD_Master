@@ -19,32 +19,50 @@ pub enum Command {
     },
     /// Déverrouille un coffre et ouvre le shell interactif.
     Open {
-        /// Nom du coffre (par défaut : le coffre par défaut).
-        name: Option<String>,
+        /// Nom du coffre.
+        name: String,
     },
     /// Change le mot de passe maître (l'ancien est demandé).
     Passwd {
-        /// Nom du coffre (par défaut : le coffre par défaut).
-        name: Option<String>,
+        /// Nom du coffre.
+        name: String,
     },
     /// Choisit un nouveau mot de passe maître grâce à la clé de récupération.
     Recover {
-        /// Nom du coffre (par défaut : le coffre par défaut).
-        name: Option<String>,
+        /// Nom du coffre.
+        name: String,
     },
     /// Importe des entrées depuis un fichier CSV (tout ou rien).
     Import {
+        /// Nom du coffre.
+        name: String,
         file: PathBuf,
-        /// Nom du coffre (par défaut : le coffre par défaut).
-        #[arg(long)]
-        vault: Option<String>,
     },
     /// Exporte un coffre en clair dans un nouveau fichier CSV.
     Export {
+        /// Nom du coffre.
+        name: String,
         file: PathBuf,
-        /// Nom du coffre (par défaut : le coffre par défaut).
+    },
+    /// Supprime un coffre de cette machine (le nom est à retaper).
+    Delete {
+        /// Nom du coffre.
+        name: String,
+    },
+    /// Sauvegarde les coffres dans un nouveau dossier daté (clé USB, disque externe).
+    Backup {
+        /// Dossier de destination, par exemple la racine de la clé USB.
+        destination: PathBuf,
+        /// Seulement ce coffre (par défaut : tous).
         #[arg(long)]
         vault: Option<String>,
+    },
+    /// Restaure un coffre d'une sauvegarde, comme nouveau coffre local.
+    Restore {
+        /// Dossier daté de la sauvegarde.
+        backup: PathBuf,
+        /// Coffre à restaurer (par défaut : demandé).
+        name: Option<String>,
     },
 }
 
@@ -65,42 +83,74 @@ mod tests {
                 name: "perso".to_owned()
             }
         );
-        assert_eq!(parse(&["open"]).unwrap(), Command::Open { name: None });
         assert_eq!(
-            parse(&["passwd", "perso"]).unwrap(),
-            Command::Passwd {
-                name: Some("perso".to_owned())
+            parse(&["open", "perso"]).unwrap(),
+            Command::Open {
+                name: "perso".to_owned()
             }
         );
         assert_eq!(
-            parse(&["recover"]).unwrap(),
-            Command::Recover { name: None }
+            parse(&["passwd", "perso"]).unwrap(),
+            Command::Passwd {
+                name: "perso".to_owned()
+            }
         );
         assert_eq!(
-            parse(&["import", "a.csv", "--vault", "perso"]).unwrap(),
+            parse(&["recover", "perso"]).unwrap(),
+            Command::Recover {
+                name: "perso".to_owned()
+            }
+        );
+        assert_eq!(
+            parse(&["import", "perso", "a.csv"]).unwrap(),
             Command::Import {
-                file: PathBuf::from("a.csv"),
+                name: "perso".to_owned(),
+                file: PathBuf::from("a.csv")
+            }
+        );
+        assert_eq!(
+            parse(&["export", "perso", "b.csv"]).unwrap(),
+            Command::Export {
+                name: "perso".to_owned(),
+                file: PathBuf::from("b.csv")
+            }
+        );
+        assert_eq!(
+            parse(&["delete", "perso"]).unwrap(),
+            Command::Delete {
+                name: "perso".to_owned()
+            }
+        );
+        assert_eq!(
+            parse(&["backup", "E:/", "--vault", "perso"]).unwrap(),
+            Command::Backup {
+                destination: PathBuf::from("E:/"),
                 vault: Some("perso".to_owned())
             }
         );
         assert_eq!(
-            parse(&["export", "b.csv"]).unwrap(),
-            Command::Export {
-                file: PathBuf::from("b.csv"),
-                vault: None
-            }
-        );
-        assert_eq!(
-            parse(&["open", "perso"]).unwrap(),
-            Command::Open {
-                name: Some("perso".to_owned())
+            parse(&["restore", "E:/pswd-sauvegardes/2026-10-23_14-30-00"]).unwrap(),
+            Command::Restore {
+                backup: PathBuf::from("E:/pswd-sauvegardes/2026-10-23_14-30-00"),
+                name: None
             }
         );
     }
 
     #[test]
     fn missing_or_unknown_arguments_are_rejected() {
-        for args in [&[][..], &["init"], &["import"], &["sync"], &["inconnue"]] {
+        for args in [
+            &[][..],
+            &["init"],
+            &["open"],
+            &["passwd"],
+            &["recover"],
+            &["import", "a.csv"],
+            &["export", "perso"],
+            &["backup"],
+            &["restore"],
+            &["sync"],
+        ] {
             assert!(parse(args).is_err(), "{args:?}");
         }
     }

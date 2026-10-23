@@ -27,16 +27,9 @@ pub(crate) struct Unlocked {
 }
 
 impl<T: Terminal, C: SecureClipboard> App<T, C> {
-    /// Déverrouille le coffre `name` (ou celui par défaut).
-    pub(crate) fn unlock(
-        &mut self,
-        name: Option<&str>,
-        unlock: Unlock,
-    ) -> Result<Unlocked, CliError> {
+    pub(crate) fn unlock(&mut self, name: &str, unlock: Unlock) -> Result<Unlocked, CliError> {
         let config = ConfigFile::new(self.locations.config_file()).load()?;
-        let (name, vault) = config.vault(name)?;
-        let (name, vault) = (name.to_owned(), vault.clone());
-        let local = FileStore::new(vault.vault_file());
+        let local = FileStore::new(config.vault(name)?.vault_file());
         let session = match unlock {
             Unlock::Password => {
                 let password = self.terminal.prompt_secret("Mot de passe maître : ")?;
@@ -49,18 +42,14 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
             }
         };
         Ok(Unlocked {
-            name,
+            name: name.to_owned(),
             session,
             config,
         })
     }
 
     /// `passwd` (ancien mot de passe) et `recover` (clé de récupération).
-    pub(crate) fn change_password(
-        &mut self,
-        name: Option<&str>,
-        unlock: Unlock,
-    ) -> Result<(), CliError> {
+    pub(crate) fn change_password(&mut self, name: &str, unlock: Unlock) -> Result<(), CliError> {
         let mut unlocked = self.unlock(name, unlock)?;
         let password = self.new_master_password()?;
         unlocked
@@ -74,7 +63,7 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
     }
 
     /// Tout le fichier est validé avant d'ajouter quoi que ce soit.
-    pub(crate) fn import(&mut self, file: &Path, name: Option<&str>) -> Result<(), CliError> {
+    pub(crate) fn import(&mut self, name: &str, file: &Path) -> Result<(), CliError> {
         let data = fs::read(file).map_err(|error| file_error("lecture", file, &error))?;
         let contents = import_csv(&data).map_err(CliError::Csv)?;
         let mut unlocked = self.unlock(name, Unlock::Password)?;
@@ -97,7 +86,7 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
     }
 
     /// Double confirmation, puis mot de passe. Un fichier existant n'est jamais écrasé.
-    pub(crate) fn export(&mut self, file: &Path, name: Option<&str>) -> Result<(), CliError> {
+    pub(crate) fn export(&mut self, name: &str, file: &Path) -> Result<(), CliError> {
         let questions = [
             "L'export contient tous vos mots de passe en clair. Continuer ? (o/N) : ".to_owned(),
             format!("Écrire le fichier {} ? (o/N) : ", file.display()),
@@ -174,7 +163,10 @@ mod tests {
     fn passwd_replaces_the_master_password() {
         let env = TestEnv::with_vault();
         let mut app = env.app("a", &["maître", "nouveau", "nouveau"]);
-        app.run(Command::Passwd { name: None }).unwrap();
+        app.run(Command::Passwd {
+            name: "perso".to_owned(),
+        })
+        .unwrap();
         assert_eq!(
             app.terminal.output(),
             "Mot de passe maître de « perso » changé."
@@ -188,7 +180,9 @@ mod tests {
         let env = TestEnv::with_vault();
         let mut app = env.app("a", &["autre"]);
         assert_eq!(
-            app.run(Command::Passwd { name: None }),
+            app.run(Command::Passwd {
+                name: "perso".to_owned()
+            }),
             Err(CliError::Session(SessionError::File(
                 FileError::WrongPassword
             )))
@@ -200,7 +194,9 @@ mod tests {
         let env = TestEnv::with_vault();
         let mut app = env.app("a", &["maître", "nouveau", "nouvau"]);
         assert_eq!(
-            app.run(Command::Passwd { name: None }),
+            app.run(Command::Passwd {
+                name: "perso".to_owned()
+            }),
             Err(CliError::PasswordMismatch)
         );
         env.local_vault("a", "maître");
@@ -211,7 +207,10 @@ mod tests {
         let (env, recovery_key) = TestEnv::with_vault_and_recovery_key();
         let typed = recovery_key.to_lowercase().replace('-', " ");
         let mut app = env.app("a", &[&typed, "retrouvé", "retrouvé"]);
-        app.run(Command::Recover { name: None }).unwrap();
+        app.run(Command::Recover {
+            name: "perso".to_owned(),
+        })
+        .unwrap();
         env.local_vault("a", "retrouvé");
     }
 
@@ -220,13 +219,17 @@ mod tests {
         let env = TestEnv::with_vault();
         let mut app = env.app("a", &["pas une clé"]);
         assert_eq!(
-            app.run(Command::Recover { name: None }),
+            app.run(Command::Recover {
+                name: "perso".to_owned()
+            }),
             Err(CliError::RecoveryKey(RecoveryKeyError::InvalidCharacter))
         );
         let other_key = RecoveryKey::generate().unwrap().encode();
         let mut app = env.app("a", &[other_key.expose()]);
         assert_eq!(
-            app.run(Command::Recover { name: None }),
+            app.run(Command::Recover {
+                name: "perso".to_owned()
+            }),
             Err(CliError::Session(SessionError::File(
                 FileError::WrongRecoveryKey
             )))
@@ -240,8 +243,8 @@ mod tests {
         fs::write(&file, CSV).unwrap();
         let mut app = env.app("a", &["maître"]);
         app.run(Command::Import {
+            name: "perso".to_owned(),
             file: file.clone(),
-            vault: None,
         })
         .unwrap();
         let output = app.terminal.output();
@@ -261,8 +264,8 @@ mod tests {
         let mut app = env.app("a", &["maître"]);
         assert_eq!(
             app.run(Command::Import {
+                name: "perso".to_owned(),
                 file: file.clone(),
-                vault: None
             }),
             Err(CliError::Csv(pswd_core::CsvError::InvalidLine {
                 line: 4,
@@ -272,8 +275,8 @@ mod tests {
         let missing = env.dir.path().join("absent.csv");
         let error = app
             .run(Command::Import {
+                name: "perso".to_owned(),
                 file: missing,
-                vault: None,
             })
             .unwrap_err();
         assert!(error.to_string().starts_with("lecture de "), "{error}");
@@ -288,13 +291,16 @@ mod tests {
         let env = TestEnv::with_vault();
         let file = env.dir.path().join("import.csv");
         fs::write(&file, CSV).unwrap();
-        let vault = env.config("a").vault(Some("perso")).unwrap().1.clone();
+        let vault = env.config("a").vault("perso").unwrap().clone();
         let mut temporary = vault.vault_file().into_os_string();
         temporary.push(".tmp");
         fs::create_dir(&temporary).unwrap();
         let mut app = env.app("a", &["maître"]);
         assert!(matches!(
-            app.run(Command::Import { file, vault: None }),
+            app.run(Command::Import {
+                name: "perso".to_owned(),
+                file
+            }),
             Err(CliError::Session(SessionError::Local(_)))
         ));
         assert_eq!(
@@ -312,8 +318,8 @@ mod tests {
         let file = env.dir.path().join("export.csv");
         let mut app = env.app("a", &["o", "oui", "maître"]);
         app.run(Command::Export {
+            name: "perso".to_owned(),
             file: file.clone(),
-            vault: Some("perso".to_owned()),
         })
         .unwrap();
         assert!(
@@ -332,8 +338,8 @@ mod tests {
         for answers in [&[""][..], &["o", "n"]] {
             let mut app = env.app("a", answers);
             app.run(Command::Export {
+                name: "perso".to_owned(),
                 file: file.clone(),
-                vault: None,
             })
             .unwrap();
             assert_eq!(app.terminal.output(), "Export annulé.");
@@ -349,8 +355,8 @@ mod tests {
         let mut app = env.app("a", &["o", "o", "maître"]);
         let error = app
             .run(Command::Export {
+                name: "perso".to_owned(),
                 file: file.clone(),
-                vault: None,
             })
             .unwrap_err();
         assert!(error.to_string().starts_with("écriture de "), "{error}");

@@ -3,7 +3,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecureClipboard};
-use pswd_core::{CsvError, GeneratorError, RecoveryKeyError, SessionError, Timestamp, VaultError};
+use pswd_core::{
+    CsvError, FileError, GeneratorError, RecoveryKeyError, SessionError, Timestamp, VaultError,
+};
 use pswd_infra::{ConfigError, Locations};
 
 use crate::cli::Command;
@@ -30,6 +32,10 @@ pub enum CliError {
     RecoveryKey(RecoveryKeyError),
     Csv(CsvError),
     File(String),
+    NothingToBackUp,
+    EmptyBackup,
+    NotInBackup(String),
+    InvalidBackup(FileError),
 }
 
 impl fmt::Display for CliError {
@@ -59,6 +65,12 @@ impl fmt::Display for CliError {
             Self::RecoveryKey(error) => error.fmt(f),
             Self::Csv(error) => error.fmt(f),
             Self::File(message) => f.write_str(message),
+            Self::NothingToBackUp => f.write_str("aucun coffre à sauvegarder : utiliser init"),
+            Self::EmptyBackup => f.write_str("cette sauvegarde ne contient aucun coffre"),
+            Self::NotInBackup(name) => {
+                write!(f, "cette sauvegarde ne contient pas de coffre « {name} »")
+            }
+            Self::InvalidBackup(error) => write!(f, "fichier de sauvegarde inutilisable : {error}"),
         }
     }
 }
@@ -107,11 +119,14 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
     pub fn run(&mut self, command: Command) -> Result<(), CliError> {
         match command {
             Command::Init { name } => self.init(&name),
-            Command::Open { name } => self.open(name.as_deref()),
-            Command::Passwd { name } => self.change_password(name.as_deref(), Unlock::Password),
-            Command::Recover { name } => self.change_password(name.as_deref(), Unlock::RecoveryKey),
-            Command::Import { file, vault } => self.import(&file, vault.as_deref()),
-            Command::Export { file, vault } => self.export(&file, vault.as_deref()),
+            Command::Open { name } => self.open(&name),
+            Command::Passwd { name } => self.change_password(&name, Unlock::Password),
+            Command::Recover { name } => self.change_password(&name, Unlock::RecoveryKey),
+            Command::Import { name, file } => self.import(&name, &file),
+            Command::Export { name, file } => self.export(&name, &file),
+            Command::Delete { name } => self.delete(&name),
+            Command::Backup { destination, vault } => self.backup(&destination, vault.as_deref()),
+            Command::Restore { backup, name } => self.restore(&backup, name.as_deref()),
         }
     }
 }
@@ -140,8 +155,8 @@ mod tests {
     fn errors_have_explicit_messages() {
         let messages = [
             (
-                CliError::Config(ConfigError::NoDefaultVault),
-                "aucun coffre par défaut : préciser son nom ou utiliser init",
+                CliError::Config(ConfigError::UnknownVault("perso".to_owned())),
+                "coffre inconnu : perso",
             ),
             (
                 CliError::Session(SessionError::NoLocalVault),
@@ -204,6 +219,22 @@ mod tests {
             (
                 CliError::File("écriture de a.csv impossible : disque plein".to_owned()),
                 "écriture de a.csv impossible : disque plein",
+            ),
+            (
+                CliError::NothingToBackUp,
+                "aucun coffre à sauvegarder : utiliser init",
+            ),
+            (
+                CliError::EmptyBackup,
+                "cette sauvegarde ne contient aucun coffre",
+            ),
+            (
+                CliError::NotInBackup("perso".to_owned()),
+                "cette sauvegarde ne contient pas de coffre « perso »",
+            ),
+            (
+                CliError::InvalidBackup(FileError::Malformed),
+                "fichier de sauvegarde inutilisable : fichier de coffre mal formé",
             ),
         ];
         for (error, message) in messages {

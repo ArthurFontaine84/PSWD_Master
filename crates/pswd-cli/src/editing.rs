@@ -3,13 +3,12 @@
 use std::collections::BTreeMap;
 
 use pswd_core::ports::SecureClipboard;
-use pswd_core::{
-    EntryContent, EntryKind, PasswordOptions, Secret, Tags, Timestamp, Vault, generate_password,
-};
+use pswd_core::{EntryContent, EntryKind, PasswordOptions, Secret, Tags, Vault, generate_password};
 
 use crate::app::{App, CliError};
 use crate::shell::{VaultSession, find_entry, system_rng};
 use crate::terminal::Terminal;
+use crate::utc::format_timestamp;
 
 /// Réponse qui efface un champ lors d'un `edit`.
 const CLEAR: &str = "-";
@@ -214,41 +213,9 @@ fn generated_password() -> Result<Secret, CliError> {
     generate_password(PasswordOptions::default(), &mut system_rng()?).map_err(CliError::Generator)
 }
 
-/// Date et heure UTC, à la minute : `2026-10-22 14:05 UTC`.
-pub fn format_timestamp(timestamp: Timestamp) -> String {
-    let seconds = timestamp.as_millis().div_euclid(1_000);
-    let (year, month, day) = civil_from_days(seconds.div_euclid(86_400));
-    let seconds_of_day = seconds.rem_euclid(86_400);
-    format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
-        seconds_of_day / 3_600,
-        seconds_of_day % 3_600 / 60
-    )
-}
-
-/// Jour du calendrier grégorien à partir du nombre de jours depuis le 1ᵉʳ janvier 1970
-/// (algorithme de Howard Hinnant).
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
-    let days = days + 719_468;
-    let era = days.div_euclid(146_097);
-    let day_of_era = days - era * 146_097;
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let shifted_month = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * shifted_month + 2) / 5 + 1;
-    let month = if shifted_month < 10 {
-        shifted_month + 3
-    } else {
-        shifted_month - 9
-    };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-    (year, month, day)
-}
-
 #[cfg(test)]
 mod tests {
-    use pswd_core::Entry;
+    use pswd_core::{Entry, Timestamp};
 
     use crate::cli::Command;
     use crate::testing::TestEnv;
@@ -261,7 +228,10 @@ mod tests {
         let mut answers = vec!["maître"];
         answers.extend_from_slice(commands);
         let mut app = env.app("a", &answers);
-        app.run(Command::Open { name: None }).unwrap();
+        app.run(Command::Open {
+            name: "perso".to_owned(),
+        })
+        .unwrap();
         let output = app.terminal.output();
         let after_open = output.split_once("Tapez help pour l'aide.").unwrap().1;
         after_open.trim_start_matches('\n').to_owned()
@@ -489,20 +459,5 @@ mod tests {
         assert_eq!(output, "dev (1)\nperso (1)");
         session_output(&env, &["rm github", "o"]);
         assert_eq!(session_output(&env, &["tags"]), "Aucun tag.");
-    }
-
-    #[test]
-    fn timestamps_are_formatted_in_utc() {
-        let cases = [
-            (0, "1970-01-01 00:00 UTC"),
-            (951_782_400_000, "2000-02-29 00:00 UTC"),
-            (1_735_689_599_999, "2024-12-31 23:59 UTC"),
-            (1_767_225_600_000, "2026-01-01 00:00 UTC"),
-            (4_102_444_800_000, "2100-01-01 00:00 UTC"),
-            (-1, "1969-12-31 23:59 UTC"),
-        ];
-        for (millis, expected) in cases {
-            assert_eq!(format_timestamp(Timestamp::from_millis(millis)), expected);
-        }
     }
 }

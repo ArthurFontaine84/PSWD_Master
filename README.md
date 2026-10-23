@@ -14,7 +14,7 @@ pswd open perso                 # déverrouille et ouvre le shell interactif
 
 Dans le shell : `list`, `search`, `show`, `copy`, `add`, `edit`, `rm`, `history`, `tags`, `gen`, `lock`, `quit`.
 
-Autres commandes : `pswd passwd`, `pswd recover`, `pswd import <fichier.csv>`, `pswd export <fichier.csv>`.
+Autres commandes : `pswd passwd <nom>`, `pswd recover <nom>`, `pswd import <nom> <fichier.csv>`, `pswd export <nom> <fichier.csv>`, `pswd backup <dossier>` (clé USB), `pswd restore <sauvegarde>`, `pswd delete <nom>`.
 
 ## ⚠ À savoir
 

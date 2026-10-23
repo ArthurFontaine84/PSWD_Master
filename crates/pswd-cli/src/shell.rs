@@ -108,7 +108,7 @@ enum ShellCommand {
 }
 
 impl<T: Terminal, C: SecureClipboard> App<T, C> {
-    pub(crate) fn open(&mut self, name: Option<&str>) -> Result<(), CliError> {
+    pub(crate) fn open(&mut self, name: &str) -> Result<(), CliError> {
         let Unlocked {
             name,
             session,
@@ -351,7 +351,9 @@ mod tests {
     use super::*;
 
     fn open() -> Command {
-        Command::Open { name: None }
+        Command::Open {
+            name: "perso".to_owned(),
+        }
     }
 
     fn github() -> EntryContent {
@@ -434,16 +436,11 @@ mod tests {
         let mut app = env.app("a", &[]);
         assert_eq!(
             app.run(Command::Open {
-                name: Some("travail".to_owned())
+                name: "travail".to_owned()
             }),
             Err(CliError::Config(ConfigError::UnknownVault(
                 "travail".to_owned()
             )))
-        );
-        let mut app = env.app("b", &[]);
-        assert_eq!(
-            app.run(open()),
-            Err(CliError::Config(ConfigError::NoDefaultVault))
         );
     }
 

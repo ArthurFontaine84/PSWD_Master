@@ -22,7 +22,6 @@ pub enum ConfigError {
     NoHomeDirectory,
     File(PortError),
     Invalid(String),
-    NoDefaultVault,
     UnknownVault(String),
     VaultExists(String),
     InvalidVaultName(String),
@@ -34,9 +33,6 @@ impl fmt::Display for ConfigError {
             Self::NoHomeDirectory => f.write_str("dossier personnel introuvable"),
             Self::File(error) => write!(f, "configuration : {error}"),
             Self::Invalid(message) => write!(f, "configuration invalide : {message}"),
-            Self::NoDefaultVault => {
-                f.write_str("aucun coffre par défaut : préciser son nom ou utiliser init")
-            }
             Self::UnknownVault(name) => write!(f, "coffre inconnu : {name}"),
             Self::VaultExists(name) => write!(f, "un coffre nommé {name} existe déjà"),
             Self::InvalidVaultName(name) => write!(
@@ -111,7 +107,6 @@ impl VaultConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    pub default_vault: Option<String>,
     pub auto_lock_minutes: u32,
     pub clipboard_clear_seconds: u32,
     pub vaults: BTreeMap<String, VaultConfig>,
@@ -120,7 +115,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            default_vault: None,
             auto_lock_minutes: 10,
             clipboard_clear_seconds: 20,
             vaults: BTreeMap::new(),
@@ -129,22 +123,12 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Le coffre `name`, ou le coffre par défaut.
-    ///
     /// # Errors
     ///
-    /// [`ConfigError::NoDefaultVault`] sans nom ni coffre par défaut,
     /// [`ConfigError::UnknownVault`] si le coffre n'existe pas.
-    pub fn vault<'a>(
-        &'a self,
-        name: Option<&'a str>,
-    ) -> Result<(&'a str, &'a VaultConfig), ConfigError> {
-        let name = name
-            .or(self.default_vault.as_deref())
-            .ok_or(ConfigError::NoDefaultVault)?;
+    pub fn vault(&self, name: &str) -> Result<&VaultConfig, ConfigError> {
         self.vaults
-            .get_key_value(name)
-            .map(|(name, vault)| (name.as_str(), vault))
+            .get(name)
             .ok_or_else(|| ConfigError::UnknownVault(name.to_owned()))
     }
 
@@ -164,7 +148,7 @@ impl Config {
         Ok(())
     }
 
-    /// Ajoute un coffre ; le premier devient le coffre par défaut.
+    /// Ajoute un coffre.
     ///
     /// # Errors
     ///
@@ -172,8 +156,18 @@ impl Config {
     pub fn add_vault(&mut self, name: &str, vault: VaultConfig) -> Result<(), ConfigError> {
         self.ensure_available(name)?;
         self.vaults.insert(name.to_owned(), vault);
-        self.default_vault.get_or_insert_with(|| name.to_owned());
         Ok(())
+    }
+
+    /// Retire un coffre : son nom redevient libre.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::UnknownVault`] si le coffre n'existe pas.
+    pub fn remove_vault(&mut self, name: &str) -> Result<VaultConfig, ConfigError> {
+        self.vaults
+            .remove(name)
+            .ok_or_else(|| ConfigError::UnknownVault(name.to_owned()))
     }
 
     #[must_use]
@@ -310,7 +304,7 @@ mod tests {
         file.save(&config).unwrap();
         assert_eq!(file.load().unwrap(), config);
         let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
-        assert!(text.starts_with("default_vault = \"perso\"\n"), "{text}");
+        assert!(text.starts_with("auto_lock_minutes = 10\n"), "{text}");
         assert!(text.contains("[vaults.travail]"), "{text}");
     }
 
@@ -349,30 +343,20 @@ mod tests {
     }
 
     #[test]
-    fn vault_is_found_by_name_or_by_default() {
+    fn vault_is_found_by_name() {
         let mut config = Config::default();
         config.add_vault("perso", vault("perso")).unwrap();
         config.add_vault("travail", vault("travail")).unwrap();
-        assert_eq!(config.default_vault.as_deref(), Some("perso"));
-        assert_eq!(config.vault(None), Ok(("perso", &vault("perso"))));
-        assert_eq!(
-            config.vault(Some("travail")),
-            Ok(("travail", &vault("travail")))
-        );
+        assert_eq!(config.vault("perso"), Ok(&vault("perso")));
+        assert_eq!(config.vault("travail"), Ok(&vault("travail")));
     }
 
     #[test]
     fn missing_vault_is_reported() {
-        let mut config = Config::default();
-        assert_eq!(config.vault(None), Err(ConfigError::NoDefaultVault));
+        let config = Config::default();
         assert_eq!(
-            config.vault(Some("perso")),
+            config.vault("perso"),
             Err(ConfigError::UnknownVault("perso".to_owned()))
-        );
-        config.default_vault = Some("disparu".to_owned());
-        assert_eq!(
-            config.vault(None),
-            Err(ConfigError::UnknownVault("disparu".to_owned()))
         );
     }
 
@@ -384,7 +368,26 @@ mod tests {
             config.add_vault("perso", vault("b")),
             Err(ConfigError::VaultExists("perso".to_owned()))
         );
-        assert_eq!(config.vault(Some("perso")), Ok(("perso", &vault("a"))));
+        assert_eq!(config.vault("perso"), Ok(&vault("a")));
+    }
+
+    #[test]
+    fn removed_vault_frees_its_name() {
+        let mut config = Config::default();
+        config.add_vault("perso", vault("perso")).unwrap();
+        config.add_vault("travail", vault("travail")).unwrap();
+        assert_eq!(config.remove_vault("perso"), Ok(vault("perso")));
+        assert_eq!(config.vaults.keys().collect::<Vec<_>>(), ["travail"]);
+        assert_eq!(config.add_vault("perso", vault("autre")), Ok(()));
+    }
+
+    #[test]
+    fn removing_an_unknown_vault_is_an_error() {
+        let mut config = Config::default();
+        assert_eq!(
+            config.remove_vault("perso"),
+            Err(ConfigError::UnknownVault("perso".to_owned()))
+        );
     }
 
     #[test]
@@ -434,10 +437,6 @@ mod tests {
             (
                 ConfigError::Invalid("ligne 2".to_owned()),
                 "configuration invalide : ligne 2",
-            ),
-            (
-                ConfigError::NoDefaultVault,
-                "aucun coffre par défaut : préciser son nom ou utiliser init",
             ),
             (
                 ConfigError::UnknownVault("perso".to_owned()),

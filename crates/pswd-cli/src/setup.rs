@@ -1,4 +1,4 @@
-//! Création d'un coffre (`init`).
+//! Création (`init`) et suppression (`delete`) d'un coffre.
 
 use std::fs;
 use std::path::Path;
@@ -27,13 +27,40 @@ impl<T: Terminal, C> App<T, C> {
 
         let recovery_key = recovery_key.encode();
         self.terminal.print(&format!("Coffre « {name} » créé."));
-        self.terminal.print(
+        self.terminal.print(&format!(
             "\nClé de récupération : notez-la et rangez-la en lieu sûr, elle ne sera plus \
              affichée.\nElle permet de choisir un nouveau mot de passe maître en cas d'oubli \
-             (pswd recover).\n",
-        );
+             (pswd recover {name}).\n"
+        ));
         self.terminal
             .print(&format!("    {}\n", recovery_key.expose()));
+        Ok(())
+    }
+
+    /// Le nom doit être retapé. Les fichiers sont supprimés avant la configuration : un échec
+    /// ne change rien.
+    pub(crate) fn delete(&mut self, name: &str) -> Result<(), CliError> {
+        let mut config_file = ConfigFile::new(self.locations.config_file());
+        let mut config = config_file.load()?;
+        let vault = config.vault(name)?.clone();
+        self.terminal.print(&format!(
+            "⚠ Le coffre « {name} » et toutes ses entrées seront supprimés de cette machine, \
+             sans retour possible. Une sauvegarde (pswd backup) permet de le restaurer plus tard."
+        ));
+        let answer = self
+            .terminal
+            .prompt("Pour confirmer, retapez le nom du coffre : ")?;
+        if answer.trim() != name {
+            self.terminal.print("Suppression annulée.");
+            return Ok(());
+        }
+        FileStore::new(vault.vault_file()).remove()?;
+        // Le dossier n'est retiré que s'il est vide : un fichier inconnu n'est jamais effacé.
+        let _ = fs::remove_dir(&vault.path);
+        config.remove_vault(name)?;
+        config_file.save(&config)?;
+
+        self.terminal.print(&format!("Coffre « {name} » supprimé."));
         Ok(())
     }
 
@@ -54,7 +81,7 @@ impl<T: Terminal, C> App<T, C> {
 
 /// Supprime le dossier du coffre si `create` échoue alors qu'il n'existait pas avant : un
 /// essai raté ne laisse rien derrière lui.
-fn removing_on_failure<R>(
+pub(crate) fn removing_on_failure<R>(
     dir: &Path,
     create: impl FnOnce() -> Result<R, CliError>,
 ) -> Result<R, CliError> {
@@ -91,9 +118,11 @@ mod tests {
         app.run(init("perso")).unwrap();
 
         let config = env.config("a");
-        let (name, vault) = config.vault(None).unwrap();
-        assert_eq!(name, "perso");
-        assert_eq!(vault.path, env.vault_dir("a", "perso"));
+        assert_eq!(config.vaults.keys().collect::<Vec<_>>(), ["perso"]);
+        assert_eq!(
+            config.vault("perso").unwrap().path,
+            env.vault_dir("a", "perso")
+        );
         assert!(env.local_vault("a", "maître").entries().next().is_none());
 
         let output = app.terminal.output();
@@ -166,5 +195,92 @@ mod tests {
             "{error}"
         );
         assert!(!env.vault_dir("a", "perso").exists());
+    }
+
+    fn delete(name: &str) -> Command {
+        Command::Delete {
+            name: name.to_owned(),
+        }
+    }
+
+    /// Coffres `perso` et `travail` sur l'appareil `a`.
+    fn env_with_two_vaults() -> TestEnv {
+        let env = TestEnv::with_vault();
+        env.app("a", &["autre", "autre"])
+            .run(init("travail"))
+            .unwrap();
+        env
+    }
+
+    #[test]
+    fn delete_removes_the_vault_once_its_name_is_retyped() {
+        let env = env_with_two_vaults();
+        let mut app = env.app("a", &[" perso "]);
+        app.run(delete("perso")).unwrap();
+        let output = app.terminal.output();
+        assert!(output.starts_with("⚠ Le coffre « perso »"), "{output}");
+        assert!(output.ends_with("Coffre « perso » supprimé."), "{output}");
+        assert!(!env.vault_dir("a", "perso").exists());
+        let config = env.config("a");
+        assert_eq!(config.vaults.keys().collect::<Vec<_>>(), ["travail"]);
+    }
+
+    #[test]
+    fn delete_is_cancelled_unless_the_exact_name_is_retyped() {
+        let env = TestEnv::with_vault();
+        for answer in ["", "o", "Perso"] {
+            let mut app = env.app("a", &[answer]);
+            app.run(delete("perso")).unwrap();
+            assert!(
+                app.terminal.output().ends_with("Suppression annulée."),
+                "{answer:?}"
+            );
+            env.local_vault("a", "maître");
+        }
+    }
+
+    #[test]
+    fn deleting_an_unknown_vault_asks_nothing() {
+        let env = TestEnv::with_vault();
+        let mut app = env.app("a", &[]);
+        assert_eq!(
+            app.run(delete("travail")),
+            Err(CliError::Config(ConfigError::UnknownVault(
+                "travail".to_owned()
+            )))
+        );
+    }
+
+    #[test]
+    fn deleted_name_can_be_used_again() {
+        let env = TestEnv::with_vault();
+        env.app("a", &["perso"]).run(delete("perso")).unwrap();
+        let config = env.config("a");
+        assert!(config.vaults.is_empty());
+
+        env.app("a", &["neuf", "neuf"]).run(init("perso")).unwrap();
+        env.local_vault("a", "neuf");
+    }
+
+    #[test]
+    fn unknown_files_in_the_vault_folder_are_kept() {
+        let env = TestEnv::with_vault();
+        let folder = env.vault_dir("a", "perso");
+        fs::write(folder.join("notes.txt"), b"a garder").unwrap();
+        env.app("a", &["perso"]).run(delete("perso")).unwrap();
+        assert_eq!(fs::read(folder.join("notes.txt")).unwrap(), b"a garder");
+        assert!(!folder.join("vault.enc").exists());
+    }
+
+    #[test]
+    fn failed_removal_changes_nothing() {
+        let env = TestEnv::with_vault();
+        let file = env.vault_dir("a", "perso").join("vault.enc");
+        fs::remove_file(&file).unwrap();
+        fs::create_dir(&file).unwrap();
+        let mut app = env.app("a", &["perso"]);
+        let error = app.run(delete("perso")).unwrap_err();
+        assert!(error.to_string().starts_with("suppression de "), "{error}");
+        assert!(env.config("a").vault("perso").is_ok());
     }
 }
