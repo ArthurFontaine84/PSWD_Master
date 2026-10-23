@@ -14,7 +14,7 @@ struct State<S> {
 type Shared<S> = Arc<(Mutex<State<S>>, Condvar)>;
 
 /// Garde une session et la détruit après `timeout` sans utilisation.
-pub(crate) struct IdleLock<S> {
+pub struct IdleLock<S> {
     shared: Shared<S>,
     timeout: Duration,
 }
@@ -46,6 +46,7 @@ impl<S: Send + 'static> IdleLock<S> {
     }
 
     /// Arrête la surveillance et rend la session, si elle n'a pas été verrouillée.
+    #[must_use]
     pub fn close(self) -> Option<S> {
         let mut state = lock(&self.shared.0);
         state.closed = true;

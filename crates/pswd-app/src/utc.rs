@@ -3,6 +3,7 @@
 use pswd_core::Timestamp;
 
 /// Date et heure UTC, à la minute : `2026-10-22 14:05 UTC`.
+#[must_use]
 pub fn format_timestamp(timestamp: Timestamp) -> String {
     let time = UtcTime::new(timestamp);
     format!(
@@ -12,6 +13,7 @@ pub fn format_timestamp(timestamp: Timestamp) -> String {
 }
 
 /// Nom du dossier d'une sauvegarde, à la seconde : `2026-10-22_14-05-09`.
+#[must_use]
 pub fn backup_stamp(timestamp: Timestamp) -> String {
     let time = UtcTime::new(timestamp);
     format!(

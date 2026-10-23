@@ -769,13 +769,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pswd-app"
+version = "0.1.0"
+dependencies = [
+ "pswd-core",
+ "pswd-infra",
+ "rand",
+ "tempfile",
+]
+
+[[package]]
 name = "pswd-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "pswd-app",
  "pswd-core",
  "pswd-infra",
- "rand",
  "rpassword",
  "shlex",
  "tempfile",

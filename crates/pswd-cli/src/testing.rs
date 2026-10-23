@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use pswd_app::Vaults;
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecureClipboard};
 use pswd_core::{Credentials, FileError, Secret, Session, Timestamp, Vault, VaultFile};
@@ -149,7 +150,7 @@ impl TestEnv {
                 output: Vec::new(),
             },
             clipboard: self.clipboard.clone(),
-            locations: self.locations(device),
+            vaults: Vaults::new(self.locations(device)),
             kdf: KdfParams::new(8 * 1024, 1, 1).unwrap(),
             clock: || Timestamp::from_millis(1_000),
             auto_lock: None,

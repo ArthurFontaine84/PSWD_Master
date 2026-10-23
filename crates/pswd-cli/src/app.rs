@@ -1,52 +1,40 @@
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use pswd_app::{AppError, Vaults};
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecureClipboard};
-use pswd_core::{
-    CsvError, FileError, GeneratorError, RecoveryKeyError, SessionError, Timestamp, VaultError,
-};
-use pswd_infra::{ConfigError, Locations};
+use pswd_core::{RecoveryKeyError, SessionError, Timestamp, VaultError};
+use pswd_infra::ConfigError;
 
 use crate::cli::Command;
 use crate::commands::Unlock;
 use crate::terminal::Terminal;
 
+/// Erreurs propres au terminal ; les autres viennent des cas d'usage ([`AppError`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliError {
-    Config(ConfigError),
-    Session(SessionError),
-    Port(PortError),
+    App(AppError),
     Input(String),
     InputClosed,
-    EmptyPassword,
     PasswordMismatch,
     EntryNotFound(String),
     AmbiguousEntry(Vec<String>),
     NoPassword(String),
-    Generator(GeneratorError),
-    RandomUnavailable,
     EmptyTitle,
     UnknownKind(String),
     Vault(VaultError),
     RecoveryKey(RecoveryKeyError),
-    Csv(CsvError),
-    File(String),
-    NothingToBackUp,
     EmptyBackup,
     NotInBackup(String),
-    InvalidBackup(FileError),
 }
 
 impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Config(error) => error.fmt(f),
-            Self::Session(error) => error.fmt(f),
-            Self::Port(error) => error.fmt(f),
+            Self::App(error) => error.fmt(f),
             Self::Input(message) => write!(f, "saisie impossible : {message}"),
             Self::InputClosed => f.write_str("saisie interrompue"),
-            Self::EmptyPassword => f.write_str("le mot de passe maître ne peut pas être vide"),
             Self::PasswordMismatch => f.write_str("les deux saisies ne correspondent pas"),
             Self::EntryNotFound(reference) => {
                 write!(f, "aucune entrée ne correspond à « {reference} »")
@@ -57,47 +45,41 @@ impl fmt::Display for CliError {
                 candidates.join(", ")
             ),
             Self::NoPassword(title) => write!(f, "l'entrée « {title} » n'a pas de mot de passe"),
-            Self::Generator(error) => error.fmt(f),
-            Self::RandomUnavailable => f.write_str("générateur aléatoire du système indisponible"),
             Self::EmptyTitle => f.write_str("le titre ne peut pas être vide"),
             Self::UnknownKind(kind) => write!(f, "type inconnu « {kind} » : login ou note"),
             Self::Vault(error) => error.fmt(f),
             Self::RecoveryKey(error) => error.fmt(f),
-            Self::Csv(error) => error.fmt(f),
-            Self::File(message) => f.write_str(message),
-            Self::NothingToBackUp => f.write_str("aucun coffre à sauvegarder : utiliser init"),
             Self::EmptyBackup => f.write_str("cette sauvegarde ne contient aucun coffre"),
             Self::NotInBackup(name) => {
                 write!(f, "cette sauvegarde ne contient pas de coffre « {name} »")
             }
-            Self::InvalidBackup(error) => write!(f, "fichier de sauvegarde inutilisable : {error}"),
         }
     }
 }
 
 impl std::error::Error for CliError {}
 
+impl From<AppError> for CliError {
+    fn from(error: AppError) -> Self {
+        Self::App(error)
+    }
+}
+
 impl From<ConfigError> for CliError {
     fn from(error: ConfigError) -> Self {
-        Self::Config(error)
+        Self::App(error.into())
     }
 }
 
 impl From<SessionError> for CliError {
     fn from(error: SessionError) -> Self {
-        Self::Session(error)
+        Self::App(error.into())
     }
 }
 
 impl From<PortError> for CliError {
     fn from(error: PortError) -> Self {
-        Self::Port(error)
-    }
-}
-
-impl From<GeneratorError> for CliError {
-    fn from(error: GeneratorError) -> Self {
-        Self::Generator(error)
+        Self::App(error.into())
     }
 }
 
@@ -105,7 +87,7 @@ impl From<GeneratorError> for CliError {
 pub struct App<T, C> {
     pub terminal: T,
     pub clipboard: C,
-    pub locations: Locations,
+    pub vaults: Vaults,
     pub kdf: KdfParams,
     pub clock: fn() -> Timestamp,
     /// Délai de verrouillage imposé ; `None` : celui de la configuration.
@@ -155,26 +137,26 @@ mod tests {
     fn errors_have_explicit_messages() {
         let messages = [
             (
-                CliError::Config(ConfigError::UnknownVault("perso".to_owned())),
+                CliError::from(ConfigError::UnknownVault("perso".to_owned())),
                 "coffre inconnu : perso",
             ),
             (
-                CliError::Session(SessionError::NoLocalVault),
+                CliError::from(SessionError::NoLocalVault),
                 "aucun coffre local : utiliser init",
             ),
             (
-                CliError::Port(PortError::new("presse-papiers indisponible")),
+                CliError::from(PortError::new("presse-papiers indisponible")),
                 "presse-papiers indisponible",
+            ),
+            (
+                CliError::from(AppError::EmptyPassword),
+                "le mot de passe maître ne peut pas être vide",
             ),
             (
                 CliError::Input("console absente".to_owned()),
                 "saisie impossible : console absente",
             ),
             (CliError::InputClosed, "saisie interrompue"),
-            (
-                CliError::EmptyPassword,
-                "le mot de passe maître ne peut pas être vide",
-            ),
             (
                 CliError::PasswordMismatch,
                 "les deux saisies ne correspondent pas",
@@ -191,14 +173,6 @@ mod tests {
                 CliError::NoPassword("Wi-Fi".to_owned()),
                 "l'entrée « Wi-Fi » n'a pas de mot de passe",
             ),
-            (
-                CliError::Generator(GeneratorError::InvalidLength),
-                "la longueur doit être comprise entre 8 et 128",
-            ),
-            (
-                CliError::RandomUnavailable,
-                "générateur aléatoire du système indisponible",
-            ),
             (CliError::EmptyTitle, "le titre ne peut pas être vide"),
             (
                 CliError::UnknownKind("carte".to_owned()),
@@ -213,28 +187,12 @@ mod tests {
                 "la clé de récupération doit compter 52 caractères",
             ),
             (
-                CliError::Csv(CsvError::InvalidHeader),
-                "en-tête CSV attendu : title,kind,username,password,urls,notes,tags",
-            ),
-            (
-                CliError::File("écriture de a.csv impossible : disque plein".to_owned()),
-                "écriture de a.csv impossible : disque plein",
-            ),
-            (
-                CliError::NothingToBackUp,
-                "aucun coffre à sauvegarder : utiliser init",
-            ),
-            (
                 CliError::EmptyBackup,
                 "cette sauvegarde ne contient aucun coffre",
             ),
             (
                 CliError::NotInBackup("perso".to_owned()),
                 "cette sauvegarde ne contient pas de coffre « perso »",
-            ),
-            (
-                CliError::InvalidBackup(FileError::Malformed),
-                "fichier de sauvegarde inutilisable : fichier de coffre mal formé",
             ),
         ];
         for (error, message) in messages {

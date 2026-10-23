@@ -1,15 +1,14 @@
 //! Commandes ponctuelles sur un coffre existant : `passwd`, `recover`, `import`, `export`.
 
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::Path;
 
+use pswd_app::{AppError, VaultSession, add_entries, export_to_file};
 use pswd_core::ports::SecureClipboard;
-use pswd_core::{Credentials, RecoveryKey, Session, Vault, export_csv, import_csv};
-use pswd_infra::{Config, ConfigFile, FileStore};
+use pswd_core::{Credentials, RecoveryKey, import_csv};
+use pswd_infra::Config;
 
 use crate::app::{App, CliError};
-use crate::shell::VaultSession;
 use crate::terminal::Terminal;
 
 /// Ce que l'utilisateur fournit pour déverrouiller le coffre.
@@ -28,17 +27,17 @@ pub(crate) struct Unlocked {
 
 impl<T: Terminal, C: SecureClipboard> App<T, C> {
     pub(crate) fn unlock(&mut self, name: &str, unlock: Unlock) -> Result<Unlocked, CliError> {
-        let config = ConfigFile::new(self.locations.config_file()).load()?;
-        let local = FileStore::new(config.vault(name)?.vault_file());
+        let config = self.vaults.config()?;
+        config.vault(name)?;
         let session = match unlock {
             Unlock::Password => {
                 let password = self.terminal.prompt_secret("Mot de passe maître : ")?;
-                Session::open(local, Credentials::Password(&password))?
+                self.vaults.open(name, Credentials::Password(&password))?
             }
             Unlock::RecoveryKey => {
                 let text = self.terminal.prompt_secret("Clé de récupération : ")?;
                 let key = RecoveryKey::parse(text.expose()).map_err(CliError::RecoveryKey)?;
-                Session::open(local, Credentials::RecoveryKey(&key))?
+                self.vaults.open(name, Credentials::RecoveryKey(&key))?
             }
         };
         Ok(Unlocked {
@@ -64,16 +63,15 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
 
     /// Tout le fichier est validé avant d'ajouter quoi que ce soit.
     pub(crate) fn import(&mut self, name: &str, file: &Path) -> Result<(), CliError> {
-        let data = fs::read(file).map_err(|error| file_error("lecture", file, &error))?;
-        let contents = import_csv(&data).map_err(CliError::Csv)?;
-        let mut unlocked = self.unlock(name, Unlock::Password)?;
-        let count = contents.len();
-        let now = (self.clock)();
-        unlocked.session.edit(|vault| {
-            for content in contents {
-                vault.add(content, now);
-            }
+        let data = fs::read(file).map_err(|error| {
+            AppError::File(format!(
+                "lecture de {} impossible : {error}",
+                file.display()
+            ))
         })?;
+        let contents = import_csv(&data).map_err(AppError::Csv)?;
+        let mut unlocked = self.unlock(name, Unlock::Password)?;
+        let count = add_entries(&mut unlocked.session, contents, (self.clock)())?;
         self.terminal.print(&format!(
             "{count} entrée(s) importée(s) dans « {} ».",
             unlocked.name
@@ -98,16 +96,9 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
             }
         }
         let unlocked = self.unlock(name, Unlock::Password)?;
-        let csv = export_csv(unlocked.session.vault()).map_err(CliError::Csv)?;
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(file)
-            .and_then(|mut output| output.write_all(&csv))
-            .map_err(|error| file_error("écriture", file, &error))?;
+        let count = export_to_file(unlocked.session.vault(), file)?;
         self.terminal.print(&format!(
-            "{} entrée(s) exportée(s) vers {}.",
-            live_count(unlocked.session.vault()),
+            "{count} entrée(s) exportée(s) vers {}.",
             file.display()
         ));
         Ok(())
@@ -119,21 +110,11 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
     }
 }
 
-pub(crate) fn live_count(vault: &Vault) -> usize {
-    vault.entries().filter(|entry| !entry.is_deleted()).count()
-}
-
-fn file_error(action: &str, file: &Path, error: &std::io::Error) -> CliError {
-    CliError::File(format!(
-        "{action} de {} impossible : {error}",
-        file.display()
-    ))
-}
-
 #[cfg(test)]
 mod tests {
+    use pswd_app::AppError;
     use pswd_core::{
-        EntryContent, EntryKind, FileError, RecoveryKeyError, SessionError, Timestamp,
+        EntryContent, EntryKind, FileError, RecoveryKeyError, SessionError, Timestamp, Vault,
     };
 
     use crate::cli::Command;
@@ -183,9 +164,9 @@ mod tests {
             app.run(Command::Passwd {
                 name: "perso".to_owned()
             }),
-            Err(CliError::Session(SessionError::File(
+            Err(CliError::App(AppError::Session(SessionError::File(
                 FileError::WrongPassword
-            )))
+            ))))
         );
     }
 
@@ -230,9 +211,9 @@ mod tests {
             app.run(Command::Recover {
                 name: "perso".to_owned()
             }),
-            Err(CliError::Session(SessionError::File(
+            Err(CliError::App(AppError::Session(SessionError::File(
                 FileError::WrongRecoveryKey
-            )))
+            ))))
         );
     }
 
@@ -267,10 +248,12 @@ mod tests {
                 name: "perso".to_owned(),
                 file: file.clone(),
             }),
-            Err(CliError::Csv(pswd_core::CsvError::InvalidLine {
-                line: 4,
-                problem: pswd_core::LineProblem::FieldCount
-            }))
+            Err(CliError::App(AppError::Csv(
+                pswd_core::CsvError::InvalidLine {
+                    line: 4,
+                    problem: pswd_core::LineProblem::FieldCount
+                }
+            )))
         );
         let missing = env.dir.path().join("absent.csv");
         let error = app
@@ -301,7 +284,7 @@ mod tests {
                 name: "perso".to_owned(),
                 file
             }),
-            Err(CliError::Session(SessionError::Local(_)))
+            Err(CliError::App(AppError::Session(SessionError::Local(_))))
         ));
         assert_eq!(
             titles(&env.local_vault("a", "maître")),

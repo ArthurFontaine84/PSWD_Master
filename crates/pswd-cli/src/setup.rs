@@ -1,29 +1,18 @@
 //! Création (`init`) et suppression (`delete`) d'un coffre.
 
-use std::fs;
-use std::path::Path;
-
-use pswd_core::{Secret, Session};
-use pswd_infra::{ConfigFile, FileStore, VaultConfig};
+use pswd_app::AppError;
+use pswd_core::Secret;
 
 use crate::app::{App, CliError};
 use crate::terminal::Terminal;
 
 impl<T: Terminal, C> App<T, C> {
     pub(crate) fn init(&mut self, name: &str) -> Result<(), CliError> {
-        let mut config_file = ConfigFile::new(self.locations.config_file());
-        let mut config = config_file.load()?;
-        config.ensure_available(name)?;
+        self.vaults.check_new_name(name)?;
         let password = self.new_master_password()?;
-        let vault = VaultConfig {
-            path: self.locations.vault_dir(name),
-        };
-        let (_, recovery_key) = removing_on_failure(&vault.path, || {
-            let local = FileStore::new(vault.vault_file());
-            Ok(Session::create(local, &password, self.kdf, (self.clock)())?)
-        })?;
-        config.add_vault(name, vault)?;
-        config_file.save(&config)?;
+        let (_, recovery_key) = self
+            .vaults
+            .create(name, &password, self.kdf, (self.clock)())?;
 
         let recovery_key = recovery_key.encode();
         self.terminal.print(&format!("Coffre « {name} » créé."));
@@ -37,12 +26,9 @@ impl<T: Terminal, C> App<T, C> {
         Ok(())
     }
 
-    /// Le nom doit être retapé. Les fichiers sont supprimés avant la configuration : un échec
-    /// ne change rien.
+    /// Le nom doit être retapé.
     pub(crate) fn delete(&mut self, name: &str) -> Result<(), CliError> {
-        let mut config_file = ConfigFile::new(self.locations.config_file());
-        let mut config = config_file.load()?;
-        let vault = config.vault(name)?.clone();
+        self.vaults.config()?.vault(name)?;
         self.terminal.print(&format!(
             "⚠ Le coffre « {name} » et toutes ses entrées seront supprimés de cette machine, \
              sans retour possible. Une sauvegarde (pswd backup) permet de le restaurer plus tard."
@@ -54,12 +40,7 @@ impl<T: Terminal, C> App<T, C> {
             self.terminal.print("Suppression annulée.");
             return Ok(());
         }
-        FileStore::new(vault.vault_file()).remove()?;
-        // Le dossier n'est retiré que s'il est vide : un fichier inconnu n'est jamais effacé.
-        let _ = fs::remove_dir(&vault.path);
-        config.remove_vault(name)?;
-        config_file.save(&config)?;
-
+        self.vaults.delete(name)?;
         self.terminal.print(&format!("Coffre « {name} » supprimé."));
         Ok(())
     }
@@ -69,7 +50,7 @@ impl<T: Terminal, C> App<T, C> {
             .terminal
             .prompt_secret("Nouveau mot de passe maître : ")?;
         if password.expose().is_empty() {
-            return Err(CliError::EmptyPassword);
+            return Err(AppError::EmptyPassword.into());
         }
         let confirmation = self.terminal.prompt_secret("Confirmation : ")?;
         if confirmation != password {
@@ -79,23 +60,10 @@ impl<T: Terminal, C> App<T, C> {
     }
 }
 
-/// Supprime le dossier du coffre si `create` échoue alors qu'il n'existait pas avant : un
-/// essai raté ne laisse rien derrière lui.
-pub(crate) fn removing_on_failure<R>(
-    dir: &Path,
-    create: impl FnOnce() -> Result<R, CliError>,
-) -> Result<R, CliError> {
-    let existed = dir.exists();
-    let result = create();
-    if result.is_err() && !existed {
-        // Au mieux : l'erreur de création est plus utile que celle du nettoyage.
-        let _ = fs::remove_dir_all(dir);
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use pswd_core::SessionError;
     use pswd_core::ports::PortError;
     use pswd_infra::ConfigError;
@@ -141,14 +109,14 @@ mod tests {
         let mut app = env.app("a", &[]);
         assert_eq!(
             app.run(init("perso")),
-            Err(CliError::Config(ConfigError::VaultExists(
+            Err(CliError::App(AppError::Config(ConfigError::VaultExists(
                 "perso".to_owned()
-            )))
+            ))))
         );
         assert_eq!(
             app.run(init("../ailleurs")),
-            Err(CliError::Config(ConfigError::InvalidVaultName(
-                "../ailleurs".to_owned()
+            Err(CliError::App(AppError::Config(
+                ConfigError::InvalidVaultName("../ailleurs".to_owned())
             )))
         );
     }
@@ -159,7 +127,10 @@ mod tests {
         let mut app = env.app("a", &["maître", "maitre"]);
         assert_eq!(app.run(init("perso")), Err(CliError::PasswordMismatch));
         let mut app = env.app("a", &[""]);
-        assert_eq!(app.run(init("perso")), Err(CliError::EmptyPassword));
+        assert_eq!(
+            app.run(init("perso")),
+            Err(CliError::App(AppError::EmptyPassword))
+        );
         assert!(env.config("a").vaults.is_empty());
         assert!(!env.vault_dir("a", "perso").exists());
     }
@@ -173,7 +144,9 @@ mod tests {
         let mut app = env.app("a", &["maître", "maître"]);
         assert_eq!(
             app.run(init("perso")),
-            Err(CliError::Session(SessionError::LocalVaultExists))
+            Err(CliError::App(AppError::Session(
+                SessionError::LocalVaultExists
+            )))
         );
         assert_eq!(fs::read(existing.join("vault.enc")).unwrap(), b"ancien");
         assert!(env.config("a").vaults.is_empty());
@@ -190,7 +163,7 @@ mod tests {
         assert!(
             matches!(
                 error,
-                CliError::Session(SessionError::Local(PortError { .. }))
+                CliError::App(AppError::Session(SessionError::Local(PortError { .. })))
             ),
             "{error}"
         );
@@ -245,9 +218,9 @@ mod tests {
         let mut app = env.app("a", &[]);
         assert_eq!(
             app.run(delete("travail")),
-            Err(CliError::Config(ConfigError::UnknownVault(
+            Err(CliError::App(AppError::Config(ConfigError::UnknownVault(
                 "travail".to_owned()
-            )))
+            ))))
         );
     }
 

@@ -10,7 +10,7 @@ Le coffre est chiffré de bout en bout : le serveur ne voit jamais de données e
 
 ## 2. Feuille de route
 
-**Étape 1 — local complet** (en cours)
+**Étape 1 — local complet** (terminée)
 - CLI `pswd` sous Windows et Linux.
 - Plusieurs coffres indépendants et entièrement locaux (un mot de passe maître et une clé par coffre).
 - Entrées `Login` et `Note`, tags, historique des versions.
@@ -19,7 +19,14 @@ Le coffre est chiffré de bout en bout : le serveur ne voit jamais de données e
 - Import / export CSV (format §8).
 - Sauvegarde et restauration sur disque externe, suppression d'un coffre (§7).
 
-**Étape 2 — interfaces graphiques** : application de bureau et application mobile (Android / iOS). Chaque appareil est autonome et entièrement local, avec les fonctionnalités de la CLI. Technologie choisie au début de l'étape.
+**Étape 2 — interfaces graphiques** (en cours, §12) : application **PSWD Master** pour le bureau (Windows, Linux, macOS) et le mobile (Android, iOS), un seul projet Tauri 2. Chaque appareil est autonome et entièrement local, avec les fonctionnalités de la CLI. Sous-étapes, chacune validée et commitée :
+1. `pswd-app` : cas d'usage extraits de la CLI, comportement inchangé.
+2. Squelette Tauri (`pswd-gui`) : CSP et capacités, premier build Android et iOS ; liste des coffres, création, déverrouillage, verrouillage.
+3. Consultation : liste, recherche, tags, détail, copier, afficher.
+4. Modification : ajout, édition, suppression, historique, générateur.
+5. Gestion des coffres : mot de passe maître, récupération, CSV, sauvegarde et restauration, suppression, réglages.
+6. Mobile : presse-papiers sensible, verrouillage en arrière-plan, écran masqué, fichiers `.pswd`, ergonomie tactile.
+7. Installateurs, documentation, mutants.
 
 **Étape 3 — serveur maison** (§11) : `pswd-server`, comptes, coffres privés et communs, synchro entre appareils.
 
@@ -40,10 +47,12 @@ Workspace Cargo, architecture hexagonale :
 | Crate | Contenu | Contraintes |
 |---|---|---|
 | `pswd-core` | Modèles, fusion, format de fichier, crypto, générateur, CSV, ports (traits) | Aucune E/S, aucun appel OS, `#![forbid(unsafe_code)]`, compilable pour mobile |
-| `pswd-infra` | Adaptateurs desktop : `LocalStore` fichier, `SecureClipboard`, config | |
-| `pswd-cli` | Binaire `pswd`, shell interactif, verrouillage automatique | `#![forbid(unsafe_code)]` |
+| `pswd-infra` | Adaptateurs : `LocalStore` fichier, `SecureClipboard` du bureau, config, sauvegardes | `arboard` réservé au bureau : la crate compile pour le mobile |
+| `pswd-app` | Cas d'usage partagés : créer, ouvrir, supprimer, sauvegarder, restaurer (à partir d'octets), importer, exporter, lister les coffres. Ne pose aucune question à l'utilisateur. | `#![forbid(unsafe_code)]` |
+| `pswd-cli` | Binaire `pswd` : questions et affichage dans le terminal, shell interactif, verrouillage automatique | `#![forbid(unsafe_code)]` |
+| `pswd-gui` | Application Tauri 2 **PSWD Master** : backend Rust (commandes, session, verrouillage) et interface Svelte 5 + TypeScript (§12) | `#![forbid(unsafe_code)]` visé (à confirmer avec le code généré par Tauri) |
 
-Futur : les interfaces graphiques (étape 2) au-dessus de `pswd-core` ; `pswd-server` et l'adaptateur `RemoteStore` HTTP (étape 3).
+Futur : `pswd-server` et l'adaptateur `RemoteStore` HTTP (étape 3).
 
 **Ports (définis dans `pswd-core`)**
 - `LocalStore` : `load() -> Option<bytes>` (`None` : pas de coffre local), `save_atomic(bytes)` (fichier temporaire + renommage).
@@ -55,7 +64,7 @@ Futur : les interfaces graphiques (étape 2) au-dessus de `pswd-core` ; `pswd-se
 
 La crypto n'est **pas** un port : déterministe, sans E/S, identique partout.
 
-**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `etcetera` (dossiers standard, licence MIT/Apache, contrairement à `directories` qui tire du MPL-2.0), `toml`, `clap`, `arboard` (presse-papiers).
+**Dépendances prévues** : `argon2`, `chacha20poly1305`, `hkdf` + `sha2`, `getrandom`, `rand` (générateur de mots de passe), `zeroize` / `secrecy`, `serde` + `serde_json`, `csv`, `uuid`, `etcetera` (dossiers standard, licence MIT/Apache, contrairement à `directories` qui tire du MPL-2.0), `toml`, `clap`, `arboard` (presse-papiers du bureau), `tauri` 2. Côté interface (npm) : `svelte` 5, `vite`, `typescript`, `vitest`, Testing Library, `svelte-check`, ESLint ; aucune bibliothèque de composants graphiques.
 
 ## 4. Modèle de données
 
@@ -235,6 +244,12 @@ Code Wi-Fi,note,,,,"Box: ABCD-1234",maison
   - Android 13+ (futur) : `EXTRA_IS_SENSITIVE` ; iOS (futur) : `localOnly` + `expirationDate`.
 - Mot de passe maître **et** clé de récupération perdus = coffre perdu. Aucune récupération possible côté serveur.
 - **Anciennes copies** : après `passwd` / `recover`, l'ancien mot de passe ouvre toujours les copies antérieures du fichier (sauvegardes externes, versions conservées par le serveur). Si le mot de passe a fuité, une rotation de clé est nécessaire (hors feuille de route).
+- **Interface graphique** : JavaScript ne peut pas effacer une chaîne de la mémoire ; le moins de secrets possible traversent vers la webview (§12).
+  - Jamais côté JS : clé du coffre, coffre déchiffré, mot de passe copié (la copie est faite par Rust).
+  - Côté JS seulement sur demande explicite : mot de passe affiché (« Afficher », masqué à nouveau après 30 s), mot de passe généré affiché.
+  - **Limite acceptée** : les saisies (mot de passe maître, mot de passe d'une entrée) passent par un champ HTML, donc par JS ; le champ est vidé dès l'envoi.
+  - CSP stricte (ressources de l'application seulement, ni script externe, ni `eval`, ni réseau) ; capacités Tauri limitées à nos commandes (aucun accès fichiers ou shell depuis JS) ; un lien d'entrée s'ouvre dans le navigateur du système, jamais dans la webview.
+- **Mobile** : écran masqué dans les applications récentes et captures interdites (Android `FLAG_SECURE`, écran neutre sur iOS).
 
 ## 10. Points d'extension à préparer
 
@@ -244,7 +259,9 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 |---|---|
 | `keyfile` | `kind = 3` réservé dans les enveloppes ; dérivation de la clé d'enveloppe isolée pour accepter un second secret ; port de déverrouillage générique. |
 | `key-rotation` | Les enveloppes sont indépendantes du payload ; `pswd passwd --rotate-key` génèrera une nouvelle clé de coffre et rechiffrera. |
-| `mobile` | `pswd-core` sans E/S ; port `SecureClipboard` à réimplémenter. |
+| `mobile` | `pswd-core` sans E/S ; port `SecureClipboard` réimplémenté par un plugin Tauri maison (Kotlin, Swift) à l'étape 2. |
+| `biometrie` | Déverrouillage par empreinte ou Face ID : une clé rangée dans le stockage sécurisé du téléphone (Keystore, Keychain), à concevoir à part. |
+| `anglais` | Textes de l'interface regroupés par langue (`textes/fr.ts`) ; `en.ts` devra avoir les mêmes clés (vérifié par TypeScript). Les erreurs Rust remontent à l'interface sous forme de codes, traduits côté interface. |
 | `remote-transport` | `RemoteStore` abstrait : l'adaptateur HTTP de `pswd-server` s'y branche (étape 3). |
 | `partage-par-membre` | Plusieurs enveloppes possibles par coffre (une par membre, à clé publique) : ajouter ou retirer un membre sans partager de mot de passe. Les coffres communs de l'étape 3 utilisent un mot de passe partagé. |
 | `dossier-reseau` | Synchro par un partage réseau (NAS) sans `pswd-server`. Un dossier ne sait pas refuser une écriture concurrente : il faudrait un fichier par appareil, fusionnés à la lecture. |
@@ -287,3 +304,35 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 - À la déconnexion, l'application demande s'il faut garder une copie locale des coffres (oui par défaut). Sans copie, les données restent sur le serveur.
 - En se connectant à un **autre** serveur, les coffres détachés ne sont pas publiés automatiquement ; les coffres « à publier » le sont.
 - Le serveur distingue « coffre inconnu » de « coffre retiré » : `RemoteStore` reçoit pour cela une erreur dédiée.
+
+## 12. Interfaces graphiques (étape 2)
+
+**Application** : PSWD Master, identifiant `fr.arthurfontaine.pswdmaster` (modifiable jusqu'à une première publication sur un store). Un seul projet Tauri 2 pour Windows, Linux, macOS, Android et iOS ; une seule branche `dev-interface`. Les différences entre plateformes se règlent dans le code (`#[cfg(target_os = …)]`), jamais par des branches.
+
+**Fonctionnement** : la webview du système affiche l'interface (HTML/CSS/JS intégrés à l'exécutable, aucun serveur web, aucun réseau). L'interface appelle les commandes Tauri du backend Rust, qui s'appuie sur `pswd-app`. La session (clé du coffre, coffre déchiffré) reste en Rust. Règles de sécurité : §9.
+
+**Interface** : Svelte 5 + TypeScript, construite par Vite ; CSS maison avec des variables (couleurs, espacements), sans bibliothèque de composants.
+- Thème clair ou sombre selon le système, réglable (auto, clair, sombre).
+- Mise en page de départ, appelée à évoluer : deux colonnes sur le bureau (liste à gauche, détail à droite), une colonne sur mobile (liste, puis détail en plein écran).
+- Bureau entièrement utilisable au clavier (Tab, Entrée, Échap, `Ctrl+F`) ; contrastes suffisants.
+- Français d'abord ; tous les textes passent par `textes/<langue>.ts` (cf. `EXTENSION(anglais)`).
+
+**Fichiers et dossiers**
+- Les coffres vont dans le dossier privé de l'application fourni par Tauri (`app_data_dir`), passé à `Locations::new` ; `FileStore` fonctionne tel quel sur mobile.
+- Bureau : sauvegarde et restauration par dossier, comme la CLI (§7), choisi dans une boîte de dialogue. Le bureau restaure aussi un fichier `.pswd`.
+- Mobile : un coffre = un fichier. « Sauvegarder » ouvre la fenêtre système d'enregistrement avec `<nom>_<AAAA-MM-JJ_HH-MM-SS>.pswd` (un `vault.enc` renommé, toujours chiffré) ; « Restaurer » ouvre le sélecteur de fichiers, puis applique les règles du §7. `pswd-app` restaure donc à partir des octets du fichier, pas d'un chemin.
+
+**Presse-papiers** : sur le bureau, `TimedClipboard<SystemClipboard>` de `pswd-infra`. Sur mobile, un plugin Tauri maison (Kotlin et Swift, quelques dizaines de lignes) implémente `SecureClipboard` avec les marqueurs du §9 ; le plugin officiel ne les pose pas.
+
+**Verrouillage**
+- Après `auto_lock_minutes` (10) sans action dans l'interface ; le minuteur vit en Rust. À l'échéance, la session est détruite et l'interface revient à l'écran de déverrouillage.
+- Mobile : application en arrière-plan plus de `background_lock_seconds` (60 ; 0 = immédiat) → verrouillage. Le délai permet d'aller coller un identifiant dans une autre application.
+- Bouton « Verrouiller » toujours visible. Pas de biométrie à cette étape (`EXTENSION(biometrie)`).
+
+**Tests**
+- `pswd-app` et le backend de `pswd-gui` : 100 % lignes et branches visées, comme `pswd-infra` ; exclusions justifiées (démarrage de Tauri, appel au plugin natif).
+- Kotlin et Swift : réduits au minimum, testés à la main sur un appareil réel.
+- TypeScript : Vitest, 100 % des lignes pour la logique (`.ts`) ; composants Svelte testés par comportement avec Testing Library, sans seuil.
+- `svelte-check` et ESLint strict sans avertissement ; `package-lock.json` versionné et `npm audit` sans faille, comme `cargo deny`.
+- Pas de test de bout en bout pour l'instant (`tauri-driver` : Windows et Linux seulement) ; un test de démarrage possible à la sous-étape 7.
+- Builds mobiles lancés à la main : Android à la fin de chaque sous-étape qui touche au mobile, iOS (sur le Mac) aux sous-étapes 2, 6 et 7.

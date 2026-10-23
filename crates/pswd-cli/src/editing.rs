@@ -1,14 +1,12 @@
 //! Commandes du shell qui modifient le coffre : `add`, `edit`, `rm`, plus `history` et `tags`.
 
-use std::collections::BTreeMap;
-
+use pswd_app::{VaultSession, format_timestamp, generate, tag_counts};
 use pswd_core::ports::SecureClipboard;
-use pswd_core::{EntryContent, EntryKind, PasswordOptions, Secret, Tags, Vault, generate_password};
+use pswd_core::{EntryContent, EntryKind, PasswordOptions, Secret, Tags, Vault};
 
 use crate::app::{App, CliError};
-use crate::shell::{VaultSession, find_entry, system_rng};
+use crate::shell::find_entry;
 use crate::terminal::Terminal;
-use crate::utc::format_timestamp;
 
 /// Réponse qui efface un champ lors d'un `edit`.
 const CLEAR: &str = "-";
@@ -147,12 +145,7 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
     }
 
     pub(crate) fn list_tags(&mut self, vault: &Vault) {
-        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-        for entry in vault.entries().filter(|entry| !entry.is_deleted()) {
-            for tag in entry.content().tags.as_slice() {
-                *counts.entry(tag).or_default() += 1;
-            }
-        }
+        let counts = tag_counts(vault);
         if counts.is_empty() {
             self.terminal.print("Aucun tag.");
         }
@@ -210,7 +203,7 @@ fn words(answer: &str) -> Vec<String> {
 }
 
 fn generated_password() -> Result<Secret, CliError> {
-    generate_password(PasswordOptions::default(), &mut system_rng()?).map_err(CliError::Generator)
+    Ok(generate(PasswordOptions::default())?)
 }
 
 #[cfg(test)]

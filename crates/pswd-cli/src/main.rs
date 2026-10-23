@@ -6,18 +6,17 @@ mod backup;
 mod cli;
 mod commands;
 mod editing;
-mod idle_lock;
 mod setup;
 mod shell;
 mod terminal;
 #[cfg(test)]
 mod testing;
-mod utc;
 
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::Parser;
+use pswd_app::Vaults;
 use pswd_core::Secret;
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecureClipboard};
@@ -47,7 +46,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
     let mut app = App {
         terminal: StdTerminal,
         clipboard: LazyClipboard(None),
-        locations: Locations::system()?,
+        vaults: Vaults::new(Locations::system()?),
         kdf: KdfParams::DEFAULT,
         clock: system_clock,
         auto_lock: None,
