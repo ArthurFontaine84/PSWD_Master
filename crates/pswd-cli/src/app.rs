@@ -1,5 +1,5 @@
 use std::fmt;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecretStore, SecureClipboard};
@@ -99,6 +99,8 @@ pub struct App<T, K, C> {
     pub locations: Locations,
     pub kdf: KdfParams,
     pub clock: fn() -> Timestamp,
+    /// Délai de verrouillage imposé ; `None` : celui de la configuration.
+    pub auto_lock: Option<Duration>,
 }
 
 impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {

@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::path::Path;
+use std::sync::Once;
 
 use git2::{
     Commit, Cred, ErrorCode, FetchOptions, Oid, PushOptions, RemoteCallbacks, Repository, Signature,
@@ -13,6 +14,23 @@ const FETCH_REFSPEC: &str = "+refs/heads/main:refs/remotes/origin/main";
 const PUSH_REFSPEC: &str = "refs/heads/main:refs/heads/main";
 const VAULT_FILE: &str = "vault.enc";
 const FILE_MODE: i32 = 0o100_644;
+/// Délai maximal de connexion au serveur, puis d'attente de chacune de ses réponses.
+const NETWORK_TIMEOUT_MS: i32 = 5_000;
+
+/// Un serveur injoignable ne bloque pas l'ouverture du coffre : il est alors utilisé hors ligne.
+fn configure_network_timeouts() {
+    static CONFIGURED: Once = Once::new();
+    CONFIGURED.call_once(|| {
+        // SAFETY: ces options sont des variables globales de libgit2, lues sans synchronisation.
+        // Ce bloc ne s'exécute qu'une fois, avant que le premier `GitRemote` existe ; or toute
+        // opération réseau de libgit2 passe par un `GitRemote` : aucune ne peut tourner en même
+        // temps. Ces fonctions ne peuvent pas échouer (documentation de `git2`).
+        unsafe {
+            let _ = git2::opts::set_server_connect_timeout_in_milliseconds(NETWORK_TIMEOUT_MS);
+            let _ = git2::opts::set_server_timeout_in_milliseconds(NETWORK_TIMEOUT_MS);
+        }
+    });
+}
 
 /// Dépôt distant, avec un dépôt nu local comme cache. Le serveur refuse tout push qui n'est pas
 /// une avance rapide : c'est lui qui garantit qu'aucune version n'est écrasée.
@@ -32,6 +50,7 @@ impl GitRemote {
     ///
     /// Si le dépôt local ne peut être ni ouvert ni créé.
     pub fn open(repo_dir: &Path, url: &str, token: Option<Secret>) -> Result<Self, PortError> {
+        configure_network_timeouts();
         let repo = Repository::open_bare(repo_dir)
             .or_else(|_| Repository::init_bare(repo_dir))
             .map_err(git_error("dépôt local"))?;
@@ -272,6 +291,20 @@ mod tests {
         let repo = Repository::open_bare(&setup.url).unwrap();
         let tree = repo.find_reference(BRANCH).unwrap().peel_to_tree().unwrap();
         assert!(tree.get_name("README.md").is_some());
+    }
+
+    #[test]
+    fn opening_a_remote_bounds_network_waits() {
+        let setup = Setup::new();
+        setup.device("a");
+        // SAFETY: simple lecture, une fois les options écrites par `configure_network_timeouts`.
+        let (connect, server) = unsafe {
+            (
+                git2::opts::get_server_connect_timeout_in_milliseconds().unwrap(),
+                git2::opts::get_server_timeout_in_milliseconds().unwrap(),
+            )
+        };
+        assert_eq!((connect, server), (NETWORK_TIMEOUT_MS, NETWORK_TIMEOUT_MS));
     }
 
     #[test]

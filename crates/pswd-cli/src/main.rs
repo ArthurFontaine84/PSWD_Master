@@ -5,6 +5,7 @@ mod app;
 mod cli;
 mod commands;
 mod editing;
+mod idle_lock;
 mod setup;
 mod shell;
 mod terminal;
@@ -48,6 +49,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
         locations: Locations::system()?,
         kdf: KdfParams::DEFAULT,
         clock: system_clock,
+        auto_lock: None,
     };
     app.run(cli.command)
 }

@@ -29,7 +29,18 @@ impl ScriptedTerminal {
         self.output.join("\n")
     }
 
+    /// `<pause:N>` attend N millisecondes avant de passer à la réponse suivante.
     fn next_answer(&mut self) -> Result<String, CliError> {
+        while let Some(pause) = self
+            .answers
+            .front()
+            .and_then(|answer| answer.strip_prefix("<pause:"))
+            .and_then(|rest| rest.strip_suffix('>'))
+            .and_then(|millis| millis.parse().ok())
+        {
+            self.answers.pop_front();
+            std::thread::sleep(Duration::from_millis(pause));
+        }
         match self.answers.pop_front() {
             Some(answer) if answer == BROKEN_INPUT => {
                 Err(CliError::Input("clavier débranché".to_owned()))
@@ -151,6 +162,7 @@ impl TestEnv {
             locations: self.locations(device),
             kdf: KdfParams::new(8 * 1024, 1, 1).unwrap(),
             clock: || Timestamp::from_millis(1_000),
+            auto_lock: None,
         }
     }
 
@@ -166,21 +178,30 @@ impl TestEnv {
 
     /// Modifie le coffre `perso` depuis l'appareil `device`, puis le publie.
     pub fn edit_vault(&self, device: &str, change: impl FnOnce(&mut Vault)) {
-        let vault = self.config(device).vault(Some("perso")).unwrap().1.clone();
-        let remote = GitRemote::open(&vault.repo_dir(), &vault.url, None).unwrap();
-        let password = Secret::new("maître".to_owned());
-        let mut session = Session::open(
-            FileStore::new(vault.vault_file()),
-            remote,
-            Credentials::Password(&password),
-        )
-        .unwrap();
-        session.edit(change).unwrap();
+        self.session(device).edit(change).unwrap();
     }
 
     /// Le dépôt distant devient injoignable.
     pub fn take_remote_offline(&self) {
         std::fs::rename(&self.url, self.dir.path().join("hors-ligne.git")).unwrap();
+    }
+
+    /// Le dépôt distant redevient joignable.
+    pub fn bring_remote_online(&self) {
+        std::fs::rename(self.dir.path().join("hors-ligne.git"), &self.url).unwrap();
+    }
+
+    /// Session ouverte sur le coffre `perso` de l'appareil, mot de passe « maître ».
+    pub fn session(&self, device: &str) -> Session<FileStore, GitRemote> {
+        let vault = self.config(device).vault(Some("perso")).unwrap().1.clone();
+        let remote = GitRemote::open(&vault.repo_dir(), &vault.url, None).unwrap();
+        let password = Secret::new("maître".to_owned());
+        Session::open(
+            FileStore::new(vault.vault_file()),
+            remote,
+            Credentials::Password(&password),
+        )
+        .unwrap()
     }
 
     pub fn clipboard_copies(&self) -> Vec<(String, Duration)> {

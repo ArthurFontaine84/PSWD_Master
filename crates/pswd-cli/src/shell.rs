@@ -11,6 +11,7 @@ use rand::rngs::{StdRng, SysRng};
 
 use crate::app::{App, CliError, describe};
 use crate::commands::{Unlock, Unlocked};
+use crate::idle_lock::IdleLock;
 use crate::terminal::Terminal;
 
 pub(crate) type VaultSession = Session<FileStore, GitRemote>;
@@ -18,6 +19,13 @@ pub(crate) type VaultSession = Session<FileStore, GitRemote>;
 /// Nombre de caractères d'identifiant affichés : assez pour désigner une entrée.
 const SHORT_ID_LEN: usize = 8;
 const MASK: &str = "••••••••";
+
+/// Sous Linux, l'exclusion de l'historique dépend du gestionnaire de presse-papiers.
+#[cfg(target_os = "linux")]
+const CLIPBOARD_NOTICE: &str = "\n⚠ Sous Linux, certains gestionnaires de presse-papiers \
+    ignorent la consigne de ne pas garder le mot de passe dans leur historique.";
+#[cfg(not(target_os = "linux"))]
+const CLIPBOARD_NOTICE: &str = "";
 
 #[derive(Debug, Parser)]
 #[command(no_binary_name = true, name = "", disable_version_flag = true)]
@@ -97,7 +105,7 @@ enum ShellCommand {
     /// Synchronise avec le dépôt distant.
     Sync,
     /// Ferme le coffre.
-    #[command(alias = "exit")]
+    #[command(visible_aliases = ["exit", "lock"])]
     Quit,
 }
 
@@ -105,24 +113,32 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
     pub(crate) fn open(&mut self, name: Option<&str>) -> Result<(), CliError> {
         let Unlocked {
             name,
-            mut session,
+            session,
             config,
         } = self.unlock(name, Unlock::Password)?;
         self.terminal.print(&format!(
             "Coffre « {name} » ouvert. Tapez help pour l'aide."
         ));
         self.terminal.print(&describe(session.status()));
-        self.shell(&name, &mut session, config.clipboard_clear())?;
+        let timeout = self.auto_lock.unwrap_or_else(|| config.auto_lock());
+        let guarded = IdleLock::new(session, timeout, publish_pending);
+        self.shell(&name, &guarded, config.clipboard_clear())?;
+        let Some(mut session) = guarded.close() else {
+            self.terminal
+                .print("Coffre verrouillé pour inactivité : relancez pswd open.");
+            return Ok(());
+        };
         if session.has_pending_changes() {
             self.terminal.print(&describe(session.sync()?));
         }
         Ok(())
     }
 
+    /// Se termine sur `quit`, en fin de saisie, ou à la première commande après un verrouillage.
     fn shell(
         &mut self,
         name: &str,
-        session: &mut VaultSession,
+        guarded: &IdleLock<VaultSession>,
         clipboard_ttl: Duration,
     ) -> Result<(), CliError> {
         loop {
@@ -145,10 +161,10 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
                     continue;
                 }
             };
-            match self.execute(command, session, clipboard_ttl) {
-                Ok(Flow::Continue) => {}
-                Ok(Flow::Quit) => return Ok(()),
-                Err(error) => self.terminal.print(&format!("erreur : {error}")),
+            match guarded.with(|session| self.execute(command, session, clipboard_ttl)) {
+                Some(Ok(Flow::Continue)) => {}
+                Some(Ok(Flow::Quit)) | None => return Ok(()),
+                Some(Err(error)) => self.terminal.print(&format!("erreur : {error}")),
             }
         }
     }
@@ -177,7 +193,7 @@ impl<T: Terminal, K: SecretStore, C: SecureClipboard> App<T, K, C> {
                     .ok_or_else(|| CliError::NoPassword(content.title.clone()))?;
                 self.clipboard.copy_secret(password, clipboard_ttl)?;
                 self.terminal.print(&format!(
-                    "Mot de passe de « {} » copié ; effacé du presse-papiers dans {} s.",
+                    "Mot de passe de « {} » copié ; effacé du presse-papiers dans {} s.{CLIPBOARD_NOTICE}",
                     content.title,
                     clipboard_ttl.as_secs()
                 ));
@@ -321,6 +337,14 @@ fn describe_entry(entry: &Entry, reveal: bool) -> String {
     ));
     lines.push(format!("  Référence : {}", entry.id()));
     lines.join("\n")
+}
+
+/// Au verrouillage automatique : dernière tentative de publication.
+fn publish_pending(session: &mut VaultSession) {
+    if session.has_pending_changes() {
+        // Au mieux : personne ne peut être averti d'un échec à ce moment-là.
+        let _ = session.sync();
+    }
 }
 
 /// Générateur cryptographique initialisé par l'aléa du système.
@@ -560,14 +584,12 @@ mod tests {
             env.clipboard_copies(),
             [("hunter2".to_owned(), Duration::from_secs(20))]
         );
-        let lines: Vec<&str> = output.lines().collect();
         assert_eq!(
-            lines[0],
-            "Mot de passe de « GitHub » copié ; effacé du presse-papiers dans 20 s."
-        );
-        assert_eq!(
-            lines[1],
-            "erreur : l'entrée « banque » n'a pas de mot de passe"
+            output,
+            format!(
+                "Mot de passe de « GitHub » copié ; effacé du presse-papiers dans 20 s.\
+                 {CLIPBOARD_NOTICE}\nerreur : l'entrée « banque » n'a pas de mot de passe"
+            )
         );
     }
 
@@ -626,12 +648,54 @@ mod tests {
     }
 
     #[test]
+    fn idle_vault_is_locked_while_waiting_for_input() {
+        let env = env_with_entries();
+        let mut app = env.app("a", &["maître", "list", "<pause:300>", "list"]);
+        app.auto_lock = Some(Duration::from_millis(50));
+        app.run(open()).unwrap();
+        let output = app.terminal.output();
+        assert_eq!(output.matches("Code Wi-Fi").count(), 1, "{output}");
+        assert!(
+            output.ends_with("Coffre verrouillé pour inactivité : relancez pswd open."),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn lock_closes_the_vault() {
+        let env = env_with_entries();
+        let output = session_output(&env, &["lock", "list"]);
+        assert_eq!(output, "");
+    }
+
+    #[test]
+    fn pending_changes_are_published_when_locking() {
+        let env = env_with_entries();
+        let mut session = env.session("a");
+        env.take_remote_offline();
+        session
+            .edit(|vault| {
+                vault.add(
+                    EntryContent::new(EntryKind::Note, "x".to_owned()),
+                    Timestamp::from_millis(5),
+                )
+            })
+            .unwrap();
+        assert!(session.has_pending_changes());
+        env.bring_remote_online();
+        publish_pending(&mut session);
+        assert!(!session.has_pending_changes());
+        publish_pending(&mut session);
+        assert_eq!(session.status(), &pswd_core::SyncStatus::Synced);
+    }
+
+    #[test]
     fn help_lists_the_commands() {
         let env = env_with_entries();
         let output = session_output(&env, &["help"]);
         for command in [
             "list", "search", "show", "copy", "gen", "add", "edit", "rm", "history", "tags",
-            "sync", "quit",
+            "sync", "quit", "lock",
         ] {
             assert!(output.contains(command), "{command} : {output}");
         }
