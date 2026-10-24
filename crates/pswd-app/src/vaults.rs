@@ -3,13 +3,15 @@ use std::path::{Path, PathBuf};
 
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::LocalStore;
-use pswd_core::{Credentials, RecoveryKey, Secret, Session, SessionError, Timestamp, VaultFile};
+use pswd_core::{
+    BackupFile, Credentials, RecoveryKey, Secret, Session, SessionError, Timestamp, VaultFile,
+};
 use pswd_infra::{
     Config, ConfigFile, FileStore, Locations, VaultConfig, backup_vault_file, backup_vault_names,
     create_backup,
 };
 
-use crate::utc::backup_stamp;
+use crate::utc::{backup_day, backup_stamp};
 use crate::{AppError, VaultSession};
 
 /// Les coffres de cet appareil, enregistrés dans la configuration.
@@ -212,6 +214,65 @@ impl Vaults {
     }
 }
 
+impl Vaults {
+    /// Sauvegarde tous les coffres dans un seul fichier `.pswd` (§7) ; renvoie ses octets et
+    /// le nombre de coffres.
+    ///
+    /// # Errors
+    ///
+    /// S'il n'y a aucun coffre, ou si le fichier d'un coffre est absent ou illisible.
+    pub fn backup_to_file(&self, now: Timestamp) -> Result<(Vec<u8>, usize), AppError> {
+        let config = self.config()?;
+        if config.vaults.is_empty() {
+            return Err(AppError::NothingToBackUp);
+        }
+        let mut files = Vec::new();
+        for (name, vault) in &config.vaults {
+            let path = vault.vault_file();
+            let file = FileStore::new(&path).load()?.ok_or_else(|| {
+                AppError::File(format!(
+                    "fichier du coffre {name} introuvable : {}",
+                    path.display()
+                ))
+            })?;
+            files.push((name.as_str(), file));
+        }
+        let mut backup = BackupFile::new(now);
+        for (name, file) in &files {
+            backup.add(name, file).map_err(AppError::BackupFile)?;
+        }
+        Ok((backup.encode(), files.len()))
+    }
+
+    /// Coffres contenus dans un fichier `.pswd`, triés par nom.
+    ///
+    /// # Errors
+    ///
+    /// [`AppError::EmptyBackup`] s'il n'en contient aucun, ou si ce n'est pas une sauvegarde.
+    pub fn backup_file_contents(&self, data: &[u8]) -> Result<Vec<String>, AppError> {
+        let backup = BackupFile::parse(data).map_err(AppError::BackupFile)?;
+        let names: Vec<String> = backup.names().map(str::to_owned).collect();
+        if names.is_empty() {
+            return Err(AppError::EmptyBackup);
+        }
+        Ok(names)
+    }
+
+    /// Restaure le coffre `name` d'un fichier `.pswd` (§7) ; renvoie le nom retenu.
+    ///
+    /// # Errors
+    ///
+    /// [`AppError::NotInBackup`] si le fichier ne contient pas ce coffre, sinon comme
+    /// [`Vaults::restore`].
+    pub fn restore_from_file(&self, data: &[u8], name: &str) -> Result<String, AppError> {
+        let backup = BackupFile::parse(data).map_err(AppError::BackupFile)?;
+        let file = backup
+            .vault(name)
+            .ok_or_else(|| AppError::NotInBackup(name.to_owned()))?;
+        self.restore(name, file, &backup_day(backup.created_at()))
+    }
+}
+
 /// Date d'un dossier de sauvegarde `AAAA-MM-JJ_HH-MM-SS` : la partie avant `_`.
 fn backup_date(backup: &Path) -> String {
     let folder = backup
@@ -238,7 +299,7 @@ fn removing_on_failure<R>(
 #[cfg(test)]
 mod tests {
     use pswd_core::ports::PortError;
-    use pswd_core::{EntryContent, EntryKind, FileError};
+    use pswd_core::{BackupFileError, EntryContent, EntryKind, FileError};
     use pswd_infra::{ConfigError, backup_vault_file, backup_vault_names};
     use tempfile::TempDir;
 
@@ -639,6 +700,83 @@ mod tests {
             other.restore_from_backup(&folder, "travail"),
             Err(AppError::NotInBackup("travail".to_owned()))
         );
+    }
+
+    #[test]
+    fn a_backup_file_is_listed_then_restored() {
+        let dir = TempDir::new().unwrap();
+        let vaults = device(&dir, "a");
+        create(&vaults, "travail");
+        create(&vaults, "perso");
+        let (data, count) = vaults.backup_to_file(at(1_761_229_809_999)).unwrap();
+        assert_eq!(count, 2);
+        let other = device(&dir, "b");
+        assert_eq!(
+            other.backup_file_contents(&data),
+            Ok(vec!["perso".to_owned(), "travail".to_owned()])
+        );
+        assert_eq!(
+            other.restore_from_file(&data, "perso"),
+            Ok("perso".to_owned())
+        );
+        assert!(open(&other, "perso").is_ok());
+        assert_eq!(
+            vaults.restore_from_file(&data, "perso"),
+            Ok("perso-sauvegarde-2025-10-23".to_owned())
+        );
+        assert_eq!(
+            other.restore_from_file(&data, "autre"),
+            Err(AppError::NotInBackup("autre".to_owned()))
+        );
+        assert_eq!(names(&other), ["perso"]);
+    }
+
+    #[test]
+    fn a_backup_file_needs_vaults() {
+        let dir = TempDir::new().unwrap();
+        assert_eq!(
+            device(&dir, "a").backup_to_file(at(0)),
+            Err(AppError::NothingToBackUp)
+        );
+    }
+
+    #[test]
+    fn a_missing_or_damaged_vault_stops_the_backup_file() {
+        let dir = TempDir::new().unwrap();
+        let vaults = device(&dir, "a");
+        create(&vaults, "perso");
+        let file = vault_file(&vaults, "perso");
+        fs::write(&file, "abîmé").unwrap();
+        assert_eq!(
+            vaults.backup_to_file(at(0)),
+            Err(AppError::BackupFile(BackupFileError::InvalidVault(
+                "perso".to_owned(),
+                FileError::Malformed
+            )))
+        );
+        fs::remove_file(&file).unwrap();
+        assert_eq!(
+            vaults.backup_to_file(at(0)),
+            Err(AppError::File(format!(
+                "fichier du coffre perso introuvable : {}",
+                file.display()
+            )))
+        );
+    }
+
+    #[test]
+    fn an_empty_or_foreign_file_is_not_a_backup() {
+        let dir = TempDir::new().unwrap();
+        let vaults = device(&dir, "a");
+        let empty = BackupFile::new(at(0)).encode();
+        assert_eq!(
+            vaults.backup_file_contents(&empty),
+            Err(AppError::EmptyBackup)
+        );
+        let foreign = Some(AppError::BackupFile(BackupFileError::Malformed));
+        assert_eq!(vaults.backup_file_contents(b"PSWD").err(), foreign);
+        assert_eq!(vaults.restore_from_file(b"PSWD", "perso").err(), foreign);
+        assert_eq!(names(&vaults), Vec::<String>::new());
     }
 
     #[test]

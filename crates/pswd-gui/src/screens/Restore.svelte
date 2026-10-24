@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { backupContents, restoreVault } from "../lib/api";
+  import { backupContents, backupFileContents, restoreFromFile, restoreVault } from "../lib/api";
   import { errorMessage } from "../lib/errors";
-  import { pickFolder } from "../lib/files";
+  import { pickBackupFile, pickFolder } from "../lib/files";
   import { texts } from "../lib/i18n";
 
   interface Props {
@@ -12,30 +12,43 @@
 
   const { onRestored, onCancel }: Props = $props();
 
-  let folder = $state<string | null>(null);
+  /** Une sauvegarde datée : un dossier, ou un fichier `.pswd`. */
+  interface Source {
+    kind: "folder" | "file";
+    path: string;
+  }
+
+  let source = $state<Source | null>(null);
   let names = $state<string[]>([]);
   let problem = $state<string | null>(null);
 
-  async function choose() {
+  async function choose(kind: Source["kind"]) {
     problem = null;
     try {
-      const chosen = await pickFolder(texts.restoreTitle);
-      if (chosen === null) {
+      const path =
+        kind === "folder"
+          ? await pickFolder(texts.restoreTitle)
+          : await pickBackupFile(texts.restoreFileTitle);
+      if (path === null) {
         return;
       }
-      names = await backupContents(chosen);
-      folder = chosen;
+      names = kind === "folder" ? await backupContents(path) : await backupFileContents(path);
+      source = { kind, path };
     } catch (error) {
       problem = errorMessage(error);
     }
   }
 
   async function restore(name: string) {
-    if (folder === null) {
+    if (source === null) {
       return;
     }
     try {
-      onRestored(texts.restored(name, await restoreVault(folder, name)));
+      const target =
+        source.kind === "folder"
+          ? await restoreVault(source.path, name)
+          : await restoreFromFile(source.path, name);
+      onRestored(texts.restored(name, target));
     } catch (error) {
       problem = errorMessage(error);
     }
@@ -45,8 +58,8 @@
 <section aria-labelledby="restore-title">
   <h2 id="restore-title">{texts.restore}</h2>
   <p>{texts.restoreExplanation}</p>
-  {#if folder}
-    <p class="folder">{folder}</p>
+  {#if source}
+    <p class="folder">{source.path}</p>
     <ul>
       {#each names as name (name)}
         <li><button type="button" onclick={() => restore(name)}>{name}</button></li>
@@ -58,7 +71,10 @@
   {/if}
   <div class="actions">
     <button type="button" onclick={onCancel}>{texts.cancel}</button>
-    <button type="button" class="primary" onclick={choose}>{texts.chooseBackup}</button>
+    <button type="button" onclick={() => choose("folder")}>{texts.chooseBackupFolder}</button>
+    <button type="button" class="primary" onclick={() => choose("file")}>
+      {texts.chooseBackupFile}
+    </button>
   </div>
 </section>
 

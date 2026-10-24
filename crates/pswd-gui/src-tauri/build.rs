@@ -27,6 +27,10 @@ const COMMANDS: &[&str] = &[
     "backup_vaults",
     "backup_contents",
     "restore_vault",
+    "backup_file_name",
+    "backup_to_file",
+    "backup_file_contents",
+    "restore_from_file",
     "get_settings",
     "save_settings",
 ];

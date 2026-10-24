@@ -29,11 +29,12 @@ const errors = {
   csvUnknownKind: (detail: string) => `CSV, ligne ${detail} : type inconnu (login ou note attendu).`,
   csvInvalidUtf8: (detail: string) => `CSV, ligne ${detail} : texte qui n'est pas en UTF-8.`,
   nothingToBackUp: () => "Aucun coffre à sauvegarder.",
-  emptyBackup: () => "Ce dossier ne contient aucun coffre sauvegardé.",
+  emptyBackup: () => "Cette sauvegarde ne contient aucun coffre.",
   notInBackup: (detail: string) => `Cette sauvegarde ne contient pas de coffre « ${detail} ».`,
   invalidBackup: (detail: string) => `Sauvegarde inutilisable : ${detail}`,
   invalidSettings: () => "Réglages hors des valeurs permises.",
   ioError: (detail: string) => `Erreur de fichier : ${detail}`,
+  fileUnwritable: (detail: string) => `Écriture du fichier impossible : ${detail}`,
   unexpected: (detail: string) => `Erreur : ${detail}`,
 } satisfies Record<string, Message>;
 
@@ -125,13 +126,17 @@ export const fr = {
   deleteVaultExplanation: (name: string) =>
     `Le coffre « ${name} » et toutes ses entrées seront supprimés de cet appareil, sans retour possible. Une sauvegarde permet de le restaurer plus tard. Pour confirmer, retapez son nom.`,
   vaultDeleted: (name: string) => `Coffre « ${name} » supprimé.`,
-  backup: "Sauvegarder les coffres",
+  backup: "Sauvegarder dans un dossier",
   backupTitle: "Choisir le dossier de sauvegarde (clé USB, disque externe)",
+  backupToFile: "Sauvegarder dans un fichier",
+  backupFileTitle: "Enregistrer la sauvegarde de tous les coffres",
   backedUp: (count: number, folder: string) =>
     `${count <= 1 ? `${count} coffre sauvegardé` : `${count} coffres sauvegardés`} dans ${folder}.`,
   restore: "Restaurer une sauvegarde",
   restoreTitle: "Choisir un dossier de sauvegarde daté",
-  chooseBackup: "Choisir la sauvegarde",
+  restoreFileTitle: "Choisir un fichier de sauvegarde .pswd",
+  chooseBackupFolder: "Choisir un dossier",
+  chooseBackupFile: "Choisir un fichier .pswd",
   restoreExplanation:
     "Le coffre est ajouté comme nouveau coffre : un coffre existant n'est jamais remplacé. Il s'ouvre avec le mot de passe maître en vigueur au moment de la sauvegarde.",
   restored: (name: string, target: string) =>

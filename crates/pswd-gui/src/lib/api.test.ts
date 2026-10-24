@@ -17,6 +17,10 @@ import {
   importEntries,
   recoverVault,
   restoreVault,
+  backupFileName,
+  backupToFile,
+  backupFileContents,
+  restoreFromFile,
   saveSettings,
   entryDetail,
   entryHistory,
@@ -73,6 +77,10 @@ describe("api", () => {
     await backupVaults("E:/");
     await backupContents("E:/pswd-sauvegardes/1");
     await restoreVault("E:/pswd-sauvegardes/1", "perso");
+    await backupFileName();
+    await backupToFile("E:/s.pswd");
+    await backupFileContents("E:/s.pswd");
+    await restoreFromFile("E:/s.pswd", "perso");
     await getSettings();
     const settings = {
       autoLockMinutes: 5,
@@ -105,6 +113,10 @@ describe("api", () => {
       ["backup_vaults", { destination: "E:/" }],
       ["backup_contents", { folder: "E:/pswd-sauvegardes/1" }],
       ["restore_vault", { folder: "E:/pswd-sauvegardes/1", name: "perso" }],
+      ["backup_file_name"],
+      ["backup_to_file", { path: "E:/s.pswd" }],
+      ["backup_file_contents", { path: "E:/s.pswd" }],
+      ["restore_from_file", { path: "E:/s.pswd", name: "perso" }],
       ["get_settings"],
       ["save_settings", { settings }],
     ]);

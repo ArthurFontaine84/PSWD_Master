@@ -49,7 +49,7 @@ describe("errorMessage", () => {
       ["csvUnknownKind", "4", "CSV, ligne 4 : type inconnu (login ou note attendu)."],
       ["csvInvalidUtf8", "5", "CSV, ligne 5 : texte qui n'est pas en UTF-8."],
       ["nothingToBackUp", null, "Aucun coffre à sauvegarder."],
-      ["emptyBackup", null, "Ce dossier ne contient aucun coffre sauvegardé."],
+      ["emptyBackup", null, "Cette sauvegarde ne contient aucun coffre."],
       ["notInBackup", "perso", "Cette sauvegarde ne contient pas de coffre « perso »."],
       ["invalidBackup", "altérée", "Sauvegarde inutilisable : altérée"],
       ["invalidSettings", null, "Réglages hors des valeurs permises."],

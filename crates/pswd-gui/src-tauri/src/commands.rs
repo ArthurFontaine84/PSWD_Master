@@ -196,6 +196,35 @@ pub fn restore_vault(
     state.restore(Path::new(&folder), &name)
 }
 
+/// Nom proposé dans la fenêtre d'enregistrement d'une sauvegarde `.pswd`.
+#[tauri::command]
+pub fn backup_file_name(state: State<'_, AppState>) -> String {
+    state.backup_file_name()
+}
+
+/// Tous les coffres dans le fichier `.pswd` choisi, écrit par Rust ; renvoie leur nombre.
+#[tauri::command]
+pub fn backup_to_file(state: State<'_, AppState>, path: String) -> Result<usize, UiError> {
+    state.backup_to_file(Path::new(&path))
+}
+
+#[tauri::command]
+pub fn backup_file_contents(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Vec<String>, UiError> {
+    state.backup_file_contents(Path::new(&path))
+}
+
+#[tauri::command]
+pub fn restore_from_file(
+    state: State<'_, AppState>,
+    path: String,
+    name: String,
+) -> Result<String, UiError> {
+    state.restore_from_file(Path::new(&path), &name)
+}
+
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, UiError> {
     state.settings()
@@ -282,6 +311,10 @@ mod tests {
                     backup_vaults,
                     backup_contents,
                     restore_vault,
+                    backup_file_name,
+                    backup_to_file,
+                    backup_file_contents,
+                    restore_from_file,
                     get_settings,
                     save_settings,
                     not_allowed
@@ -614,6 +647,25 @@ mod tests {
                 json!({ "folder": folder, "name": "perso" })
             ),
             Ok(json!("perso-sauvegarde-1970-01-01"))
+        );
+
+        let name = app.call("backup_file_name", json!({})).unwrap();
+        assert_eq!(name, "pswd-sauvegarde_1970-01-01_00-00-01.pswd");
+        let file = usb.join(name.as_str().unwrap()).display().to_string();
+        assert_eq!(
+            app.call("backup_to_file", json!({ "path": file })),
+            Ok(json!(2))
+        );
+        assert_eq!(
+            app.call("backup_file_contents", json!({ "path": file })),
+            Ok(json!(["perso", "perso-sauvegarde-1970-01-01"]))
+        );
+        assert_eq!(
+            app.call(
+                "restore_from_file",
+                json!({ "path": file, "name": "perso" })
+            ),
+            Err(json!({ "code": "vaultExists", "detail": "perso-sauvegarde-1970-01-01" }))
         );
 
         let settings = app.call("get_settings", json!({})).unwrap();

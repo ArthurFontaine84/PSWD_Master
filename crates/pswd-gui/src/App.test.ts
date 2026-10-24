@@ -38,7 +38,12 @@ vi.mock("./lib/api", () => ({
   restoreVault: vi.fn(),
   deleteVault: vi.fn(),
 }));
-vi.mock("./lib/files", () => ({ pickFolder: vi.fn(), pickCsvFile: vi.fn() }));
+vi.mock("./lib/files", () => ({
+  pickFolder: vi.fn(),
+  pickCsvFile: vi.fn(),
+  pickBackupFile: vi.fn(),
+  pickBackupDestination: vi.fn(),
+}));
 
 const defaults: Settings = {
   autoLockMinutes: 10,
@@ -235,7 +240,7 @@ describe("App", () => {
     vi.mocked(restoreVault).mockResolvedValue("perso-sauvegarde-2026-10-23");
     render(App);
     await fireEvent.click(await screen.findByRole("button", { name: "Restaurer une sauvegarde" }));
-    await fireEvent.click(screen.getByRole("button", { name: "Choisir la sauvegarde" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Choisir un dossier" }));
     await fireEvent.click(await screen.findByRole("button", { name: "perso" }));
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Coffre « perso » restauré sous le nom « perso-sauvegarde-2026-10-23 »",

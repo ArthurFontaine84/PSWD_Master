@@ -187,6 +187,25 @@ export function restoreVault(folder: string, name: string): Promise<string> {
   return invoke<string>("restore_vault", { folder, name });
 }
 
+/** Nom proposé pour une sauvegarde en un seul fichier, daté par le backend. */
+export function backupFileName(): Promise<string> {
+  return invoke<string>("backup_file_name");
+}
+
+/** Écrit tous les coffres dans le fichier `.pswd` choisi ; renvoie leur nombre. */
+export function backupToFile(path: string): Promise<number> {
+  return invoke<number>("backup_to_file", { path });
+}
+
+export function backupFileContents(path: string): Promise<string[]> {
+  return invoke<string[]>("backup_file_contents", { path });
+}
+
+/** Restaure un coffre d'un fichier `.pswd` ; renvoie le nom retenu. */
+export function restoreFromFile(path: string, name: string): Promise<string> {
+  return invoke<string>("restore_from_file", { path, name });
+}
+
 export function getSettings(): Promise<Settings> {
   return invoke<Settings>("get_settings");
 }

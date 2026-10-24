@@ -9,6 +9,7 @@ mod commands;
 mod editing;
 mod entries;
 mod error;
+mod files;
 mod settings;
 mod state;
 
@@ -58,6 +59,10 @@ pub fn run() {
             commands::backup_vaults,
             commands::backup_contents,
             commands::restore_vault,
+            commands::backup_file_name,
+            commands::backup_to_file,
+            commands::backup_file_contents,
+            commands::restore_from_file,
             commands::get_settings,
             commands::save_settings
         ])

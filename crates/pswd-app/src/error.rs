@@ -1,7 +1,7 @@
 use std::fmt;
 
 use pswd_core::ports::PortError;
-use pswd_core::{CsvError, FileError, GeneratorError, SessionError};
+use pswd_core::{BackupFileError, CsvError, FileError, GeneratorError, SessionError};
 use pswd_infra::ConfigError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +14,7 @@ pub enum AppError {
     EmptyPassword,
     NothingToBackUp,
     InvalidBackup(FileError),
+    BackupFile(BackupFileError),
     EmptyBackup,
     NotInBackup(String),
     File(String),
@@ -31,6 +32,7 @@ impl fmt::Display for AppError {
             Self::EmptyPassword => f.write_str("le mot de passe maître ne peut pas être vide"),
             Self::NothingToBackUp => f.write_str("aucun coffre à sauvegarder : utiliser init"),
             Self::InvalidBackup(error) => write!(f, "fichier de sauvegarde inutilisable : {error}"),
+            Self::BackupFile(error) => error.fmt(f),
             Self::EmptyBackup => f.write_str("cette sauvegarde ne contient aucun coffre"),
             Self::NotInBackup(name) => {
                 write!(f, "cette sauvegarde ne contient pas de coffre « {name} »")
@@ -105,6 +107,10 @@ mod tests {
             (
                 AppError::InvalidBackup(FileError::Malformed),
                 "fichier de sauvegarde inutilisable : fichier de coffre mal formé",
+            ),
+            (
+                AppError::BackupFile(BackupFileError::Malformed),
+                "fichier de sauvegarde mal formé",
             ),
             (
                 AppError::EmptyBackup,

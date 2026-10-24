@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { backupVaults, listVaults } from "../lib/api";
+  import { backupFileName, backupToFile, backupVaults, listVaults } from "../lib/api";
   import { errorMessage } from "../lib/errors";
-  import { pickFolder } from "../lib/files";
+  import { pickBackupDestination, pickFolder } from "../lib/files";
   import { texts } from "../lib/i18n";
 
   interface Props {
@@ -28,6 +28,20 @@
       }
       const { folder, count } = await backupVaults(destination);
       backupResult = texts.backedUp(count, folder);
+    } catch (error) {
+      backupProblem = errorMessage(error);
+    }
+  }
+
+  async function backupFile() {
+    backupResult = null;
+    backupProblem = null;
+    try {
+      const path = await pickBackupDestination(texts.backupFileTitle, await backupFileName());
+      if (path === null) {
+        return;
+      }
+      backupResult = texts.backedUp(await backupToFile(path), path);
     } catch (error) {
       backupProblem = errorMessage(error);
     }
@@ -63,6 +77,7 @@
     <div class="actions">
       {#if names.length > 0}
         <button type="button" onclick={backup}>{texts.backup}</button>
+        <button type="button" onclick={backupFile}>{texts.backupToFile}</button>
       {/if}
       <button type="button" onclick={onRestore}>{texts.restore}</button>
       <button type="button" class="primary" onclick={onCreate}>{texts.newVault}</button>

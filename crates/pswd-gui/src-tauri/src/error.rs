@@ -69,7 +69,9 @@ impl From<AppError> for UiError {
             AppError::EmptyBackup => Self::code("emptyBackup"),
             AppError::NotInBackup(name) => Self::new("notInBackup", name),
             AppError::InvalidBackup(error) => Self::new("invalidBackup", error.to_string()),
+            AppError::BackupFile(error) => Self::new("invalidBackup", error.to_string()),
             AppError::Port(error) => Self::new("ioError", error.to_string()),
+            AppError::File(message) => Self::new("ioError", message),
             // EXTENSION(anglais): les autres erreurs reçoivent leur code au fil des écrans ; en
             // attendant, le message français sert de détail.
             other => Self::new("unexpected", other.to_string()),
@@ -93,6 +95,7 @@ impl From<VaultError> for UiError {
 
 #[cfg(test)]
 mod tests {
+    use pswd_core::BackupFileError;
     use pswd_core::ports::PortError;
 
     use super::*;
@@ -216,9 +219,19 @@ mod tests {
                 Some("fichier de coffre mal formé"),
             ),
             (
+                AppError::BackupFile(BackupFileError::Malformed),
+                "invalidBackup",
+                Some("fichier de sauvegarde mal formé"),
+            ),
+            (
                 AppError::Port(PortError::new("disque absent")),
                 "ioError",
                 Some("disque absent"),
+            ),
+            (
+                AppError::File("coffre introuvable".to_owned()),
+                "ioError",
+                Some("coffre introuvable"),
             ),
             (
                 AppError::Csv(CsvError::Internal),

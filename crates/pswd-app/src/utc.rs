@@ -35,6 +35,13 @@ pub fn backup_stamp(timestamp: Timestamp) -> String {
     )
 }
 
+/// Jour d'une sauvegarde : `2026-10-22`.
+#[must_use]
+pub fn backup_day(timestamp: Timestamp) -> String {
+    let time = UtcTime::new(timestamp);
+    format!("{:04}-{:02}-{:02}", time.year, time.month, time.day)
+}
+
 struct UtcTime {
     year: i64,
     month: i64,
@@ -115,5 +122,14 @@ mod tests {
         for (millis, expected) in cases {
             assert_eq!(backup_stamp(Timestamp::from_millis(millis)), expected);
         }
+    }
+
+    #[test]
+    fn backup_day_is_the_date_alone() {
+        assert_eq!(
+            backup_day(Timestamp::from_millis(1_761_229_809_999)),
+            "2025-10-23"
+        );
+        assert_eq!(backup_day(Timestamp::from_millis(-1)), "1969-12-31");
     }
 }

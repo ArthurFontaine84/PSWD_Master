@@ -1,10 +1,10 @@
-use std::fs;
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use pswd_app::{
-    AppError, IdleLock, VaultSession, Vaults, add_entries, live_count, search, tag_counts,
+    AppError, IdleLock, VaultSession, Vaults, add_entries, backup_stamp, live_count, search,
+    tag_counts,
 };
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::SecureClipboard;
@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::editing::{EntryInput, HistoryItem, history};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
+use crate::files;
 use crate::settings::Settings;
 
 /// Résultat d'une sauvegarde : le dossier daté créé et le nombre de coffres copiés.
@@ -319,8 +320,7 @@ impl AppState {
 
     /// Importe un fichier CSV dans le coffre ouvert, tout ou rien ; renvoie le nombre d'entrées.
     pub fn import_entries(&self, file: &Path) -> Result<usize, UiError> {
-        let data =
-            fs::read(file).map_err(|error| UiError::new("fileUnreadable", error.to_string()))?;
+        let data = files::read(file)?;
         let contents = import_csv(&data).map_err(AppError::Csv)?;
         let now = (self.clock)();
         Ok(self.with_session(|session| add_entries(session, contents, now))??)
@@ -342,6 +342,27 @@ impl AppState {
     /// Restaure un coffre d'une sauvegarde ; renvoie le nom retenu.
     pub fn restore(&self, folder: &Path, name: &str) -> Result<String, UiError> {
         Ok(self.vaults.restore_from_backup(folder, name)?)
+    }
+
+    /// Nom proposé pour une sauvegarde en un seul fichier : `pswd-sauvegarde_<date>.pswd`.
+    pub fn backup_file_name(&self) -> String {
+        format!("pswd-sauvegarde_{}.pswd", backup_stamp((self.clock)()))
+    }
+
+    /// Sauvegarde tous les coffres dans le fichier `.pswd` choisi ; renvoie leur nombre.
+    pub fn backup_to_file(&self, path: &Path) -> Result<usize, UiError> {
+        let (data, count) = self.vaults.backup_to_file((self.clock)())?;
+        files::write(path, &data)?;
+        Ok(count)
+    }
+
+    pub fn backup_file_contents(&self, path: &Path) -> Result<Vec<String>, UiError> {
+        Ok(self.vaults.backup_file_contents(&files::read(path)?)?)
+    }
+
+    /// Restaure un coffre d'un fichier `.pswd` ; renvoie le nom retenu.
+    pub fn restore_from_file(&self, path: &Path, name: &str) -> Result<String, UiError> {
+        Ok(self.vaults.restore_from_file(&files::read(path)?, name)?)
     }
 
     pub fn settings(&self) -> Result<Settings, UiError> {
@@ -1246,6 +1267,65 @@ mod tests {
         );
         let error = state.backup(&dir.path().join("débranchée")).unwrap_err();
         assert_eq!(serde_json::to_value(error).unwrap()["code"], "ioError");
+    }
+
+    #[test]
+    fn vaults_are_backed_up_to_a_file_then_restored() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        state.create("perso", &secret("maître")).unwrap();
+        state.create("travail", &secret("maître")).unwrap();
+        assert_eq!(
+            state.backup_file_name(),
+            "pswd-sauvegarde_1970-01-01_00-00-01.pswd"
+        );
+        let file = dir.path().join(state.backup_file_name());
+        assert_eq!(state.backup_to_file(&file), Ok(2));
+        assert_eq!(
+            state.backup_file_contents(&file),
+            Ok(vec!["perso".to_owned(), "travail".to_owned()])
+        );
+        assert_eq!(
+            state.restore_from_file(&file, "perso"),
+            Ok("perso-sauvegarde-1970-01-01".to_owned())
+        );
+        assert_eq!(
+            state.restore_from_file(&file, "autre").err(),
+            Some(UiError::new("notInBackup", "autre"))
+        );
+        assert_eq!(state.vaults.config().unwrap().vaults.len(), 3);
+    }
+
+    #[test]
+    fn unusable_backup_files_are_reported() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        let code = |error: UiError| serde_json::to_value(error).unwrap()["code"].clone();
+        let absent = dir.path().join("absent.pswd");
+        assert_eq!(
+            code(state.backup_to_file(&absent).unwrap_err()),
+            "nothingToBackUp"
+        );
+        assert_eq!(
+            code(state.backup_file_contents(&absent).unwrap_err()),
+            "fileUnreadable"
+        );
+        assert_eq!(
+            code(state.restore_from_file(&absent, "perso").unwrap_err()),
+            "fileUnreadable"
+        );
+        let foreign = dir.path().join("photo.pswd");
+        std::fs::write(&foreign, "pas une sauvegarde").unwrap();
+        assert_eq!(
+            code(state.backup_file_contents(&foreign).unwrap_err()),
+            "invalidBackup"
+        );
+        state.create("perso", &secret("maître")).unwrap();
+        let folder_missing = dir.path().join("débranchée").join("x.pswd");
+        assert_eq!(
+            code(state.backup_to_file(&folder_missing).unwrap_err()),
+            "fileUnwritable"
+        );
     }
 
     #[test]

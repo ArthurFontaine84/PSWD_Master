@@ -164,7 +164,7 @@ Fonction pure `merge(local: Vault, remote: Vault) -> Result<Vault, MergeError>` 
 - Copie brute des fichiers chiffrés : aucun mot de passe demandé, rien de lisible sur le disque. Chaque fichier est écrit sur le disque (`sync_all`) avant la fin de la commande.
 - Une sauvegarde ne touche jamais aux précédentes (même dossier daté : refus). Une copie ratée retire la sauvegarde incomplète. Supprimer les anciennes sauvegardes est laissé à l'utilisateur.
 
-**Sauvegarde en un seul fichier `.pswd`** (mobile, où une sauvegarde ne peut pas être un dossier ; le bureau sait la lire)
+**Sauvegarde en un seul fichier `.pswd`** (mobile, où une sauvegarde ne peut pas être un dossier ; le bureau sait aussi la lire et l'écrire, par exemple pour passer ses coffres sur le téléphone)
 - Même contenu qu'un dossier daté : tous les coffres locaux, copiés bruts, toujours chiffrés. Nom proposé : `pswd-sauvegarde_<AAAA-MM-JJ_HH-MM-SS>.pswd`. Les noms des coffres sont rangés dans le fichier : un sélecteur de fichiers mobile ne donne pas toujours le nom du fichier, et celui-ci a pu être renommé.
 - Format (`pswd-core`, binaire, little-endian) :
 
@@ -339,7 +339,7 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 **Fichiers et dossiers**
 - Bureau : les mêmes dossiers que la CLI (`Locations::system`) ; les deux programmes voient les mêmes coffres. **Limite actuelle** : un même coffre ne doit pas être modifié dans les deux programmes à la fois (la dernière écriture l'emporterait) ; à traiter avant la fin de l'étape 2 en fusionnant avec la copie sur le disque avant chaque écriture (§6).
 - Mobile : le dossier privé de l'application fourni par Tauri (`app_data_dir`), passé à `Locations::new` ; `FileStore` fonctionne tel quel.
-- Bureau : sauvegarde et restauration par dossier, comme la CLI (§7), choisi dans une boîte de dialogue. Le bureau restaure aussi un fichier `.pswd`.
+- Bureau : sauvegarde et restauration par dossier, comme la CLI (§7), choisi dans une boîte de dialogue. Le bureau sait aussi écrire et restaurer un fichier `.pswd` (« Sauvegarder dans un fichier », « Choisir un fichier .pswd »). Les fichiers choisis sont lus et écrits par Rust (module `files`), jamais par l'interface ; une écriture se termine par `sync_all`.
 - Mobile : une sauvegarde = un fichier `.pswd` (§7). « Sauvegarder » ouvre la fenêtre système d'enregistrement ; « Restaurer » ouvre le sélecteur de fichiers, liste les coffres du fichier comme ceux d'un dossier, puis applique les règles du §7. `pswd-app` restaure donc à partir des octets du fichier, pas d'un chemin.
 
 **Consultation** : la liste et le détail ne contiennent jamais de mot de passe. « Copier » est fait par Rust (`copy_password`) ; « Afficher » (`reveal_password`) envoie le mot de passe à l'interface, qui le masque de nouveau au bout de 30 s, ou dès qu'on change d'entrée. Recherche à chaque frappe (côté Rust, `pswd_app::search`), filtre par tag, `Ctrl+F` pour aller à la recherche. Toute lecture du coffre repousse son verrouillage ; si le coffre s'est verrouillé entre-temps, l'interface revient à la liste.
