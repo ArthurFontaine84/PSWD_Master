@@ -5,6 +5,8 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+#[cfg(target_os = "android")]
+mod android_clipboard;
 mod commands;
 mod editing;
 mod entries;
@@ -27,13 +29,17 @@ use crate::state::{AppState, Clipboard};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn run() {
-    let result = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_fs::init());
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(android_clipboard::plugin());
+    let result = builder
         .setup(|app| {
             let locations = locations(app.handle())?;
             let on_lock = commands::lock_notifier(app.handle().clone());
-            app.manage(AppState::new(Vaults::new(locations), clipboard(), on_lock));
+            let clipboard = clipboard(app.handle());
+            app.manage(AppState::new(Vaults::new(locations), clipboard, on_lock));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -93,22 +99,33 @@ fn locations(app: &tauri::AppHandle) -> Result<Locations, Box<dyn Error>> {
 /// Sur le bureau, le presse-papiers du système, ouvert à la première copie.
 #[cfg(desktop)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn clipboard() -> Clipboard {
+fn clipboard(_: &tauri::AppHandle) -> Clipboard {
     Box::new(pswd_infra::LazyClipboard::default())
 }
 
-/// Sur mobile, pas encore de presse-papiers : il doit marquer le contenu comme sensible.
-#[cfg(mobile)]
+/// Sur Android, le plugin natif, enregistré avant le démarrage de l'application.
+#[cfg(target_os = "android")]
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn clipboard() -> Clipboard {
+fn clipboard(app: &tauri::AppHandle) -> Clipboard {
+    Box::new(
+        app.state::<android_clipboard::AndroidClipboard<tauri::Wry>>()
+            .inner()
+            .clone(),
+    )
+}
+
+/// Sur iOS, pas encore de presse-papiers : il doit marquer le contenu comme sensible.
+#[cfg(target_os = "ios")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn clipboard(_: &tauri::AppHandle) -> Clipboard {
     Box::new(UnavailableClipboard)
 }
 
-// EXTENSION(mobile): plugin natif (Kotlin, Swift) qui pose les marqueurs « sensible » (SPEC §12).
-#[cfg(mobile)]
+// EXTENSION(mobile): plugin natif Swift qui pose les marqueurs « sensible » (SPEC §12).
+#[cfg(target_os = "ios")]
 struct UnavailableClipboard;
 
-#[cfg(mobile)]
+#[cfg(target_os = "ios")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl pswd_core::ports::SecureClipboard for UnavailableClipboard {
     fn copy_secret(

@@ -349,7 +349,10 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 
 **Écran masqué** (§9) : sur Android, `FLAG_SECURE` est posé dans `MainActivity.kt` (`gen/android`, versionné ; à reporter si le projet Android est régénéré) : écran noir dans les applications récentes, captures et enregistrements refusés. Sur iOS, une vue neutre recouvre l'interface dès que l'application quitte le premier plan ; elle sera ajoutée au projet Xcode généré sur le Mac (sous-étape 6). Vérifié à la main sur appareil.
 
-**Presse-papiers** : sur le bureau, `LazyClipboard` de `pswd-infra` (ouvert à la première copie, partagé avec la CLI). Sur mobile, un plugin Tauri maison (Kotlin et Swift, quelques dizaines de lignes) implémente `SecureClipboard` avec les marqueurs du §9 ; le plugin officiel ne les pose pas.
+**Presse-papiers** : sur le bureau, `LazyClipboard` de `pswd-infra` (ouvert à la première copie, partagé avec la CLI). Sur mobile, un plugin maison implémente `SecureClipboard` avec les marqueurs du §9 ; le plugin officiel ne les pose pas.
+- Android : classe `SecureClipboardPlugin.kt` dans le projet Android de l'application (`gen/android`), enregistrée par `android_clipboard.rs` (plugin Tauri déclaré dans la crate, sans crate séparée). Marqueur `android.content.extra.IS_SENSITIVE`. Seule l'empreinte SHA-256 de la valeur copiée est gardée, pour vérifier avant d'effacer que le presse-papiers la contient encore ; seul le minuteur de la dernière copie efface.
+- **Limite Android** : depuis Android 10, une application en arrière-plan ne peut pas lire le presse-papiers. Si le délai expire pendant qu'on colle dans une autre application, l'effacement attend le retour au premier plan. Le mot de passe traverse JNI dans une chaîne JSON, non effaçable, comme toute chaîne Java.
+- iOS (sur le Mac) : l'enregistrement d'un plugin Swift passe par une fonction externe (`unsafe extern`), interdite dans `pswd-gui` (`#![forbid(unsafe_code)]`) : prévoir une petite crate dédiée. En attendant, la copie renvoie une erreur sur iOS.
 
 **Verrouillage**
 - Un seul coffre ouvert à la fois, gardé en Rust dans un `IdleLock` ; en ouvrir un autre verrouille le premier. Un coffre créé reste ouvert : sa clé de récupération est affichée une seule fois, puis oubliée par l'interface.
