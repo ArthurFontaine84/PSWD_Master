@@ -46,7 +46,7 @@ Workspace Cargo, architecture hexagonale :
 
 | Crate | Contenu | Contraintes |
 |---|---|---|
-| `pswd-core` | Modèles, fusion, format de fichier, crypto, générateur, CSV, ports (traits) | Aucune E/S, aucun appel OS, `#![forbid(unsafe_code)]`, compilable pour mobile |
+| `pswd-core` | Modèles, fusion, formats de fichier (`vault.enc`, `.pswd`), noms de coffre, crypto, générateur, CSV, ports (traits) | Aucune E/S, aucun appel OS, `#![forbid(unsafe_code)]`, compilable pour mobile |
 | `pswd-infra` | Adaptateurs : `LocalStore` fichier, `SecureClipboard` du bureau, config, sauvegardes | `arboard` réservé au bureau : la crate compile pour le mobile |
 | `pswd-app` | Cas d'usage partagés : créer, ouvrir, supprimer, sauvegarder, restaurer (à partir d'octets), importer, lister les coffres. Ne pose aucune question à l'utilisateur. | `#![forbid(unsafe_code)]` |
 | `pswd-cli` | Binaire `pswd` : questions et affichage dans le terminal, shell interactif, verrouillage automatique | `#![forbid(unsafe_code)]` |
@@ -163,6 +163,24 @@ Fonction pure `merge(local: Vault, remote: Vault) -> Result<Vault, MergeError>` 
 - La destination doit exister : sinon, une clé débranchée donnerait une sauvegarde sur le disque de la machine (sous Linux, le point de montage est un dossier ordinaire).
 - Copie brute des fichiers chiffrés : aucun mot de passe demandé, rien de lisible sur le disque. Chaque fichier est écrit sur le disque (`sync_all`) avant la fin de la commande.
 - Une sauvegarde ne touche jamais aux précédentes (même dossier daté : refus). Une copie ratée retire la sauvegarde incomplète. Supprimer les anciennes sauvegardes est laissé à l'utilisateur.
+
+**Sauvegarde en un seul fichier `.pswd`** (mobile, où une sauvegarde ne peut pas être un dossier ; le bureau sait la lire)
+- Même contenu qu'un dossier daté : tous les coffres locaux, copiés bruts, toujours chiffrés. Nom proposé : `pswd-sauvegarde_<AAAA-MM-JJ_HH-MM-SS>.pswd`. Les noms des coffres sont rangés dans le fichier : un sélecteur de fichiers mobile ne donne pas toujours le nom du fichier, et celui-ci a pu être renommé.
+- Format (`pswd-core`, binaire, little-endian) :
+
+```
+magic          "PSWDSAVE"        8 o
+format_version u8                (1)
+created_at     i64 (ms UTC)      date de la sauvegarde
+vault_count    u16               1 000 au plus
+pour chaque coffre, noms triés et distincts :
+  name_len     u8
+  name         ASCII             nom de coffre valide (§7)
+  file_len     u32               64 Mio au plus
+  file         vault.enc         vérifié (structure, version) à la lecture
+```
+
+- Le fichier est lu en entier et chaque coffre vérifié avant d'en restaurer un ; rien après le dernier coffre. Une sauvegarde n'a qu'une écriture (noms triés) : le fuzzing vérifie que tout fichier accepté se réencode à l'identique.
 
 **Restauration**
 - L'utilisateur donne une sauvegarde datée et, au choix, un coffre ; sinon les coffres de la sauvegarde sont listés et le nom est demandé.
@@ -322,7 +340,7 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 - Bureau : les mêmes dossiers que la CLI (`Locations::system`) ; les deux programmes voient les mêmes coffres. **Limite actuelle** : un même coffre ne doit pas être modifié dans les deux programmes à la fois (la dernière écriture l'emporterait) ; à traiter avant la fin de l'étape 2 en fusionnant avec la copie sur le disque avant chaque écriture (§6).
 - Mobile : le dossier privé de l'application fourni par Tauri (`app_data_dir`), passé à `Locations::new` ; `FileStore` fonctionne tel quel.
 - Bureau : sauvegarde et restauration par dossier, comme la CLI (§7), choisi dans une boîte de dialogue. Le bureau restaure aussi un fichier `.pswd`.
-- Mobile : un coffre = un fichier. « Sauvegarder » ouvre la fenêtre système d'enregistrement avec `<nom>_<AAAA-MM-JJ_HH-MM-SS>.pswd` (un `vault.enc` renommé, toujours chiffré) ; « Restaurer » ouvre le sélecteur de fichiers, puis applique les règles du §7. `pswd-app` restaure donc à partir des octets du fichier, pas d'un chemin.
+- Mobile : une sauvegarde = un fichier `.pswd` (§7). « Sauvegarder » ouvre la fenêtre système d'enregistrement ; « Restaurer » ouvre le sélecteur de fichiers, liste les coffres du fichier comme ceux d'un dossier, puis applique les règles du §7. `pswd-app` restaure donc à partir des octets du fichier, pas d'un chemin.
 
 **Consultation** : la liste et le détail ne contiennent jamais de mot de passe. « Copier » est fait par Rust (`copy_password`) ; « Afficher » (`reveal_password`) envoie le mot de passe à l'interface, qui le masque de nouveau au bout de 30 s, ou dès qu'on change d'entrée. Recherche à chaque frappe (côté Rust, `pswd_app::search`), filtre par tag, `Ctrl+F` pour aller à la recherche. Toute lecture du coffre repousse son verrouillage ; si le coffre s'est verrouillé entre-temps, l'interface revient à la liste.
 

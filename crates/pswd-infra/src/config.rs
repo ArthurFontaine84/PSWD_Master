@@ -5,17 +5,12 @@ use std::time::Duration;
 
 use etcetera::BaseStrategy;
 use pswd_core::ports::{LocalStore, PortError};
+use pswd_core::{MAX_VAULT_NAME_LEN, is_valid_vault_name};
 use serde::{Deserialize, Serialize};
 
 use crate::FileStore;
 
 const APP_DIR: &str = "pswd";
-const MAX_VAULT_NAME_LEN: usize = 64;
-/// Noms de fichiers interdits par Windows, quelle que soit la casse.
-const RESERVED_NAMES: [&str; 22] = [
-    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
-    "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
@@ -199,17 +194,6 @@ impl Config {
     pub fn background_lock(&self) -> Duration {
         Duration::from_secs(u64::from(self.background_lock_seconds))
     }
-}
-
-/// Le nom sert de nom de dossier : ni séparateur, ni `..`, ni
-/// nom réservé par Windows.
-fn is_valid_vault_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= MAX_VAULT_NAME_LEN
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        && !RESERVED_NAMES.contains(&name.to_ascii_lowercase().as_str())
 }
 
 /// Fichier `config.toml`, écrit de façon atomique.
