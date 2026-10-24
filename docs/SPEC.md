@@ -328,7 +328,9 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 **Presse-papiers** : sur le bureau, `TimedClipboard<SystemClipboard>` de `pswd-infra`. Sur mobile, un plugin Tauri maison (Kotlin et Swift, quelques dizaines de lignes) implémente `SecureClipboard` avec les marqueurs du §9 ; le plugin officiel ne les pose pas.
 
 **Verrouillage**
-- Après `auto_lock_minutes` (10) sans action dans l'interface ; le minuteur vit en Rust. À l'échéance, la session est détruite et l'interface revient à l'écran de déverrouillage.
+- Un seul coffre ouvert à la fois, gardé en Rust dans un `IdleLock` ; en ouvrir un autre verrouille le premier. Un coffre créé reste ouvert : sa clé de récupération est affichée une seule fois, puis oubliée par l'interface.
+- Après `auto_lock_minutes` (10) sans action dans l'interface ; le minuteur vit en Rust. À l'échéance, la session est détruite et Rust envoie l'événement `vault-locked` : l'interface revient à la liste des coffres avec un message.
+- Une touche ou un clic compte comme une action : l'interface le signale au backend (`current_vault`) au plus une fois toutes les 30 s. Si le coffre s'est verrouillé entre-temps, elle revient aussi à la liste.
 - Mobile : application en arrière-plan plus de `background_lock_seconds` (60 ; 0 = immédiat) → verrouillage. Le délai permet d'aller coller un identifiant dans une autre application.
 - Bouton « Verrouiller » toujours visible. Pas de biométrie à cette étape (`EXTENSION(biometrie)`).
 

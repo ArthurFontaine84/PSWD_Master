@@ -1,7 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Ce que l'interface peut appeler : uniquement les commandes de PSWD Master, ni fichiers, ni shell, ni réseau.",
+  "description": "Ce que l'interface peut appeler : les commandes de PSWD Master et l'écoute de leurs événements ; ni fichiers, ni shell, ni réseau.",
   "windows": ["main"],
-  "permissions": ["allow-list-vaults"]
+  "permissions": [
+    "allow-list-vaults",
+    "allow-create-vault",
+    "allow-unlock-vault",
+    "allow-lock-vault",
+    "allow-current-vault",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
 }

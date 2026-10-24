@@ -1,4 +1,5 @@
 use pswd_app::AppError;
+use pswd_core::{FileError, SessionError};
 use pswd_infra::ConfigError;
 use serde::Serialize;
 
@@ -17,6 +18,10 @@ impl UiError {
             detail: Some(detail.into()),
         }
     }
+
+    fn code(code: &'static str) -> Self {
+        Self { code, detail: None }
+    }
 }
 
 impl From<AppError> for UiError {
@@ -25,6 +30,19 @@ impl From<AppError> for UiError {
             AppError::Config(ConfigError::Invalid(message)) => Self::new("configInvalid", message),
             AppError::Config(ConfigError::File(error)) => {
                 Self::new("configUnreadable", error.to_string())
+            }
+            AppError::Config(ConfigError::UnknownVault(name)) => Self::new("unknownVault", name),
+            AppError::Config(ConfigError::VaultExists(name)) => Self::new("vaultExists", name),
+            AppError::Config(ConfigError::InvalidVaultName(name)) => {
+                Self::new("invalidVaultName", name)
+            }
+            AppError::EmptyPassword => Self::code("emptyPassword"),
+            AppError::Session(SessionError::File(FileError::WrongPassword)) => {
+                Self::code("wrongPassword")
+            }
+            AppError::Session(SessionError::LocalVaultExists) => Self::code("vaultFolderExists"),
+            AppError::Session(SessionError::File(error)) => {
+                Self::new("vaultUnreadable", error.to_string())
             }
             // EXTENSION(anglais): les autres erreurs reçoivent leur code au fil des écrans ; en
             // attendant, le message français sert de détail.
@@ -45,17 +63,48 @@ mod tests {
             (
                 AppError::Config(ConfigError::Invalid("ligne 2".to_owned())),
                 "configInvalid",
-                "ligne 2",
+                Some("ligne 2"),
             ),
             (
                 AppError::Config(ConfigError::File(PortError::new("accès refusé"))),
                 "configUnreadable",
-                "accès refusé",
+                Some("accès refusé"),
             ),
             (
-                AppError::EmptyPassword,
+                AppError::Config(ConfigError::UnknownVault("perso".to_owned())),
+                "unknownVault",
+                Some("perso"),
+            ),
+            (
+                AppError::Config(ConfigError::VaultExists("perso".to_owned())),
+                "vaultExists",
+                Some("perso"),
+            ),
+            (
+                AppError::Config(ConfigError::InvalidVaultName("a/b".to_owned())),
+                "invalidVaultName",
+                Some("a/b"),
+            ),
+            (AppError::EmptyPassword, "emptyPassword", None),
+            (
+                AppError::Session(SessionError::File(FileError::WrongPassword)),
+                "wrongPassword",
+                None,
+            ),
+            (
+                AppError::Session(SessionError::LocalVaultExists),
+                "vaultFolderExists",
+                None,
+            ),
+            (
+                AppError::Session(SessionError::File(FileError::Corrupted)),
+                "vaultUnreadable",
+                Some("coffre altéré ou corrompu"),
+            ),
+            (
+                AppError::NothingToBackUp,
                 "unexpected",
-                "le mot de passe maître ne peut pas être vide",
+                Some("aucun coffre à sauvegarder : utiliser init"),
             ),
         ];
         for (error, code, detail) in cases {
@@ -63,7 +112,7 @@ mod tests {
                 UiError::from(error),
                 UiError {
                     code,
-                    detail: Some(detail.to_owned())
+                    detail: detail.map(str::to_owned)
                 }
             );
         }

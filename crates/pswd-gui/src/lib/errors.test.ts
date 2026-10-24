@@ -2,16 +2,26 @@ import { describe, expect, it } from "vitest";
 import { errorMessage } from "./errors";
 
 describe("errorMessage", () => {
-  it("translates known codes with their detail", () => {
-    expect(errorMessage({ code: "configInvalid", detail: "ligne 2" })).toBe(
-      "Configuration invalide : ligne 2",
-    );
-    expect(errorMessage({ code: "configUnreadable", detail: "accès refusé" })).toBe(
-      "Configuration illisible : accès refusé",
-    );
-    expect(errorMessage({ code: "unexpected", detail: "disque plein" })).toBe(
-      "Erreur : disque plein",
-    );
+  it("translates every known code", () => {
+    const cases: [string, string | null, string][] = [
+      ["configInvalid", "ligne 2", "Configuration invalide : ligne 2"],
+      ["configUnreadable", "accès refusé", "Configuration illisible : accès refusé"],
+      ["unknownVault", "perso", "Coffre inconnu : perso."],
+      ["vaultExists", "perso", "Un coffre nommé perso existe déjà."],
+      [
+        "invalidVaultName",
+        "a/b",
+        "Nom de coffre invalide : « a/b » (lettres, chiffres, - et _ ; 64 caractères au plus).",
+      ],
+      ["emptyPassword", null, "Le mot de passe maître ne peut pas être vide."],
+      ["wrongPassword", null, "Mot de passe maître incorrect."],
+      ["vaultFolderExists", null, "Un dossier de coffre existe déjà à cet emplacement."],
+      ["vaultUnreadable", "altéré", "Coffre illisible : altéré"],
+      ["unexpected", "disque plein", "Erreur : disque plein"],
+    ];
+    for (const [code, detail, message] of cases) {
+      expect(errorMessage({ code, detail })).toBe(message);
+    }
   });
 
   it("falls back on the detail, then on the code, for an unknown code", () => {

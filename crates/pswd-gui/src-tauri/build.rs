@@ -3,7 +3,13 @@ use std::path::Path;
 
 // Seules les commandes déclarées ici sont appelables depuis l'interface, et seulement si une
 // capacité (`capabilities/`) les autorise.
-const COMMANDS: &[&str] = &["list_vaults"];
+const COMMANDS: &[&str] = &[
+    "list_vaults",
+    "create_vault",
+    "unlock_vault",
+    "lock_vault",
+    "current_vault",
+];
 
 fn main() {
     let manifest = tauri_build::AppManifest::new().commands(COMMANDS);

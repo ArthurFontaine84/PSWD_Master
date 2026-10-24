@@ -22,7 +22,7 @@ use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecureClipboard};
 use pswd_infra::{Locations, SystemClipboard, TimedClipboard};
 
-use crate::app::{App, CliError, system_clock};
+use crate::app::{App, CliError};
 use crate::cli::Cli;
 use crate::terminal::StdTerminal;
 
@@ -48,7 +48,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
         clipboard: LazyClipboard(None),
         vaults: Vaults::new(Locations::system()?),
         kdf: KdfParams::DEFAULT,
-        clock: system_clock,
+        clock: pswd_app::now,
         auto_lock: None,
     };
     app.run(cli.command)

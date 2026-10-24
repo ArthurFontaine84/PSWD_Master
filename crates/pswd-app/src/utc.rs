@@ -1,6 +1,19 @@
 //! Dates affichées et noms de dossiers datés, en UTC : aucun fuseau horaire à connaître.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use pswd_core::Timestamp;
+
+/// Heure courante : `pswd-core` ne lit jamais l'horloge lui-même.
+#[must_use]
+pub fn now() -> Timestamp {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        });
+    Timestamp::from_millis(millis)
+}
 
 /// Date et heure UTC, à la minute : `2026-10-22 14:05 UTC`.
 #[must_use]
@@ -70,6 +83,12 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn now_gives_the_current_time() {
+        // 1ᵉʳ janvier 2026 en millisecondes.
+        assert!(now() > Timestamp::from_millis(1_767_225_600_000));
+    }
 
     #[test]
     fn timestamps_are_formatted_in_utc() {

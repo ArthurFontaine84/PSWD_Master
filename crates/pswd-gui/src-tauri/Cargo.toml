@@ -16,12 +16,12 @@ tauri-build.workspace = true
 
 [dependencies]
 pswd-app.workspace = true
+pswd-core.workspace = true
 pswd-infra.workspace = true
 serde.workspace = true
 tauri.workspace = true
 
 [dev-dependencies]
-pswd-core.workspace = true
 serde_json.workspace = true
 tauri = { workspace = true, features = ["test"] }
 tempfile.workspace = true

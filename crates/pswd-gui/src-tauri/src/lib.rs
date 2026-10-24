@@ -26,10 +26,17 @@ pub fn run() {
     let result = tauri::Builder::default()
         .setup(|app| {
             let locations = locations(app.handle())?;
-            app.manage(AppState::new(Vaults::new(locations)));
+            let on_lock = commands::lock_notifier(app.handle().clone());
+            app.manage(AppState::new(Vaults::new(locations), on_lock));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::list_vaults])
+        .invoke_handler(tauri::generate_handler![
+            commands::list_vaults,
+            commands::create_vault,
+            commands::unlock_vault,
+            commands::lock_vault,
+            commands::current_vault
+        ])
         .run(tauri::generate_context!());
     if let Err(error) = result {
         eprintln!("PSWD Master : {error}");

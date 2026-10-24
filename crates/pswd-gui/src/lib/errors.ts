@@ -18,7 +18,8 @@ export function errorMessage(error: unknown): string {
   }
   const detail = error.detail ?? "";
   if (isKnownCode(error.code)) {
-    return texts.errors[error.code](detail);
+    const message: (detail: string) => string = texts.errors[error.code];
+    return message(detail);
   }
   return texts.errors.unexpected(detail || error.code);
 }

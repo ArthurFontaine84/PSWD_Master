@@ -1,12 +1,26 @@
 //! Commandes appelables depuis l'interface (déclarées aussi dans `build.rs`).
 
-// Tauri impose de recevoir l'état (`State`) par valeur.
+// Tauri impose de recevoir l'état (`State`) et les arguments par valeur.
 #![allow(clippy::needless_pass_by_value)]
 
-use tauri::State;
+use pswd_core::Secret;
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Runtime, State};
 
 use crate::error::UiError;
-use crate::state::AppState;
+use crate::state::{AppState, VaultInfo};
+
+/// Événement envoyé à l'interface quand le coffre se verrouille par inactivité.
+pub const VAULT_LOCKED: &str = "vault-locked";
+
+/// Coffre créé et ouvert, avec sa clé de récupération : affichée une seule fois, à la demande
+/// explicite de l'utilisateur qui vient de créer le coffre.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedVault {
+    vault: VaultInfo,
+    recovery_key: String,
+}
 
 /// Noms des coffres de cet appareil, triés.
 #[tauri::command]
@@ -14,20 +28,65 @@ pub fn list_vaults(state: State<'_, AppState>) -> Result<Vec<String>, UiError> {
     Ok(state.vaults.config()?.vaults.into_keys().collect())
 }
 
+#[tauri::command]
+pub fn create_vault(
+    state: State<'_, AppState>,
+    name: String,
+    password: String,
+) -> Result<CreatedVault, UiError> {
+    let password = Secret::new(password);
+    let (vault, recovery_key) = state.create(&name, &password)?;
+    Ok(CreatedVault {
+        vault,
+        recovery_key: recovery_key.expose().to_owned(),
+    })
+}
+
+#[tauri::command]
+pub fn unlock_vault(
+    state: State<'_, AppState>,
+    name: String,
+    password: String,
+) -> Result<VaultInfo, UiError> {
+    let password = Secret::new(password);
+    state.unlock(&name, &password)
+}
+
+#[tauri::command]
+pub fn lock_vault(state: State<'_, AppState>) {
+    state.lock();
+}
+
+/// Le coffre ouvert, s'il y en a un ; chaque appel compte comme une activité.
+#[tauri::command]
+pub fn current_vault(state: State<'_, AppState>) -> Option<VaultInfo> {
+    state.current()
+}
+
+/// Prévient l'interface quand le coffre se verrouille par inactivité.
+pub fn lock_notifier<R: Runtime>(app: AppHandle<R>) -> impl Fn() + Send + Sync + 'static {
+    move || {
+        // Au mieux : si la fenêtre est déjà fermée, il n'y a plus personne à prévenir.
+        let _ = app.emit(VAULT_LOCKED, ());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::mpsc;
+    use std::time::Duration;
 
     use pswd_app::Vaults;
+    use pswd_core::Timestamp;
     use pswd_core::crypto::KdfParams;
-    use pswd_core::{Secret, Timestamp};
     use pswd_infra::Locations;
     use serde_json::{Value, json};
-    use tauri::WebviewUrl;
     use tauri::http::HeaderMap;
     use tauri::ipc::{CallbackFn, InvokeBody};
-    use tauri::test::{INVOKE_KEY, get_ipc_response, mock_builder};
+    use tauri::test::{INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder};
     use tauri::webview::InvokeRequest;
+    use tauri::{App, Listener, Manager, WebviewUrl, WebviewWindow};
     use tempfile::TempDir;
 
     use super::*;
@@ -38,67 +97,149 @@ mod tests {
     #[cfg(not(any(windows, target_os = "android")))]
     const ORIGIN: &str = "tauri://localhost";
 
-    fn vaults_in(dir: &TempDir) -> Vaults {
-        Vaults::new(Locations::new(
-            &dir.path().join("config"),
-            &dir.path().join("data"),
-        ))
+    /// La vraie configuration de l'application (capacités comprises) avec le moteur factice de
+    /// Tauri : les commandes sont appelées comme le ferait l'interface.
+    struct TestApp {
+        app: App<MockRuntime>,
+        webview: WebviewWindow<MockRuntime>,
+        dir: TempDir,
     }
 
-    /// Appelle `command` comme le ferait l'interface : la vraie configuration de l'application
-    /// (capacités comprises) avec le moteur factice de Tauri.
-    fn invoke(vaults: Vaults, command: &str) -> Result<Value, Value> {
-        let app = mock_builder()
-            .manage(AppState::new(vaults))
-            .invoke_handler(tauri::generate_handler![list_vaults, not_allowed])
-            .build(tauri::generate_context!())
-            .unwrap();
-        let webview = tauri::WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
-            .build()
-            .unwrap();
-        let request = InvokeRequest {
-            cmd: command.to_owned(),
-            callback: CallbackFn(0),
-            error: CallbackFn(1),
-            url: ORIGIN.parse().unwrap(),
-            body: InvokeBody::default(),
-            headers: HeaderMap::default(),
-            invoke_key: INVOKE_KEY.to_owned(),
-        };
-        get_ipc_response(&webview, request).map(|body| body.deserialize().unwrap())
+    impl TestApp {
+        fn new(auto_lock: Option<Duration>) -> Self {
+            let dir = TempDir::new().unwrap();
+            let vaults = Vaults::new(Locations::new(
+                &dir.path().join("config"),
+                &dir.path().join("data"),
+            ));
+            let kdf = KdfParams::new(8 * 1024, 1, 1).unwrap();
+            let app = mock_builder()
+                .invoke_handler(tauri::generate_handler![
+                    list_vaults,
+                    create_vault,
+                    unlock_vault,
+                    lock_vault,
+                    current_vault,
+                    not_allowed
+                ])
+                .build(tauri::generate_context!())
+                .unwrap();
+            app.manage(AppState::with_settings(
+                vaults,
+                kdf,
+                || Timestamp::from_millis(1_000),
+                auto_lock,
+                lock_notifier(app.handle().clone()),
+            ));
+            let webview = tauri::WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+                .build()
+                .unwrap();
+            Self { app, webview, dir }
+        }
+
+        fn call(&self, command: &str, arguments: Value) -> Result<Value, Value> {
+            let request = InvokeRequest {
+                cmd: command.to_owned(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                url: ORIGIN.parse().unwrap(),
+                body: InvokeBody::Json(arguments),
+                headers: HeaderMap::default(),
+                invoke_key: INVOKE_KEY.to_owned(),
+            };
+            get_ipc_response(&self.webview, request).map(|body| body.deserialize().unwrap())
+        }
+
+        fn create(&self, name: &str, password: &str) -> Result<Value, Value> {
+            self.call(
+                "create_vault",
+                json!({ "name": name, "password": password }),
+            )
+        }
+
+        fn config_file(&self) -> std::path::PathBuf {
+            self.dir.path().join("config").join("config.toml")
+        }
     }
 
     #[test]
     fn vault_names_are_listed_in_order() {
-        let dir = TempDir::new().unwrap();
-        let vaults = vaults_in(&dir);
-        let params = KdfParams::new(8 * 1024, 1, 1).unwrap();
-        for name in ["travail", "perso"] {
-            let password = Secret::new("maître".to_owned());
-            vaults
-                .create(name, &password, params, Timestamp::from_millis(0))
-                .unwrap();
-        }
+        let app = TestApp::new(None);
+        assert_eq!(app.call("list_vaults", json!({})), Ok(json!([])));
+        app.create("travail", "maître").unwrap();
+        app.create("perso", "maître").unwrap();
         assert_eq!(
-            invoke(vaults, "list_vaults"),
+            app.call("list_vaults", json!({})),
             Ok(json!(["perso", "travail"]))
         );
     }
 
     #[test]
-    fn a_new_device_has_no_vault() {
-        let dir = TempDir::new().unwrap();
-        assert_eq!(invoke(vaults_in(&dir), "list_vaults"), Ok(json!([])));
+    fn errors_reach_the_interface_as_codes() {
+        let app = TestApp::new(None);
+        fs::create_dir_all(app.config_file().parent().unwrap()).unwrap();
+        fs::write(app.config_file(), "couleur = 1").unwrap();
+        let error = app.call("list_vaults", json!({})).unwrap_err();
+        assert_eq!(error["code"], "configInvalid");
+        assert!(error["detail"].is_string(), "{error}");
     }
 
     #[test]
-    fn errors_reach_the_interface_as_codes() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join("config")).unwrap();
-        fs::write(dir.path().join("config").join("config.toml"), "couleur = 1").unwrap();
-        let error = invoke(vaults_in(&dir), "list_vaults").unwrap_err();
-        assert_eq!(error["code"], "configInvalid");
-        assert!(error["detail"].is_string(), "{error}");
+    fn created_vault_is_open_and_shows_its_recovery_key() {
+        let app = TestApp::new(None);
+        let created = app.create("perso", "maître").unwrap();
+        assert_eq!(created["vault"], json!({ "name": "perso", "entries": 0 }));
+        let key = created["recoveryKey"].as_str().unwrap();
+        assert_eq!(key.split('-').count(), 13, "{key}");
+        assert_eq!(
+            app.call("current_vault", json!({})),
+            Ok(json!({ "name": "perso", "entries": 0 }))
+        );
+        assert_eq!(
+            app.create("perso", "autre"),
+            Err(json!({ "code": "vaultExists", "detail": "perso" }))
+        );
+    }
+
+    #[test]
+    fn vault_is_unlocked_with_its_password_and_locked_on_demand() {
+        let app = TestApp::new(None);
+        app.create("perso", "maître").unwrap();
+        assert_eq!(app.call("lock_vault", json!({})), Ok(Value::Null));
+        assert_eq!(app.call("current_vault", json!({})), Ok(Value::Null));
+        assert_eq!(
+            app.call(
+                "unlock_vault",
+                json!({ "name": "perso", "password": "autre" })
+            ),
+            Err(json!({ "code": "wrongPassword", "detail": null }))
+        );
+        assert_eq!(
+            app.call(
+                "unlock_vault",
+                json!({ "name": "perso", "password": "maître" })
+            ),
+            Ok(json!({ "name": "perso", "entries": 0 }))
+        );
+        assert_eq!(
+            app.call(
+                "unlock_vault",
+                json!({ "name": "inconnu", "password": "x" })
+            ),
+            Err(json!({ "code": "unknownVault", "detail": "inconnu" }))
+        );
+    }
+
+    #[test]
+    fn idle_vault_locks_itself_and_warns_the_interface() {
+        let app = TestApp::new(Some(Duration::from_millis(50)));
+        let (sender, receiver) = mpsc::channel();
+        app.app.listen_any(VAULT_LOCKED, move |_| {
+            let _ = sender.send(());
+        });
+        app.create("perso", "maître").unwrap();
+        assert_eq!(receiver.recv_timeout(Duration::from_secs(5)), Ok(()));
+        assert_eq!(app.call("current_vault", json!({})), Ok(Value::Null));
     }
 
     /// Commande bien enregistrée, mais ni déclarée dans `build.rs` ni autorisée par une capacité.
@@ -110,14 +251,14 @@ mod tests {
     #[test]
     fn commands_outside_the_capabilities_are_refused() {
         assert_eq!(not_allowed(), "secret");
-        let dir = TempDir::new().unwrap();
-        let refusal = invoke(vaults_in(&dir), "not_allowed").unwrap_err();
+        let app = TestApp::new(None);
+        let refusal = app.call("not_allowed", json!({})).unwrap_err();
         assert!(
             refusal
                 .as_str()
                 .is_some_and(|message| message.contains("not allowed")),
             "{refusal}"
         );
-        assert!(invoke(vaults_in(&dir), "plugin:fs|read_file").is_err());
+        assert!(app.call("plugin:fs|read_file", json!({})).is_err());
     }
 }

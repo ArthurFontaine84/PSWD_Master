@@ -1,5 +1,5 @@
-//! Verrouillage automatique : la session est détruite à l'échéance, même si le shell attend une
-//! saisie.
+//! Verrouillage automatique : la session est détruite à l'échéance, même si l'interface attend
+//! une saisie.
 
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
@@ -22,6 +22,16 @@ pub struct IdleLock<S> {
 impl<S: Send + 'static> IdleLock<S> {
     /// Un délai nul désactive le verrouillage.
     pub fn new(session: S, timeout: Duration) -> Self {
+        Self::notifying(session, timeout, || {})
+    }
+
+    /// Comme [`IdleLock::new`] ; `on_lock` est appelé une fois la session détruite à
+    /// l'échéance, jamais après [`IdleLock::close`].
+    pub fn notifying(
+        session: S,
+        timeout: Duration,
+        on_lock: impl FnOnce() + Send + 'static,
+    ) -> Self {
         let shared: Shared<S> = Arc::new((
             Mutex::new(State {
                 session: Some(session),
@@ -32,7 +42,11 @@ impl<S: Send + 'static> IdleLock<S> {
         ));
         if !timeout.is_zero() {
             let watched = Arc::clone(&shared);
-            thread::spawn(move || watch(&watched));
+            thread::spawn(move || {
+                if watch(&watched) {
+                    on_lock();
+                }
+            });
         }
         Self { shared, timeout }
     }
@@ -55,8 +69,9 @@ impl<S: Send + 'static> IdleLock<S> {
     }
 }
 
-/// Dort jusqu'à l'échéance ; une utilisation l'a peut-être repoussée entre-temps.
-fn watch<S>(shared: &(Mutex<State<S>>, Condvar)) {
+/// Dort jusqu'à l'échéance ; une utilisation l'a peut-être repoussée entre-temps. Renvoie
+/// `true` si la session a été détruite à l'échéance, `false` si l'`IdleLock` a été fermé avant.
+fn watch<S>(shared: &(Mutex<State<S>>, Condvar)) -> bool {
     let (mutex, wakeup) = shared;
     let mut state = lock(mutex);
     while !state.closed {
@@ -64,7 +79,7 @@ fn watch<S>(shared: &(Mutex<State<S>>, Condvar)) {
         if now >= state.deadline {
             // La session est détruite ici : sa clé est effacée de la mémoire.
             state.session = None;
-            return;
+            return true;
         }
         let remaining = state.deadline - now;
         state = wakeup
@@ -72,6 +87,7 @@ fn watch<S>(shared: &(Mutex<State<S>>, Condvar)) {
             .unwrap_or_else(PoisonError::into_inner)
             .0;
     }
+    false
 }
 
 fn lock<S>(mutex: &Mutex<State<S>>) -> MutexGuard<'_, State<S>> {
@@ -133,6 +149,30 @@ mod tests {
         drop(guarded.close());
         thread::sleep(Duration::from_millis(200));
         assert_eq!(events(&log), ["détruite"]);
+    }
+
+    #[test]
+    fn notification_follows_the_automatic_lock_only() {
+        let notified = Arc::new(Mutex::new(Vec::new()));
+        let notify = |label: &'static str| {
+            let notified = Arc::clone(&notified);
+            move || notified.lock().unwrap().push(label)
+        };
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let idle = IdleLock::notifying(
+            Fake(Arc::clone(&log)),
+            Duration::from_millis(30),
+            notify("échue"),
+        );
+        let closed = IdleLock::notifying(
+            Fake(Arc::clone(&log)),
+            Duration::from_millis(30),
+            notify("fermée"),
+        );
+        drop(closed.close());
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(*notified.lock().unwrap(), ["échue"]);
+        assert_eq!(idle.with(|_| ()), None);
     }
 
     #[test]

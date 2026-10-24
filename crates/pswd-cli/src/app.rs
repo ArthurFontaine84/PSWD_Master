@@ -1,5 +1,5 @@
 use std::fmt;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use pswd_app::{AppError, Vaults};
 use pswd_core::crypto::KdfParams;
@@ -113,25 +113,9 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
     }
 }
 
-/// Heure courante : `pswd-core` ne lit jamais l'horloge lui-même.
-pub fn system_clock() -> Timestamp {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
-        });
-    Timestamp::from_millis(millis)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn system_clock_gives_the_current_time() {
-        // 1ᵉʳ janvier 2026 en millisecondes.
-        assert!(system_clock() > Timestamp::from_millis(1_767_225_600_000));
-    }
 
     #[test]
     fn errors_have_explicit_messages() {
