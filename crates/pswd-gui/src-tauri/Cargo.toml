@@ -1,0 +1,30 @@
+[package]
+name = "pswd-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# Le mobile charge l'application comme une bibliothèque : `staticlib` pour iOS, `cdylib` pour
+# Android, `rlib` pour le binaire du bureau.
+[lib]
+name = "pswd_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+pswd-app.workspace = true
+pswd-infra.workspace = true
+serde.workspace = true
+tauri.workspace = true
+
+[dev-dependencies]
+pswd-core.workspace = true
+serde_json.workspace = true
+tauri = { workspace = true, features = ["test"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true
