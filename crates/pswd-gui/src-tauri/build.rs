@@ -9,6 +9,11 @@ const COMMANDS: &[&str] = &[
     "unlock_vault",
     "lock_vault",
     "current_vault",
+    "list_entries",
+    "entry_detail",
+    "list_tags",
+    "reveal_password",
+    "copy_password",
 ];
 
 fn main() {

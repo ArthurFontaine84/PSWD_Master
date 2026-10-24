@@ -76,13 +76,17 @@
       onCancel={() => (screen = { kind: "list" })}
     />
   {:else}
-    <OpenVault vault={screen.vault} onLocked={() => (screen = { kind: "list" })} />
+    <OpenVault
+      vault={screen.vault}
+      onLocked={() => (screen = { kind: "list" })}
+      onExpired={showLocked}
+    />
   {/if}
 </main>
 
 <style>
   main {
-    max-width: 40rem;
+    max-width: 64rem;
     margin: 0 auto;
     padding: var(--space-l) var(--space-m);
   }

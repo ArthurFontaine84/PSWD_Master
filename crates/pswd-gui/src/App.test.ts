@@ -4,6 +4,8 @@ import App from "./App.svelte";
 import {
   createVault,
   currentVault,
+  listEntries,
+  listTags,
   listVaults,
   lockVault,
   onVaultLocked,
@@ -17,6 +19,8 @@ vi.mock("./lib/api", () => ({
   lockVault: vi.fn(),
   currentVault: vi.fn(),
   onVaultLocked: vi.fn(),
+  listEntries: vi.fn(),
+  listTags: vi.fn(),
 }));
 
 /** Le gestionnaire passé à `onVaultLocked`, et la fonction qui arrête l'écoute. */
@@ -26,6 +30,11 @@ const stopListening = vi.fn();
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(listVaults).mockResolvedValue(["perso"]);
+  vi.mocked(listTags).mockResolvedValue([]);
+  vi.mocked(listEntries).mockResolvedValue([
+    { id: "1", kind: "note", title: "Wi-Fi", username: null, tags: [], hasPassword: false },
+    { id: "2", kind: "note", title: "Code", username: null, tags: [], hasPassword: false },
+  ]);
   vi.mocked(onVaultLocked).mockImplementation((handler) => {
     lockHandler = handler;
     return Promise.resolve(stopListening);

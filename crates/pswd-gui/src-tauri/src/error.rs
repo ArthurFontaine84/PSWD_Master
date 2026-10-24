@@ -12,7 +12,7 @@ pub struct UiError {
 }
 
 impl UiError {
-    fn new(code: &'static str, detail: impl Into<String>) -> Self {
+    pub fn new(code: &'static str, detail: impl Into<String>) -> Self {
         Self {
             code,
             detail: Some(detail.into()),
@@ -21,6 +21,11 @@ impl UiError {
 
     fn code(code: &'static str) -> Self {
         Self { code, detail: None }
+    }
+
+    /// Aucun coffre ouvert : il a été verrouillé, à la main ou par inactivité.
+    pub fn vault_locked() -> Self {
+        Self::code("vaultLocked")
     }
 }
 

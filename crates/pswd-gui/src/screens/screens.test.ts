@@ -1,8 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createVault, listVaults, lockVault, unlockVault } from "../lib/api";
+import { createVault, listVaults, unlockVault } from "../lib/api";
 import CreateVault from "./CreateVault.svelte";
-import OpenVault from "./OpenVault.svelte";
 import RecoveryKey from "./RecoveryKey.svelte";
 import Unlock from "./Unlock.svelte";
 import VaultList from "./VaultList.svelte";
@@ -11,7 +10,6 @@ vi.mock("../lib/api", () => ({
   listVaults: vi.fn(),
   createVault: vi.fn(),
   unlockVault: vi.fn(),
-  lockVault: vi.fn(),
 }));
 
 const created = { vault: { name: "perso", entries: 0 }, recoveryKey: "AAAA-BBBB" };
@@ -135,25 +133,5 @@ describe("Unlock", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Mot de passe maître incorrect.");
     await fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
     expect(onCancel).toHaveBeenCalled();
-  });
-});
-
-describe("OpenVault", () => {
-  it("shows the vault and locks it", async () => {
-    vi.mocked(lockVault).mockResolvedValue();
-    const onLocked = vi.fn();
-    render(OpenVault, { vault: { name: "perso", entries: 2 }, onLocked });
-    expect(screen.getByRole("heading")).toHaveTextContent("Coffre « perso »");
-    expect(screen.getByText("2 entrées")).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole("button", { name: "Verrouiller" }));
-    await vi.waitFor(() => {
-      expect(onLocked).toHaveBeenCalled();
-    });
-    expect(lockVault).toHaveBeenCalled();
-  });
-
-  it("counts a single entry in the singular", () => {
-    render(OpenVault, { vault: { name: "perso", entries: 1 }, onLocked: vi.fn() });
-    expect(screen.getByText("1 entrée")).toBeInTheDocument();
   });
 });

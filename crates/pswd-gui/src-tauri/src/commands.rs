@@ -7,6 +7,7 @@ use pswd_core::Secret;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
 
+use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
 use crate::state::{AppState, VaultInfo};
 
@@ -63,6 +64,39 @@ pub fn current_vault(state: State<'_, AppState>) -> Option<VaultInfo> {
     state.current()
 }
 
+/// Entrées du coffre ouvert qui correspondent à `text` et à `tag`, sans mot de passe.
+#[tauri::command]
+pub fn list_entries(
+    state: State<'_, AppState>,
+    text: String,
+    tag: Option<String>,
+) -> Result<Vec<EntrySummary>, UiError> {
+    state.entries(&text, tag.as_deref())
+}
+
+#[tauri::command]
+pub fn entry_detail(state: State<'_, AppState>, id: String) -> Result<EntryDetail, UiError> {
+    state.entry(&id)
+}
+
+#[tauri::command]
+pub fn list_tags(state: State<'_, AppState>) -> Result<Vec<TagCount>, UiError> {
+    state.tags()
+}
+
+/// Le mot de passe d'une entrée, sur demande explicite de l'utilisateur (« Afficher »).
+#[tauri::command]
+pub fn reveal_password(state: State<'_, AppState>, id: String) -> Result<String, UiError> {
+    Ok(state.reveal_password(&id)?.expose().to_owned())
+}
+
+/// Copie le mot de passe sans le transmettre à l'interface ; renvoie le délai d'effacement en
+/// secondes.
+#[tauri::command]
+pub fn copy_password(state: State<'_, AppState>, id: String) -> Result<u64, UiError> {
+    Ok(state.copy_password(&id)?.as_secs())
+}
+
 /// Prévient l'interface quand le coffre se verrouille par inactivité.
 pub fn lock_notifier<R: Runtime>(app: AppHandle<R>) -> impl Fn() + Send + Sync + 'static {
     move || {
@@ -78,8 +112,9 @@ mod tests {
     use std::time::Duration;
 
     use pswd_app::Vaults;
-    use pswd_core::Timestamp;
     use pswd_core::crypto::KdfParams;
+    use pswd_core::ports::{PortError, SecureClipboard};
+    use pswd_core::{EntryContent, EntryKind, Tags, Timestamp};
     use pswd_infra::Locations;
     use serde_json::{Value, json};
     use tauri::http::HeaderMap;
@@ -120,12 +155,18 @@ mod tests {
                     unlock_vault,
                     lock_vault,
                     current_vault,
+                    list_entries,
+                    entry_detail,
+                    list_tags,
+                    reveal_password,
+                    copy_password,
                     not_allowed
                 ])
                 .build(tauri::generate_context!())
                 .unwrap();
             app.manage(AppState::with_settings(
                 vaults,
+                Box::new(FakeClipboard),
                 kdf,
                 || Timestamp::from_millis(1_000),
                 auto_lock,
@@ -240,6 +281,93 @@ mod tests {
         app.create("perso", "maître").unwrap();
         assert_eq!(receiver.recv_timeout(Duration::from_secs(5)), Ok(()));
         assert_eq!(app.call("current_vault", json!({})), Ok(Value::Null));
+    }
+
+    /// Presse-papiers qui accepte tout, sans rien garder.
+    struct FakeClipboard;
+
+    impl SecureClipboard for FakeClipboard {
+        fn copy_secret(&mut self, _: &Secret, _: Duration) -> Result<(), PortError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn existing_entries_are_returned_without_their_password() {
+        let app = TestApp::new(None);
+        app.create("perso", "maître").unwrap();
+        let state = app.app.state::<AppState>();
+        state.lock();
+        let (mut session, _) = state
+            .vaults
+            .create(
+                "travail",
+                &Secret::new("maître".to_owned()),
+                KdfParams::new(8 * 1024, 1, 1).unwrap(),
+                Timestamp::from_millis(0),
+            )
+            .unwrap();
+        let id = session
+            .edit(|vault| {
+                vault.add(
+                    EntryContent {
+                        password: Some(Secret::new("hunter2".to_owned())),
+                        tags: Tags::new(["dev"]),
+                        ..EntryContent::new(EntryKind::Login, "GitHub".to_owned())
+                    },
+                    Timestamp::from_millis(1),
+                )
+            })
+            .unwrap()
+            .to_string();
+        drop(session);
+        app.call(
+            "unlock_vault",
+            json!({ "name": "travail", "password": "maître" }),
+        )
+        .unwrap();
+        let listed = app
+            .call("list_entries", json!({ "text": "", "tag": "dev" }))
+            .unwrap();
+        assert_eq!(listed[0]["title"], "GitHub");
+        assert!(!listed.to_string().contains("hunter2"));
+        let detail = app.call("entry_detail", json!({ "id": id })).unwrap();
+        assert_eq!(detail["hasPassword"], true);
+        assert!(!detail.to_string().contains("hunter2"));
+        assert_eq!(
+            app.call("list_tags", json!({})),
+            Ok(json!([{ "tag": "dev", "count": 1 }]))
+        );
+        assert_eq!(
+            app.call("reveal_password", json!({ "id": id })),
+            Ok(json!("hunter2"))
+        );
+        assert_eq!(
+            app.call("copy_password", json!({ "id": id })),
+            Ok(json!(20))
+        );
+    }
+
+    #[test]
+    fn entries_are_read_through_their_commands() {
+        let app = TestApp::new(None);
+        let empty = json!({ "text": "", "tag": null });
+        assert_eq!(
+            app.call("list_entries", empty.clone()),
+            Err(json!({ "code": "vaultLocked", "detail": null }))
+        );
+        app.create("perso", "maître").unwrap();
+        assert_eq!(app.call("list_entries", empty), Ok(json!([])));
+        assert_eq!(
+            app.call("list_entries", json!({ "text": "x", "tag": "dev" })),
+            Ok(json!([]))
+        );
+        assert_eq!(app.call("list_tags", json!({})), Ok(json!([])));
+        let unknown = json!({ "id": "inconnue" });
+        let not_found = Err(json!({ "code": "entryNotFound", "detail": "inconnue" }));
+        assert_eq!(app.call("entry_detail", unknown.clone()), not_found);
+        assert_eq!(app.call("reveal_password", unknown.clone()), not_found);
+        assert_eq!(app.call("copy_password", unknown), not_found);
     }
 
     /// Commande bien enregistrée, mais ni déclarée dans `build.rs` ni autorisée par une capacité.

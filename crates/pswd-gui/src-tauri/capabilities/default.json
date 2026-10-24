@@ -9,6 +9,11 @@
     "allow-unlock-vault",
     "allow-lock-vault",
     "allow-current-vault",
+    "allow-list-entries",
+    "allow-entry-detail",
+    "allow-list-tags",
+    "allow-reveal-password",
+    "allow-copy-password",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

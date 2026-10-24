@@ -14,6 +14,33 @@ export interface VaultInfo {
   entries: number;
 }
 
+export type EntryKind = "login" | "note";
+
+/** Une ligne de la liste : jamais de mot de passe. */
+export interface EntrySummary {
+  id: string;
+  kind: EntryKind;
+  title: string;
+  username: string | null;
+  tags: string[];
+  hasPassword: boolean;
+}
+
+/** Le détail d'une entrée, toujours sans son mot de passe. */
+export interface EntryDetail extends EntrySummary {
+  urls: string[];
+  notes: string | null;
+  /** Millisecondes depuis l'époque Unix. */
+  createdAt: number;
+  updatedAt: number;
+  versions: number;
+}
+
+export interface TagCount {
+  tag: string;
+  count: number;
+}
+
 export interface CreatedVault {
   vault: VaultInfo;
   /** À afficher une seule fois, puis à oublier. */
@@ -39,6 +66,28 @@ export async function lockVault(): Promise<void> {
 /** Le coffre ouvert, ou `null` ; chaque appel repousse le verrouillage automatique. */
 export function currentVault(): Promise<VaultInfo | null> {
   return invoke<VaultInfo | null>("current_vault");
+}
+
+export function listEntries(text: string, tag: string | null): Promise<EntrySummary[]> {
+  return invoke<EntrySummary[]>("list_entries", { text, tag });
+}
+
+export function entryDetail(id: string): Promise<EntryDetail> {
+  return invoke<EntryDetail>("entry_detail", { id });
+}
+
+export function listTags(): Promise<TagCount[]> {
+  return invoke<TagCount[]>("list_tags");
+}
+
+/** Le mot de passe en clair : seulement quand l'utilisateur demande à le voir. */
+export function revealPassword(id: string): Promise<string> {
+  return invoke<string>("reveal_password", { id });
+}
+
+/** Copie faite par le backend ; renvoie le délai d'effacement, en secondes. */
+export function copyPassword(id: string): Promise<number> {
+  return invoke<number>("copy_password", { id });
 }
 
 /** Appelle `handler` quand le coffre se verrouille par inactivité. */

@@ -11,6 +11,11 @@ function isKnownCode(code: string): code is ErrorCode {
   return Object.hasOwn(texts.errors, code);
 }
 
+/** L'opération a échoué parce que le coffre s'est verrouillé entre-temps. */
+export function isVaultLocked(error: unknown): boolean {
+  return isUiError(error) && error.code === "vaultLocked";
+}
+
 /** Message à afficher pour une erreur reçue du backend, dans la langue de l'interface. */
 export function errorMessage(error: unknown): string {
   if (!isUiError(error)) {

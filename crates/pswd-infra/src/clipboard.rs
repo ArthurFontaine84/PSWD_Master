@@ -11,7 +11,7 @@ use zeroize::Zeroizing;
 mod system;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub use system::SystemClipboard;
+pub use system::{LazyClipboard, SystemClipboard};
 
 /// Accès brut au presse-papiers.
 pub trait ClipboardAccess: Send + 'static {

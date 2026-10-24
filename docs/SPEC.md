@@ -22,7 +22,7 @@ Le coffre est chiffré de bout en bout : le serveur ne voit jamais de données e
 **Étape 2 — interfaces graphiques** (en cours, §12) : application **PSWD Master** pour le bureau (Windows, Linux, macOS) et le mobile (Android, iOS), un seul projet Tauri 2. Chaque appareil est autonome et entièrement local, avec les fonctionnalités de la CLI. Sous-étapes, chacune validée et commitée :
 1. `pswd-app` : cas d'usage extraits de la CLI, comportement inchangé.
 2. Squelette Tauri (`pswd-gui`) : CSP et capacités, premier build Android et iOS ; liste des coffres, création, déverrouillage, verrouillage.
-3. Consultation : liste, recherche, tags, détail, copier, afficher.
+3. Consultation : liste, recherche, tags, détail, copier, afficher. Reportés : ouvrir une URL dans le navigateur du système (plugin et capacité dédiés), copier l'identifiant.
 4. Modification : ajout, édition, suppression, historique, générateur.
 5. Gestion des coffres : mot de passe maître, récupération, CSV, sauvegarde et restauration, suppression, réglages.
 6. Mobile : presse-papiers sensible, verrouillage en arrière-plan, écran masqué, fichiers `.pswd`, ergonomie tactile.
@@ -325,7 +325,9 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 - Bureau : sauvegarde et restauration par dossier, comme la CLI (§7), choisi dans une boîte de dialogue. Le bureau restaure aussi un fichier `.pswd`.
 - Mobile : un coffre = un fichier. « Sauvegarder » ouvre la fenêtre système d'enregistrement avec `<nom>_<AAAA-MM-JJ_HH-MM-SS>.pswd` (un `vault.enc` renommé, toujours chiffré) ; « Restaurer » ouvre le sélecteur de fichiers, puis applique les règles du §7. `pswd-app` restaure donc à partir des octets du fichier, pas d'un chemin.
 
-**Presse-papiers** : sur le bureau, `TimedClipboard<SystemClipboard>` de `pswd-infra`. Sur mobile, un plugin Tauri maison (Kotlin et Swift, quelques dizaines de lignes) implémente `SecureClipboard` avec les marqueurs du §9 ; le plugin officiel ne les pose pas.
+**Consultation** : la liste et le détail ne contiennent jamais de mot de passe. « Copier » est fait par Rust (`copy_password`) ; « Afficher » (`reveal_password`) envoie le mot de passe à l'interface, qui le masque de nouveau au bout de 30 s, ou dès qu'on change d'entrée. Recherche à chaque frappe (côté Rust, `pswd_app::search`), filtre par tag, `Ctrl+F` pour aller à la recherche. Toute lecture du coffre repousse son verrouillage ; si le coffre s'est verrouillé entre-temps, l'interface revient à la liste.
+
+**Presse-papiers** : sur le bureau, `LazyClipboard` de `pswd-infra` (ouvert à la première copie, partagé avec la CLI). Sur mobile, un plugin Tauri maison (Kotlin et Swift, quelques dizaines de lignes) implémente `SecureClipboard` avec les marqueurs du §9 ; le plugin officiel ne les pose pas.
 
 **Verrouillage**
 - Un seul coffre ouvert à la fois, gardé en Rust dans un `IdleLock` ; en ouvrir un autre verrouille le premier. Un coffre créé reste ouvert : sa clé de récupération est affichée une seule fois, puis oubliée par l'interface.

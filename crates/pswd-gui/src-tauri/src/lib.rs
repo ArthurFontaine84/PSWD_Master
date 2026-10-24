@@ -6,6 +6,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 mod commands;
+mod entries;
 mod error;
 mod state;
 
@@ -15,7 +16,7 @@ use pswd_app::Vaults;
 use pswd_infra::Locations;
 use tauri::Manager;
 
-use crate::state::AppState;
+use crate::state::{AppState, Clipboard};
 
 /// Démarre l'application : sur le bureau par `main`, sur mobile par le code natif généré.
 // Exclu de la couverture : ouvre une vraie fenêtre ; les commandes sont testées avec le moteur
@@ -27,7 +28,7 @@ pub fn run() {
         .setup(|app| {
             let locations = locations(app.handle())?;
             let on_lock = commands::lock_notifier(app.handle().clone());
-            app.manage(AppState::new(Vaults::new(locations), on_lock));
+            app.manage(AppState::new(Vaults::new(locations), clipboard(), on_lock));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -35,7 +36,12 @@ pub fn run() {
             commands::create_vault,
             commands::unlock_vault,
             commands::lock_vault,
-            commands::current_vault
+            commands::current_vault,
+            commands::list_entries,
+            commands::entry_detail,
+            commands::list_tags,
+            commands::reveal_password,
+            commands::copy_password
         ])
         .run(tauri::generate_context!());
     if let Err(error) = result {
@@ -57,4 +63,36 @@ fn locations(_: &tauri::AppHandle) -> Result<Locations, Box<dyn Error>> {
 fn locations(app: &tauri::AppHandle) -> Result<Locations, Box<dyn Error>> {
     let dir = app.path().app_data_dir()?;
     Ok(Locations::new(&dir.join("config"), &dir.join("data")))
+}
+
+/// Sur le bureau, le presse-papiers du système, ouvert à la première copie.
+#[cfg(desktop)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn clipboard() -> Clipboard {
+    Box::new(pswd_infra::LazyClipboard::default())
+}
+
+/// Sur mobile, pas encore de presse-papiers : il doit marquer le contenu comme sensible.
+#[cfg(mobile)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn clipboard() -> Clipboard {
+    Box::new(UnavailableClipboard)
+}
+
+// EXTENSION(mobile): plugin natif (Kotlin, Swift) qui pose les marqueurs « sensible » (SPEC §12).
+#[cfg(mobile)]
+struct UnavailableClipboard;
+
+#[cfg(mobile)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+impl pswd_core::ports::SecureClipboard for UnavailableClipboard {
+    fn copy_secret(
+        &mut self,
+        _: &pswd_core::Secret,
+        _: std::time::Duration,
+    ) -> Result<(), pswd_core::ports::PortError> {
+        Err(pswd_core::ports::PortError::new(
+            "copie pas encore disponible sur mobile",
+        ))
+    }
 }
