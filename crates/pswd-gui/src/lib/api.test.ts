@@ -3,10 +3,19 @@ import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   addEntry,
+  backupContents,
+  backupVaults,
+  changePassword,
   copyPassword,
   createVault,
   currentVault,
   deleteEntry,
+  deleteVault,
+  getSettings,
+  importEntries,
+  recoverVault,
+  restoreVault,
+  saveSettings,
   entryDetail,
   entryHistory,
   listEntries,
@@ -53,6 +62,21 @@ describe("api", () => {
     await updateEntry("1", entry);
     await deleteEntry("1");
     await entryHistory("1");
+    await changePassword("maître", "nouveau");
+    await recoverVault("perso", "AAAA", "nouveau");
+    await deleteVault("perso", "perso");
+    await importEntries("C:/import.csv");
+    await backupVaults("E:/");
+    await backupContents("E:/pswd-sauvegardes/1");
+    await restoreVault("E:/pswd-sauvegardes/1", "perso");
+    await getSettings();
+    const settings = {
+      autoLockMinutes: 5,
+      clipboardClearSeconds: 20,
+      backgroundLockSeconds: 60,
+      theme: "dark" as const,
+    };
+    await saveSettings(settings);
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ["list_vaults"],
       ["create_vault", { name: "perso", password: "maître" }],
@@ -68,6 +92,15 @@ describe("api", () => {
       ["update_entry", { id: "1", entry }],
       ["delete_entry", { id: "1" }],
       ["entry_history", { id: "1" }],
+      ["change_password", { current: "maître", password: "nouveau" }],
+      ["recover_vault", { name: "perso", recoveryKey: "AAAA", password: "nouveau" }],
+      ["delete_vault", { name: "perso", confirmation: "perso" }],
+      ["import_entries", { path: "C:/import.csv" }],
+      ["backup_vaults", { destination: "E:/" }],
+      ["backup_contents", { folder: "E:/pswd-sauvegardes/1" }],
+      ["restore_vault", { folder: "E:/pswd-sauvegardes/1", name: "perso" }],
+      ["get_settings"],
+      ["save_settings", { settings }],
     ]);
   });
 

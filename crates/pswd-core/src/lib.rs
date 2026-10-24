@@ -16,7 +16,7 @@ mod timestamp;
 mod vault;
 mod vault_file;
 
-pub use csv_format::{CsvError, LineProblem, export_csv, import_csv};
+pub use csv_format::{CsvError, LineProblem, import_csv};
 pub use entry::{Entry, EntryContent, EntryKind, EntrySnapshot};
 pub use generator::{GeneratorError, PasswordOptions, generate_password};
 pub use merge::{MergeError, merge};

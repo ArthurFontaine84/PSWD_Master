@@ -12,6 +12,11 @@ export function newVaultProblem(name: string, password: string, confirmation: st
   if (name.length > MAX_NAME_LENGTH || !NAME_PATTERN.test(name)) {
     return texts.validation.nameInvalid;
   }
+  return newPasswordProblem(password, confirmation);
+}
+
+/** Problème d'un nouveau mot de passe maître et de sa confirmation, ou `null`. */
+export function newPasswordProblem(password: string, confirmation: string): string | null {
   if (password === "") {
     return texts.validation.passwordRequired;
   }

@@ -221,11 +221,6 @@
     border-radius: var(--radius);
   }
 
-  .danger {
-    border-color: var(--danger);
-    color: var(--danger);
-  }
-
   .history {
     display: grid;
     gap: var(--space-s);

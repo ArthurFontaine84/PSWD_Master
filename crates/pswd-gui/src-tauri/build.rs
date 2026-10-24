@@ -18,6 +18,15 @@ const COMMANDS: &[&str] = &[
     "update_entry",
     "delete_entry",
     "entry_history",
+    "change_password",
+    "recover_vault",
+    "delete_vault",
+    "import_entries",
+    "backup_vaults",
+    "backup_contents",
+    "restore_vault",
+    "get_settings",
+    "save_settings",
 ];
 
 fn main() {

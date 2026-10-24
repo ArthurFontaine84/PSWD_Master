@@ -14,7 +14,7 @@ mod vaults;
 use pswd_core::Session;
 use pswd_infra::FileStore;
 
-pub use entries::{add_entries, export_to_file, live_count, search, tag_counts};
+pub use entries::{add_entries, live_count, search, tag_counts};
 pub use error::AppError;
 pub use idle_lock::IdleLock;
 pub use random::generate;

@@ -73,7 +73,12 @@ afterEach(() => {
 function show(props: Partial<{ onLocked: () => void; onExpired: () => void }> = {}) {
   const onLocked = props.onLocked ?? vi.fn();
   const onExpired = props.onExpired ?? vi.fn();
-  render(OpenVault, { vault: { name: "perso", entries: 2 }, onLocked, onExpired });
+  render(OpenVault, {
+    vault: { name: "perso", entries: 2 },
+    onLocked,
+    onExpired,
+    onDeleted: vi.fn(),
+  });
   return { onLocked, onExpired };
 }
 

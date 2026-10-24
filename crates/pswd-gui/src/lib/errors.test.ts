@@ -32,6 +32,28 @@ describe("errorMessage", () => {
       ["emptyTitle", null, "Le titre ne peut pas être vide."],
       ["invalidLength", null, "La longueur doit être comprise entre 8 et 128."],
       ["saveFailed", "disque plein", "Enregistrement impossible : disque plein"],
+      ["wrongRecoveryKey", null, "Clé de récupération incorrecte."],
+      [
+        "invalidRecoveryKey",
+        null,
+        "Clé de récupération mal saisie : 52 caractères, par groupes de 4.",
+      ],
+      ["confirmationMismatch", null, "Le nom retapé ne correspond pas."],
+      ["fileUnreadable", "introuvable", "Fichier illisible : introuvable"],
+      [
+        "csvInvalidHeader",
+        null,
+        "Première ligne du CSV attendue : title,kind,username,password,urls,notes,tags",
+      ],
+      ["csvFieldCount", "3", "CSV, ligne 3 : nombre de colonnes incorrect."],
+      ["csvUnknownKind", "4", "CSV, ligne 4 : type inconnu (login ou note attendu)."],
+      ["csvInvalidUtf8", "5", "CSV, ligne 5 : texte qui n'est pas en UTF-8."],
+      ["nothingToBackUp", null, "Aucun coffre à sauvegarder."],
+      ["emptyBackup", null, "Ce dossier ne contient aucun coffre sauvegardé."],
+      ["notInBackup", "perso", "Cette sauvegarde ne contient pas de coffre « perso »."],
+      ["invalidBackup", "altérée", "Sauvegarde inutilisable : altérée"],
+      ["invalidSettings", null, "Réglages hors des valeurs permises."],
+      ["ioError", "disque absent", "Erreur de fichier : disque absent"],
       ["unexpected", "disque plein", "Erreur : disque plein"],
     ];
     for (const [code, detail, message] of cases) {

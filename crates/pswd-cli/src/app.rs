@@ -25,8 +25,6 @@ pub enum CliError {
     UnknownKind(String),
     Vault(VaultError),
     RecoveryKey(RecoveryKeyError),
-    EmptyBackup,
-    NotInBackup(String),
 }
 
 impl fmt::Display for CliError {
@@ -49,10 +47,6 @@ impl fmt::Display for CliError {
             Self::UnknownKind(kind) => write!(f, "type inconnu « {kind} » : login ou note"),
             Self::Vault(error) => error.fmt(f),
             Self::RecoveryKey(error) => error.fmt(f),
-            Self::EmptyBackup => f.write_str("cette sauvegarde ne contient aucun coffre"),
-            Self::NotInBackup(name) => {
-                write!(f, "cette sauvegarde ne contient pas de coffre « {name} »")
-            }
         }
     }
 }
@@ -105,7 +99,6 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
             Command::Passwd { name } => self.change_password(&name, Unlock::Password),
             Command::Recover { name } => self.change_password(&name, Unlock::RecoveryKey),
             Command::Import { name, file } => self.import(&name, &file),
-            Command::Export { name, file } => self.export(&name, &file),
             Command::Delete { name } => self.delete(&name),
             Command::Backup { destination, vault } => self.backup(&destination, vault.as_deref()),
             Command::Restore { backup, name } => self.restore(&backup, name.as_deref()),
@@ -169,14 +162,6 @@ mod tests {
             (
                 CliError::RecoveryKey(RecoveryKeyError::WrongLength),
                 "la clé de récupération doit compter 52 caractères",
-            ),
-            (
-                CliError::EmptyBackup,
-                "cette sauvegarde ne contient aucun coffre",
-            ),
-            (
-                CliError::NotInBackup("perso".to_owned()),
-                "cette sauvegarde ne contient pas de coffre « perso »",
             ),
         ];
         for (error, message) in messages {

@@ -38,12 +38,6 @@ pub enum Command {
         name: String,
         file: PathBuf,
     },
-    /// Exporte un coffre en clair dans un nouveau fichier CSV.
-    Export {
-        /// Nom du coffre.
-        name: String,
-        file: PathBuf,
-    },
     /// Supprime un coffre de cette machine (le nom est à retaper).
     Delete {
         /// Nom du coffre.
@@ -109,13 +103,6 @@ mod tests {
             }
         );
         assert_eq!(
-            parse(&["export", "perso", "b.csv"]).unwrap(),
-            Command::Export {
-                name: "perso".to_owned(),
-                file: PathBuf::from("b.csv")
-            }
-        );
-        assert_eq!(
             parse(&["delete", "perso"]).unwrap(),
             Command::Delete {
                 name: "perso".to_owned()
@@ -146,7 +133,6 @@ mod tests {
             &["passwd"],
             &["recover"],
             &["import", "a.csv"],
-            &["export", "perso"],
             &["backup"],
             &["restore"],
             &["sync"],

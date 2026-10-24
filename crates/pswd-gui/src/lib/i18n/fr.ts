@@ -19,6 +19,21 @@ const errors = {
   emptyTitle: () => "Le titre ne peut pas être vide.",
   invalidLength: () => "La longueur doit être comprise entre 8 et 128.",
   saveFailed: (detail: string) => `Enregistrement impossible : ${detail}`,
+  wrongRecoveryKey: () => "Clé de récupération incorrecte.",
+  invalidRecoveryKey: () => "Clé de récupération mal saisie : 52 caractères, par groupes de 4.",
+  confirmationMismatch: () => "Le nom retapé ne correspond pas.",
+  fileUnreadable: (detail: string) => `Fichier illisible : ${detail}`,
+  csvInvalidHeader: () =>
+    "Première ligne du CSV attendue : title,kind,username,password,urls,notes,tags",
+  csvFieldCount: (detail: string) => `CSV, ligne ${detail} : nombre de colonnes incorrect.`,
+  csvUnknownKind: (detail: string) => `CSV, ligne ${detail} : type inconnu (login ou note attendu).`,
+  csvInvalidUtf8: (detail: string) => `CSV, ligne ${detail} : texte qui n'est pas en UTF-8.`,
+  nothingToBackUp: () => "Aucun coffre à sauvegarder.",
+  emptyBackup: () => "Ce dossier ne contient aucun coffre sauvegardé.",
+  notInBackup: (detail: string) => `Cette sauvegarde ne contient pas de coffre « ${detail} ».`,
+  invalidBackup: (detail: string) => `Sauvegarde inutilisable : ${detail}`,
+  invalidSettings: () => "Réglages hors des valeurs permises.",
+  ioError: (detail: string) => `Erreur de fichier : ${detail}`,
   unexpected: (detail: string) => `Erreur : ${detail}`,
 } satisfies Record<string, Message>;
 
@@ -90,6 +105,46 @@ export const fr = {
   history: "Historique",
   hideHistory: "Masquer l'historique",
   passwordChanged: "mot de passe différent",
+  manage: "Gérer le coffre",
+  changePassword: "Changer le mot de passe maître",
+  currentPassword: "Mot de passe maître actuel",
+  newPassword: "Nouveau mot de passe maître",
+  masterPasswordChanged: "Mot de passe maître changé.",
+  forgotPassword: "Mot de passe oublié ?",
+  recoverTitle: (name: string) => `Récupérer « ${name} »`,
+  recoveryKey: "Clé de récupération",
+  recover: "Choisir le nouveau mot de passe",
+  importCsv: "Importer un CSV",
+  importExplanation:
+    "Le fichier est lu sans passer par l'interface. Tout le fichier est vérifié avant d'ajouter quoi que ce soit.",
+  chooseFile: "Choisir le fichier",
+  imported: (count: number) =>
+    `${count <= 1 ? `${count} entrée importée` : `${count} entrées importées`}. Supprimez maintenant le fichier CSV : il contient vos mots de passe en clair.`,
+  deleteVault: "Supprimer ce coffre",
+  deleteForever: "Supprimer définitivement",
+  deleteVaultExplanation: (name: string) =>
+    `Le coffre « ${name} » et toutes ses entrées seront supprimés de cet appareil, sans retour possible. Une sauvegarde permet de le restaurer plus tard. Pour confirmer, retapez son nom.`,
+  vaultDeleted: (name: string) => `Coffre « ${name} » supprimé.`,
+  backup: "Sauvegarder les coffres",
+  backupTitle: "Choisir le dossier de sauvegarde (clé USB, disque externe)",
+  backedUp: (count: number, folder: string) =>
+    `${count <= 1 ? `${count} coffre sauvegardé` : `${count} coffres sauvegardés`} dans ${folder}.`,
+  restore: "Restaurer une sauvegarde",
+  restoreTitle: "Choisir un dossier de sauvegarde daté",
+  chooseBackup: "Choisir la sauvegarde",
+  restoreExplanation:
+    "Le coffre est ajouté comme nouveau coffre : un coffre existant n'est jamais remplacé. Il s'ouvre avec le mot de passe maître en vigueur au moment de la sauvegarde.",
+  restored: (name: string, target: string) =>
+    name === target
+      ? `Coffre « ${name} » restauré.`
+      : `Coffre « ${name} » restauré sous le nom « ${target} » : ce nom était déjà pris.`,
+  settings: "Réglages",
+  autoLock: "Verrouillage après inactivité (minutes, 0 = jamais)",
+  clipboardClear: "Effacement du presse-papiers (secondes)",
+  backgroundLock: "Verrouillage en arrière-plan sur mobile (secondes, 0 = immédiat)",
+  theme: "Thème",
+  themes: { auto: "Comme le système", light: "Clair", dark: "Sombre" },
+  settingsSaved: "Réglages enregistrés.",
   lockedForInactivity: "Coffre verrouillé après une période d'inactivité.",
   validation: {
     nameRequired: "Le nom du coffre est obligatoire.",

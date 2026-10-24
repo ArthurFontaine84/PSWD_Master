@@ -1,11 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { currentVault, onVaultLocked, type VaultInfo } from "./lib/api";
+  import { currentVault, getSettings, onVaultLocked, type VaultInfo } from "./lib/api";
   import { throttle } from "./lib/activity";
   import { texts } from "./lib/i18n";
+  import { applyTheme } from "./lib/theme";
   import CreateVault from "./screens/CreateVault.svelte";
   import OpenVault from "./screens/OpenVault.svelte";
   import RecoveryKey from "./screens/RecoveryKey.svelte";
+  import Restore from "./screens/Restore.svelte";
+  import Settings from "./screens/Settings.svelte";
   import Unlock from "./screens/Unlock.svelte";
   import VaultList from "./screens/VaultList.svelte";
 
@@ -14,7 +17,9 @@
     | { kind: "create" }
     | { kind: "recovery"; vault: VaultInfo; recoveryKey: string }
     | { kind: "unlock"; name: string }
-    | { kind: "open"; vault: VaultInfo };
+    | { kind: "open"; vault: VaultInfo }
+    | { kind: "restore" }
+    | { kind: "settings" };
 
   /** Intervalle minimal entre deux signaux d'activité envoyés au backend. */
   const ACTIVITY_INTERVAL = 30_000;
@@ -42,6 +47,13 @@
   }
 
   onMount(() => {
+    // Sans réglages lisibles, le thème reste celui du système.
+    getSettings().then(
+      (settings) => {
+        applyTheme(settings.theme);
+      },
+      () => undefined,
+    );
     const unlisten = onVaultLocked(showLocked);
     return () => {
       void unlisten.then((stop) => {
@@ -60,6 +72,8 @@
       notice={screen.notice}
       onOpen={(name) => (screen = { kind: "unlock", name })}
       onCreate={() => (screen = { kind: "create" })}
+      onRestore={() => (screen = { kind: "restore" })}
+      onSettings={() => (screen = { kind: "settings" })}
     />
   {:else if screen.kind === "create"}
     <CreateVault
@@ -75,11 +89,20 @@
       onUnlocked={(vault) => (screen = { kind: "open", vault })}
       onCancel={() => (screen = { kind: "list" })}
     />
+  {:else if screen.kind === "restore"}
+    <Restore
+      onRestored={(notice) => (screen = { kind: "list", notice })}
+      onCancel={() => (screen = { kind: "list" })}
+    />
+  {:else if screen.kind === "settings"}
+    <Settings onClose={() => (screen = { kind: "list" })} />
   {:else}
+    {@const name = screen.vault.name}
     <OpenVault
       vault={screen.vault}
       onLocked={() => (screen = { kind: "list" })}
       onExpired={showLocked}
+      onDeleted={() => (screen = { kind: "list", notice: texts.vaultDeleted(name) })}
     />
   {/if}
 </main>

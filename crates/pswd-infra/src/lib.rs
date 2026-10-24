@@ -11,5 +11,5 @@ pub use backup::{BACKUPS_DIR, backup_vault_file, backup_vault_names, create_back
 pub use clipboard::{ClipboardAccess, TimedClipboard};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use clipboard::{LazyClipboard, SystemClipboard};
-pub use config::{Config, ConfigError, ConfigFile, Locations, VaultConfig};
+pub use config::{Config, ConfigError, ConfigFile, Locations, Theme, VaultConfig};
 pub use file_store::FileStore;

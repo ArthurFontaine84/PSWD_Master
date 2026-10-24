@@ -27,7 +27,7 @@ describe("VaultList", () => {
     vi.mocked(listVaults).mockResolvedValue(["perso", "travail"]);
     const onOpen = vi.fn();
     const onCreate = vi.fn();
-    render(VaultList, { onOpen, onCreate });
+    render(VaultList, { onOpen, onCreate, onRestore: vi.fn(), onSettings: vi.fn() });
     expect(screen.getByText("Chargement…")).toBeInTheDocument();
     await fireEvent.click(await screen.findByRole("button", { name: "travail" }));
     expect(onOpen).toHaveBeenCalledWith("travail");
@@ -37,14 +37,20 @@ describe("VaultList", () => {
 
   it("shows the notice, the empty list and the errors", async () => {
     vi.mocked(listVaults).mockResolvedValue([]);
-    render(VaultList, { notice: "Coffre verrouillé.", onOpen: vi.fn(), onCreate: vi.fn() });
+    render(VaultList, {
+      notice: "Coffre verrouillé.",
+      onOpen: vi.fn(),
+      onCreate: vi.fn(),
+      onRestore: vi.fn(),
+      onSettings: vi.fn(),
+    });
     expect(screen.getByRole("status")).toHaveTextContent("Coffre verrouillé.");
     expect(await screen.findByText("Aucun coffre sur cet appareil.")).toBeInTheDocument();
   });
 
   it("shows a translated error", async () => {
     vi.mocked(listVaults).mockRejectedValue({ code: "configInvalid", detail: "ligne 2" });
-    render(VaultList, { onOpen: vi.fn(), onCreate: vi.fn() });
+    render(VaultList, { onOpen: vi.fn(), onCreate: vi.fn(), onRestore: vi.fn(), onSettings: vi.fn() });
     expect(await screen.findByRole("alert")).toHaveTextContent("Configuration invalide : ligne 2");
   });
 });

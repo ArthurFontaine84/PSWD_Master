@@ -16,7 +16,7 @@ Le coffre est chiffré de bout en bout : le serveur ne voit jamais de données e
 - Entrées `Login` et `Note`, tags, historique des versions.
 - Générateur de mots de passe, copie sécurisée dans le presse-papiers.
 - Changement de mot de passe maître, clé de récupération.
-- Import / export CSV (format §8).
+- Import CSV (format §8). Pas d'export en clair : il exposerait tous les mots de passe dans un fichier, sans besoin réel (les sauvegardes, elles, restent chiffrées).
 - Sauvegarde et restauration sur disque externe, suppression d'un coffre (§7).
 
 **Étape 2 — interfaces graphiques** (en cours, §12) : application **PSWD Master** pour le bureau (Windows, Linux, macOS) et le mobile (Android, iOS), un seul projet Tauri 2. Chaque appareil est autonome et entièrement local, avec les fonctionnalités de la CLI. Sous-étapes, chacune validée et commitée :
@@ -24,7 +24,7 @@ Le coffre est chiffré de bout en bout : le serveur ne voit jamais de données e
 2. Squelette Tauri (`pswd-gui`) : CSP et capacités, premier build Android et iOS ; liste des coffres, création, déverrouillage, verrouillage.
 3. Consultation : liste, recherche, tags, détail, copier, afficher. Reportés : ouvrir une URL dans le navigateur du système (plugin et capacité dédiés), copier l'identifiant.
 4. Modification : ajout, édition, suppression, historique, générateur.
-5. Gestion des coffres : mot de passe maître, récupération, CSV, sauvegarde et restauration, suppression, réglages.
+5. Gestion des coffres : mot de passe maître, récupération, import CSV, sauvegarde et restauration, suppression, réglages.
 6. Mobile : presse-papiers sensible, verrouillage en arrière-plan, écran masqué, fichiers `.pswd`, ergonomie tactile.
 7. Installateurs, documentation, mutants.
 
@@ -48,7 +48,7 @@ Workspace Cargo, architecture hexagonale :
 |---|---|---|
 | `pswd-core` | Modèles, fusion, format de fichier, crypto, générateur, CSV, ports (traits) | Aucune E/S, aucun appel OS, `#![forbid(unsafe_code)]`, compilable pour mobile |
 | `pswd-infra` | Adaptateurs : `LocalStore` fichier, `SecureClipboard` du bureau, config, sauvegardes | `arboard` réservé au bureau : la crate compile pour le mobile |
-| `pswd-app` | Cas d'usage partagés : créer, ouvrir, supprimer, sauvegarder, restaurer (à partir d'octets), importer, exporter, lister les coffres. Ne pose aucune question à l'utilisateur. | `#![forbid(unsafe_code)]` |
+| `pswd-app` | Cas d'usage partagés : créer, ouvrir, supprimer, sauvegarder, restaurer (à partir d'octets), importer, lister les coffres. Ne pose aucune question à l'utilisateur. | `#![forbid(unsafe_code)]` |
 | `pswd-cli` | Binaire `pswd` : questions et affichage dans le terminal, shell interactif, verrouillage automatique | `#![forbid(unsafe_code)]` |
 | `pswd-gui` | Application Tauri 2 **PSWD Master** : backend Rust (commandes, session, verrouillage) et interface Svelte 5 + TypeScript (§12) | `#![forbid(unsafe_code)]` |
 
@@ -200,7 +200,6 @@ Précisions :
 | `pswd passwd <nom>` | Change le mot de passe maître (ancien requis), refait l'enveloppe 1. |
 | `pswd recover <nom>` | Clé de récupération + nouveau mot de passe, refait l'enveloppe 1. |
 | `pswd import <nom> <fichier.csv>` | Importe le format CSV ci-dessous (tout le fichier est validé avant d'ajouter quoi que ce soit), puis rappelle de supprimer le fichier. |
-| `pswd export <nom> <fichier.csv>` | Export en clair : double confirmation + mot de passe maître redemandé. Un fichier existant n'est jamais écrasé. |
 | `pswd backup <destination> [--vault nom]` | Sauvegarde tous les coffres (ou un seul) dans un nouveau dossier daté (§7). |
 | `pswd restore <sauvegarde> [nom]` | Restaure un coffre d'une sauvegarde datée comme nouveau coffre local (§7). |
 | `pswd delete <nom>` | Supprime un coffre de cette machine, après avoir retapé son nom (§7). |
@@ -220,7 +219,7 @@ Aucune commande n'écrase un coffre existant.
 - **Générateur** : 24 caractères par défaut (8 à 128), majuscules, minuscules, chiffres et symboles `!#$%&()*+,-./:;<=>?@[]^_{|}~` (ni espace, ni guillemets, ni antislash, ni accent grave) ; au moins un caractère de chaque classe active, obtenu par rejet des candidats incomplets pour que tous les mots de passe valides restent équiprobables. `pswd-core` reçoit le générateur aléatoire en paramètre, contraint par le trait `CryptoRng` ; la CLI fournit un `StdRng` initialisé par `SysRng` (aléa du système, `rand` 0.10) : si l'aléa manque, une erreur est affichée, jamais de panique.
 - **Affichage** : mot de passe masqué par défaut ; le mot de passe maître n'est jamais affiché ni copié.
 
-**Format CSV (import et export, aller-retour sans perte)**
+**Format CSV d'import**
 
 ```csv
 title,kind,username,password,urls,notes,tags
@@ -232,7 +231,7 @@ Code Wi-Fi,note,,,,"Box: ABCD-1234",maison
 - Listes (`urls`, `tags`) : `\;` et `\\` désignent un `;` et un `\` littéraux ; un `\` isolé est gardé tel quel ; les éléments vides sont ignorés.
 - Une cellule vide est un champ absent (`username`, `password`, `notes`). `kind` est lu sans tenir compte de la casse. Le BOM UTF-8 (Excel) est ignoré ; fins de ligne `\r\n`, `\n` ou `\r`.
 - L'en-tête doit être exactement celui ci-dessus. Les numéros de ligne sont ceux du fichier, y compris dans les champs sur plusieurs lignes ; ils sont calculés par `pswd-core` (ceux de la crate `csv` sont faux avec `\r\n` et les lignes vides). Les messages d'erreur ne citent jamais le contenu.
-- Export : entrées non supprimées, sans historique, triées par contenu, fins de ligne `\r\n`. Un champ commençant par `=`, `+`, `-` ou `@` n'est pas neutralisé (l'aller-retour serait perdu) : ouvrir l'export dans un tableur peut l'interpréter comme une formule.
+- L'application n'écrit jamais de CSV. Les tests et le fuzzing vérifient l'aller-retour avec un écrivain réservé aux tests (`#[cfg(any(test, fuzzing))]`) : tout CSV accepté se relit à l'identique.
 - Limite acceptée : les buffers internes de la crate `csv` ne sont pas effacés ; le fichier CSV est de toute façon en clair.
 
 ## 9. Sécurité

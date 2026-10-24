@@ -1,7 +1,10 @@
 <script lang="ts">
+  import ChangePassword from "../components/ChangePassword.svelte";
+  import DeleteVault from "../components/DeleteVault.svelte";
   import EntryDetailView from "../components/EntryDetail.svelte";
   import EntryForm from "../components/EntryForm.svelte";
   import EntryList from "../components/EntryList.svelte";
+  import ImportEntries from "../components/ImportEntries.svelte";
   import {
     addEntry,
     listEntries,
@@ -23,9 +26,10 @@
     onLocked: () => void;
     /** Le coffre s'est verrouillé pendant une opération. */
     onExpired: () => void;
+    onDeleted: () => void;
   }
 
-  const { vault, onLocked, onExpired }: Props = $props();
+  const { vault, onLocked, onExpired, onDeleted }: Props = $props();
 
   let text = $state("");
   let tag = $state<string | null>(null);
@@ -38,6 +42,15 @@
   let editor = $state<{ mode: "add" } | { mode: "edit"; detail: EntryDetail } | null>(null);
   /** Augmente après chaque modification : la liste et les tags sont relus. */
   let revision = $state(0);
+  let managing = $state(false);
+  /** Action de gestion ouverte à la place du détail. */
+  let panel = $state<"password" | "import" | "delete" | null>(null);
+
+  /** Une seule chose à la fois à la place du détail. */
+  function show(next: "password" | "import" | "delete") {
+    editor = null;
+    panel = next;
+  }
 
   function fail(error: unknown) {
     if (isVaultLocked(error)) {
@@ -69,7 +82,13 @@
 
   function select(id: string) {
     editor = null;
+    panel = null;
     selected = id;
+  }
+
+  function startEntry() {
+    panel = null;
+    editor = { mode: "add" };
   }
 
   /** Enregistre le formulaire, puis montre l'entrée enregistrée. */
@@ -100,14 +119,24 @@
 
 <svelte:window onkeydown={shortcut} />
 
-<section class="vault" class:has-selection={selected !== null || editor !== null} aria-labelledby="vault-title">
+<section class="vault" class:has-selection={selected !== null || editor !== null || panel !== null} aria-labelledby="vault-title">
   <header>
     <h2 id="vault-title">{texts.vaultTitle(vault.name)}</h2>
     <div class="actions">
-      <button type="button" class="primary" onclick={() => (editor = { mode: "add" })}>{texts.newEntry}</button>
+      <button type="button" class="primary" onclick={startEntry}>{texts.newEntry}</button>
+      <button type="button" aria-expanded={managing} onclick={() => (managing = !managing)}>
+        {texts.manage}
+      </button>
       <button type="button" onclick={lock}>{texts.lock}</button>
     </div>
   </header>
+  {#if managing}
+    <div class="actions manage">
+      <button type="button" onclick={() => show("password")}>{texts.changePassword}</button>
+      <button type="button" onclick={() => show("import")}>{texts.importCsv}</button>
+      <button type="button" class="danger" onclick={() => show("delete")}>{texts.deleteVault}</button>
+    </div>
+  {/if}
   <div class="layout">
     <div class="list-pane">
       <div class="filters">
@@ -135,7 +164,13 @@
       <EntryList {entries} {selected} onSelect={select} />
     </div>
     <div class="detail-pane">
-      {#if editor}
+      {#if panel === "password"}
+        <ChangePassword onClose={() => (panel = null)} {onExpired} />
+      {:else if panel === "import"}
+        <ImportEntries onImported={() => (revision += 1)} onClose={() => (panel = null)} {onExpired} />
+      {:else if panel === "delete"}
+        <DeleteVault name={vault.name} {onDeleted} onClose={() => (panel = null)} />
+      {:else if editor}
         <h3>{editor.mode === "edit" ? texts.editEntry(editor.detail.title) : texts.newEntry}</h3>
         {#key editor}
           <EntryForm
@@ -151,7 +186,10 @@
           <EntryDetailView
             id={selected}
             onBack={() => (selected = null)}
-            onEdit={(detail) => (editor = { mode: "edit", detail })}
+            onEdit={(detail) => {
+              panel = null;
+              editor = { mode: "edit", detail };
+            }}
             onDeleted={deleted}
             onError={fail}
           />
@@ -169,6 +207,12 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-m);
+  }
+
+  .manage {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    margin-bottom: var(--space-m);
   }
 
   .filters {

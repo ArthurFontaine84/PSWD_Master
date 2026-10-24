@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Ce que l'interface peut appeler : les commandes de PSWD Master et l'écoute de leurs événements ; ni fichiers, ni shell, ni réseau.",
+  "description": "Ce que l'interface peut appeler : les commandes de PSWD Master, l'écoute de leurs événements et la fenêtre système de choix d'un fichier ou d'un dossier (seul le chemin choisi est transmis) ; ni lecture de fichiers, ni shell, ni réseau.",
   "windows": ["main"],
   "permissions": [
     "allow-list-vaults",
@@ -18,7 +18,17 @@
     "allow-update-entry",
     "allow-delete-entry",
     "allow-entry-history",
+    "allow-change-password",
+    "allow-recover-vault",
+    "allow-delete-vault",
+    "allow-import-entries",
+    "allow-backup-vaults",
+    "allow-backup-contents",
+    "allow-restore-vault",
+    "allow-get-settings",
+    "allow-save-settings",
     "core:event:allow-listen",
-    "core:event:allow-unlisten"
+    "core:event:allow-unlisten",
+    "dialog:allow-open"
   ]
 }

@@ -9,6 +9,7 @@ mod commands;
 mod editing;
 mod entries;
 mod error;
+mod settings;
 mod state;
 
 use std::error::Error;
@@ -26,6 +27,7 @@ use crate::state::{AppState, Clipboard};
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn run() {
     let result = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let locations = locations(app.handle())?;
             let on_lock = commands::lock_notifier(app.handle().clone());
@@ -46,7 +48,16 @@ pub fn run() {
             commands::add_entry,
             commands::update_entry,
             commands::delete_entry,
-            commands::entry_history
+            commands::entry_history,
+            commands::change_password,
+            commands::recover_vault,
+            commands::delete_vault,
+            commands::import_entries,
+            commands::backup_vaults,
+            commands::backup_contents,
+            commands::restore_vault,
+            commands::get_settings,
+            commands::save_settings
         ])
         .run(tauri::generate_context!());
     if let Err(error) = result {

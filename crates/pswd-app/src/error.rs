@@ -14,6 +14,8 @@ pub enum AppError {
     EmptyPassword,
     NothingToBackUp,
     InvalidBackup(FileError),
+    EmptyBackup,
+    NotInBackup(String),
     File(String),
     RandomUnavailable,
 }
@@ -29,6 +31,10 @@ impl fmt::Display for AppError {
             Self::EmptyPassword => f.write_str("le mot de passe maître ne peut pas être vide"),
             Self::NothingToBackUp => f.write_str("aucun coffre à sauvegarder : utiliser init"),
             Self::InvalidBackup(error) => write!(f, "fichier de sauvegarde inutilisable : {error}"),
+            Self::EmptyBackup => f.write_str("cette sauvegarde ne contient aucun coffre"),
+            Self::NotInBackup(name) => {
+                write!(f, "cette sauvegarde ne contient pas de coffre « {name} »")
+            }
             Self::File(message) => f.write_str(message),
             Self::RandomUnavailable => f.write_str("générateur aléatoire du système indisponible"),
         }
@@ -99,6 +105,14 @@ mod tests {
             (
                 AppError::InvalidBackup(FileError::Malformed),
                 "fichier de sauvegarde inutilisable : fichier de coffre mal formé",
+            ),
+            (
+                AppError::EmptyBackup,
+                "cette sauvegarde ne contient aucun coffre",
+            ),
+            (
+                AppError::NotInBackup("perso".to_owned()),
+                "cette sauvegarde ne contient pas de coffre « perso »",
             ),
             (
                 AppError::File("écriture de a.csv impossible : disque plein".to_owned()),

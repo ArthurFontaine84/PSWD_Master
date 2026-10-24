@@ -20,6 +20,7 @@ pswd-core.workspace = true
 pswd-infra.workspace = true
 serde.workspace = true
 tauri.workspace = true
+tauri-plugin-dialog.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]

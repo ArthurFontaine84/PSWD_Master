@@ -1,16 +1,28 @@
+use std::fs;
+use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use pswd_app::{IdleLock, VaultSession, Vaults, live_count, search, tag_counts};
+use pswd_app::{
+    AppError, IdleLock, VaultSession, Vaults, add_entries, live_count, search, tag_counts,
+};
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::SecureClipboard;
-use pswd_core::{Credentials, Entry, Secret, Timestamp, Vault};
+use pswd_core::{Credentials, Entry, RecoveryKey, Secret, Timestamp, Vault, import_csv};
 use serde::Serialize;
 use uuid::Uuid;
 
 use crate::editing::{EntryInput, HistoryItem, history};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
+use crate::settings::Settings;
+
+/// Résultat d'une sauvegarde : le dossier daté créé et le nombre de coffres copiés.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BackupDone {
+    pub folder: String,
+    pub count: usize,
+}
 
 /// Coffre ouvert, tel que l'interface le voit : jamais de secret.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -212,6 +224,95 @@ impl AppState {
     pub fn history(&self, id: &str) -> Result<Vec<HistoryItem>, UiError> {
         let id = parse_id(id)?;
         self.with_vault(|vault| find(vault, id).map(history))?
+    }
+
+    /// Change le mot de passe maître du coffre ouvert ; l'actuel est redemandé.
+    pub fn change_password(&self, current: &Secret, new: &Secret) -> Result<(), UiError> {
+        if new.expose().is_empty() {
+            return Err(AppError::EmptyPassword.into());
+        }
+        let name = self.open_name()?;
+        self.vaults.open(&name, Credentials::Password(current))?;
+        let now = (self.clock)();
+        self.with_session(|session| session.change_password(new, self.kdf, now))??;
+        Ok(())
+    }
+
+    /// Mot de passe oublié : la clé de récupération ouvre le coffre et fixe un nouveau mot de
+    /// passe ; le coffre reste ouvert.
+    pub fn recover(
+        &self,
+        name: &str,
+        recovery_key: &Secret,
+        new: &Secret,
+    ) -> Result<VaultInfo, UiError> {
+        let key = RecoveryKey::parse(recovery_key.expose())
+            .map_err(|_| UiError::code("invalidRecoveryKey"))?;
+        if new.expose().is_empty() {
+            return Err(AppError::EmptyPassword.into());
+        }
+        let timeout = self.auto_lock()?;
+        let mut session = self.vaults.open(name, Credentials::RecoveryKey(&key))?;
+        session.change_password(new, self.kdf, (self.clock)())?;
+        Ok(self.keep_open(name, session, timeout))
+    }
+
+    /// Supprime un coffre de cet appareil ; `confirmation` doit être son nom, retapé.
+    pub fn delete_vault(&self, name: &str, confirmation: &str) -> Result<(), UiError> {
+        if confirmation.trim() != name {
+            return Err(UiError::code("confirmationMismatch"));
+        }
+        let is_open = self.open().as_ref().is_some_and(|open| open.name == name);
+        if is_open {
+            self.lock();
+        }
+        Ok(self.vaults.delete(name)?)
+    }
+
+    /// Importe un fichier CSV dans le coffre ouvert, tout ou rien ; renvoie le nombre d'entrées.
+    pub fn import_entries(&self, file: &Path) -> Result<usize, UiError> {
+        let data =
+            fs::read(file).map_err(|error| UiError::new("fileUnreadable", error.to_string()))?;
+        let contents = import_csv(&data).map_err(AppError::Csv)?;
+        let now = (self.clock)();
+        Ok(self.with_session(|session| add_entries(session, contents, now))??)
+    }
+
+    /// Sauvegarde tous les coffres dans un nouveau dossier daté de `destination`.
+    pub fn backup(&self, destination: &Path) -> Result<BackupDone, UiError> {
+        let (folder, count) = self.vaults.backup(destination, None, (self.clock)())?;
+        Ok(BackupDone {
+            folder: folder.display().to_string(),
+            count,
+        })
+    }
+
+    pub fn backup_contents(&self, folder: &Path) -> Result<Vec<String>, UiError> {
+        Ok(self.vaults.backup_contents(folder)?)
+    }
+
+    /// Restaure un coffre d'une sauvegarde ; renvoie le nom retenu.
+    pub fn restore(&self, folder: &Path, name: &str) -> Result<String, UiError> {
+        Ok(self.vaults.restore_from_backup(folder, name)?)
+    }
+
+    pub fn settings(&self) -> Result<Settings, UiError> {
+        Ok(Settings::from(&self.vaults.config()?))
+    }
+
+    pub fn save_settings(&self, settings: Settings) -> Result<Settings, UiError> {
+        settings.check()?;
+        let config = self
+            .vaults
+            .update_config(|config| settings.apply_to(config))?;
+        Ok(Settings::from(&config))
+    }
+
+    fn open_name(&self) -> Result<String, UiError> {
+        self.open()
+            .as_ref()
+            .map(|open| open.name.clone())
+            .ok_or_else(UiError::vault_locked)
     }
 
     /// Lit le coffre ouvert, et repousse son verrouillage.
@@ -791,5 +892,206 @@ mod tests {
             .unwrap_err();
         assert_eq!(serde_json::to_value(error).unwrap()["code"], "saveFailed");
         assert_eq!(state.entries("", None).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn managing_needs_an_open_vault() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        let locked = Some(UiError::vault_locked());
+        assert_eq!(
+            state.change_password(&secret("a"), &secret("b")).err(),
+            locked
+        );
+        let csv = dir.path().join("import.csv");
+        std::fs::write(&csv, "title,kind,username,password,urls,notes,tags\r\n").unwrap();
+        assert_eq!(state.import_entries(&csv).err(), locked);
+    }
+
+    #[test]
+    fn master_password_is_changed_after_checking_the_current_one() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        state.create("perso", &secret("maître")).unwrap();
+        assert_eq!(
+            state
+                .change_password(&secret("faux"), &secret("nouveau"))
+                .err(),
+            Some(UiError::code("wrongPassword"))
+        );
+        assert_eq!(
+            state.change_password(&secret("maître"), &secret("")).err(),
+            Some(UiError::code("emptyPassword"))
+        );
+        assert_eq!(
+            state.change_password(&secret("maître"), &secret("nouveau")),
+            Ok(())
+        );
+        state.lock();
+        assert!(state.unlock("perso", &secret("maître")).is_err());
+        assert_eq!(
+            state.unlock("perso", &secret("nouveau")),
+            Ok(info("perso", 0))
+        );
+    }
+
+    #[test]
+    fn recovery_key_sets_a_new_password_and_opens_the_vault() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        let (_, key) = state.create("perso", &secret("oublié")).unwrap();
+        state.lock();
+        let other = secret(&key.expose().to_lowercase().replace('-', " "));
+        assert_eq!(
+            state.recover("perso", &other, &secret("nouveau")),
+            Ok(info("perso", 0))
+        );
+        assert_eq!(state.current(), Some(info("perso", 0)));
+        state.lock();
+        assert_eq!(
+            state.unlock("perso", &secret("nouveau")),
+            Ok(info("perso", 0))
+        );
+    }
+
+    #[test]
+    fn recovery_errors_are_reported() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        let (_, key) = state.create("perso", &secret("maître")).unwrap();
+        state.lock();
+        assert_eq!(
+            state
+                .recover("perso", &secret("pas une clé"), &secret("x"))
+                .err(),
+            Some(UiError::code("invalidRecoveryKey"))
+        );
+        assert_eq!(
+            state.recover("perso", &key, &secret("")).err(),
+            Some(UiError::code("emptyPassword"))
+        );
+        let other_key = RecoveryKey::generate().unwrap().encode();
+        assert_eq!(
+            state.recover("perso", &other_key, &secret("x")).err(),
+            Some(UiError::code("wrongRecoveryKey"))
+        );
+        assert_eq!(state.current(), None);
+    }
+
+    #[test]
+    fn a_vault_is_deleted_once_its_name_is_retyped() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        state.create("travail", &secret("x")).unwrap();
+        state.create("perso", &secret("maître")).unwrap();
+        assert_eq!(
+            state.delete_vault("perso", "Perso").err(),
+            Some(UiError::code("confirmationMismatch"))
+        );
+        assert_eq!(state.current(), Some(info("perso", 0)));
+        assert_eq!(state.delete_vault("travail", " travail "), Ok(()));
+        assert_eq!(state.current(), Some(info("perso", 0)));
+        assert_eq!(state.delete_vault("perso", "perso"), Ok(()));
+        assert_eq!(state.current(), None);
+        assert!(state.vaults.config().unwrap().vaults.is_empty());
+        assert_eq!(
+            state.delete_vault("perso", "perso").err(),
+            Some(UiError::new("unknownVault", "perso"))
+        );
+    }
+
+    #[test]
+    fn csv_files_are_imported_all_or_nothing() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        open_with_entries(&state);
+        let csv = dir.path().join("import.csv");
+        std::fs::write(
+            &csv,
+            "title,kind,username,password,urls,notes,tags\r\n\
+             Box,login,admin,1234,,,maison\r\n\
+             Code,note,,,,ABCD,\r\n",
+        )
+        .unwrap();
+        assert_eq!(state.import_entries(&csv), Ok(2));
+        assert_eq!(state.entries("", None).unwrap().len(), 5);
+        std::fs::write(
+            &csv,
+            "title,kind,username,password,urls,notes,tags\r\nA,carte,,,,,\r\n",
+        )
+        .unwrap();
+        assert_eq!(
+            state.import_entries(&csv).err(),
+            Some(UiError::new("csvUnknownKind", "2"))
+        );
+        assert_eq!(state.entries("", None).unwrap().len(), 5);
+        let error = state
+            .import_entries(&dir.path().join("absent.csv"))
+            .unwrap_err();
+        assert_eq!(
+            serde_json::to_value(error).unwrap()["code"],
+            "fileUnreadable"
+        );
+    }
+
+    #[test]
+    fn vaults_are_backed_up_then_restored() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        state.create("perso", &secret("maître")).unwrap();
+        let usb = dir.path().join("usb");
+        std::fs::create_dir(&usb).unwrap();
+        let done = state.backup(&usb).unwrap();
+        assert_eq!(done.count, 1);
+        let folder = Path::new(&done.folder).to_owned();
+        assert_eq!(
+            folder,
+            usb.join("pswd-sauvegardes").join("1970-01-01_00-00-01")
+        );
+        assert_eq!(state.backup_contents(&folder), Ok(vec!["perso".to_owned()]));
+        assert_eq!(
+            state.restore(&folder, "perso"),
+            Ok("perso-sauvegarde-1970-01-01".to_owned())
+        );
+        assert_eq!(
+            state.restore(&folder, "travail").err(),
+            Some(UiError::new("notInBackup", "travail"))
+        );
+        let error = state.backup(&dir.path().join("débranchée")).unwrap_err();
+        assert_eq!(serde_json::to_value(error).unwrap()["code"], "ioError");
+    }
+
+    #[test]
+    fn settings_are_read_checked_and_saved() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        let defaults = serde_json::to_value(state.settings().unwrap()).unwrap();
+        assert_eq!(defaults["autoLockMinutes"], 10);
+        let changed: Settings = serde_json::from_value(json!({
+            "autoLockMinutes": 5,
+            "clipboardClearSeconds": 30,
+            "backgroundLockSeconds": 0,
+            "theme": "dark",
+        }))
+        .unwrap();
+        assert_eq!(state.save_settings(changed), Ok(changed));
+        assert_eq!(state.settings(), Ok(changed));
+        assert_eq!(state.vaults.config().unwrap().auto_lock_minutes, 5);
+        let invalid: Settings = serde_json::from_value(json!({
+            "autoLockMinutes": 5,
+            "clipboardClearSeconds": 1,
+            "backgroundLockSeconds": 0,
+            "theme": "dark",
+        }))
+        .unwrap();
+        assert_eq!(
+            state.save_settings(invalid).err(),
+            Some(UiError::code("invalidSettings"))
+        );
+        let config = dir.path().join("config").join("config.toml");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, "couleur = 1").unwrap();
+        assert!(state.settings().is_err());
+        assert!(state.save_settings(changed).is_err());
     }
 }

@@ -86,7 +86,6 @@ Commandes ponctuelles :
 pswd passwd perso                # changer le mot de passe maître
 pswd recover perso               # nouveau mot de passe grâce à la clé de récupération
 pswd import perso fichier.csv    # importer (format : docs/SPEC.md § 8)
-pswd export perso export.csv     # exporter en clair (double confirmation)
 pswd delete essai                # supprimer un coffre (nom à retaper)
 ```
 

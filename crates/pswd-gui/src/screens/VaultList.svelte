@@ -1,20 +1,44 @@
 <script lang="ts">
-  import { listVaults } from "../lib/api";
+  import { backupVaults, listVaults } from "../lib/api";
   import { errorMessage } from "../lib/errors";
+  import { pickFolder } from "../lib/files";
   import { texts } from "../lib/i18n";
 
   interface Props {
     notice?: string;
     onOpen: (name: string) => void;
     onCreate: () => void;
+    onRestore: () => void;
+    onSettings: () => void;
   }
 
-  const { notice, onOpen, onCreate }: Props = $props();
+  const { notice, onOpen, onCreate, onRestore, onSettings }: Props = $props();
   const vaults = listVaults();
+
+  let backupResult = $state<string | null>(null);
+  let backupProblem = $state<string | null>(null);
+
+  async function backup() {
+    backupResult = null;
+    backupProblem = null;
+    try {
+      const destination = await pickFolder(texts.backupTitle);
+      if (destination === null) {
+        return;
+      }
+      const { folder, count } = await backupVaults(destination);
+      backupResult = texts.backedUp(count, folder);
+    } catch (error) {
+      backupProblem = errorMessage(error);
+    }
+  }
 </script>
 
 <section aria-labelledby="vaults-title">
-  <h2 id="vaults-title">{texts.vaults}</h2>
+  <header>
+    <h2 id="vaults-title">{texts.vaults}</h2>
+    <button type="button" onclick={onSettings}>{texts.settings}</button>
+  </header>
   {#if notice}
     <p role="status" class="notice">{notice}</p>
   {/if}
@@ -30,13 +54,32 @@
         {/each}
       </ul>
     {/if}
+    {#if backupResult}
+      <p role="status">{backupResult}</p>
+    {/if}
+    {#if backupProblem}
+      <p role="alert">{backupProblem}</p>
+    {/if}
+    <div class="actions">
+      {#if names.length > 0}
+        <button type="button" onclick={backup}>{texts.backup}</button>
+      {/if}
+      <button type="button" onclick={onRestore}>{texts.restore}</button>
+      <button type="button" class="primary" onclick={onCreate}>{texts.newVault}</button>
+    </div>
   {:catch error}
     <p role="alert">{errorMessage(error)}</p>
   {/await}
-  <button type="button" class="primary" onclick={onCreate}>{texts.newVault}</button>
 </section>
 
 <style>
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-m);
+  }
+
   ul {
     list-style: none;
     padding: 0;
@@ -56,5 +99,9 @@
   .vault:hover,
   .vault:focus-visible {
     background: var(--surface);
+  }
+
+  .actions {
+    flex-wrap: wrap;
   }
 </style>

@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::LocalStore;
 use pswd_core::{Credentials, RecoveryKey, Secret, Session, SessionError, Timestamp, VaultFile};
-use pswd_infra::{Config, ConfigFile, FileStore, Locations, VaultConfig, create_backup};
+use pswd_infra::{
+    Config, ConfigFile, FileStore, Locations, VaultConfig, backup_vault_file, backup_vault_names,
+    create_backup,
+};
 
 use crate::utc::backup_stamp;
 use crate::{AppError, VaultSession};
@@ -32,6 +35,19 @@ impl Vaults {
     /// Si la configuration existe mais ne peut pas être lue.
     pub fn config(&self) -> Result<Config, AppError> {
         Ok(self.config_file().load()?)
+    }
+
+    /// Modifie les réglages et les enregistre ; renvoie la configuration enregistrée.
+    ///
+    /// # Errors
+    ///
+    /// Si la configuration ne peut pas être lue ou écrite.
+    pub fn update_config(&self, change: impl FnOnce(&mut Config)) -> Result<Config, AppError> {
+        let mut config_file = self.config_file();
+        let mut config = config_file.load()?;
+        change(&mut config);
+        config_file.save(&config)?;
+        Ok(config)
     }
 
     /// Vérifie, avant de demander quoi que ce soit, qu'un coffre peut être créé sous ce nom.
@@ -159,6 +175,50 @@ impl Vaults {
         config_file.save(&config)?;
         Ok(target)
     }
+}
+
+impl Vaults {
+    /// Coffres contenus dans un dossier de sauvegarde daté, triés par nom.
+    ///
+    /// # Errors
+    ///
+    /// [`AppError::EmptyBackup`] s'il n'en contient aucun, ou si ce n'est pas une sauvegarde.
+    pub fn backup_contents(&self, backup: &Path) -> Result<Vec<String>, AppError> {
+        let names = backup_vault_names(backup)?;
+        if names.is_empty() {
+            return Err(AppError::EmptyBackup);
+        }
+        Ok(names)
+    }
+
+    /// Restaure le coffre `name` d'un dossier de sauvegarde daté (§7) ; renvoie le nom retenu.
+    ///
+    /// # Errors
+    ///
+    /// [`AppError::NotInBackup`] si la sauvegarde ne contient pas ce coffre, sinon comme
+    /// [`Vaults::restore`].
+    pub fn restore_from_backup(&self, backup: &Path, name: &str) -> Result<String, AppError> {
+        if !self
+            .backup_contents(backup)?
+            .iter()
+            .any(|known| known == name)
+        {
+            return Err(AppError::NotInBackup(name.to_owned()));
+        }
+        let file = FileStore::new(backup_vault_file(backup, name))
+            .load()?
+            .ok_or(AppError::NotInBackup(name.to_owned()))?;
+        self.restore(name, &file, &backup_date(backup))
+    }
+}
+
+/// Date d'un dossier de sauvegarde `AAAA-MM-JJ_HH-MM-SS` : la partie avant `_`.
+fn backup_date(backup: &Path) -> String {
+    let folder = backup
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default();
+    folder.split('_').next().unwrap_or_default().to_owned()
 }
 
 /// Supprime le dossier du coffre si `create` échoue alors qu'il n'existait pas avant.
@@ -528,5 +588,79 @@ mod tests {
             Err(AppError::Port(_))
         ));
         assert_eq!(names(&vaults), Vec::<String>::new());
+    }
+
+    fn lock_after_three_minutes(config: &mut Config) {
+        config.auto_lock_minutes = 3;
+    }
+
+    #[test]
+    fn settings_are_changed_and_saved() {
+        let dir = TempDir::new().unwrap();
+        let vaults = device(&dir, "a");
+        create(&vaults, "perso");
+        let saved = vaults.update_config(lock_after_three_minutes).unwrap();
+        assert_eq!(saved.auto_lock_minutes, 3);
+        assert_eq!(vaults.config().unwrap().auto_lock_minutes, 3);
+        assert_eq!(names(&vaults), ["perso"]);
+    }
+
+    #[test]
+    fn unreadable_configuration_is_not_overwritten() {
+        let dir = TempDir::new().unwrap();
+        let vaults = device(&dir, "a");
+        let file = dir.path().join("a").join("config").join("config.toml");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "couleur = 1").unwrap();
+        assert!(matches!(
+            vaults.update_config(lock_after_three_minutes),
+            Err(AppError::Config(ConfigError::Invalid(_)))
+        ));
+        assert_eq!(fs::read_to_string(&file).unwrap(), "couleur = 1");
+    }
+
+    #[test]
+    fn a_backup_folder_is_listed_then_restored() {
+        let dir = TempDir::new().unwrap();
+        let vaults = device(&dir, "a");
+        create(&vaults, "perso");
+        let (folder, _) = vaults.backup(&usb_key(&dir), None, at(0)).unwrap();
+        let other = device(&dir, "b");
+        assert_eq!(other.backup_contents(&folder), Ok(vec!["perso".to_owned()]));
+        assert_eq!(
+            other.restore_from_backup(&folder, "perso"),
+            Ok("perso".to_owned())
+        );
+        assert_eq!(
+            vaults.restore_from_backup(&folder, "perso"),
+            Ok("perso-sauvegarde-1970-01-01".to_owned())
+        );
+        assert_eq!(
+            other.restore_from_backup(&folder, "travail"),
+            Err(AppError::NotInBackup("travail".to_owned()))
+        );
+    }
+
+    #[test]
+    fn an_empty_or_foreign_folder_is_not_a_backup() {
+        let dir = TempDir::new().unwrap();
+        let vaults = device(&dir, "a");
+        let folder = dir.path().join("vide");
+        fs::create_dir_all(folder.join("vaults")).unwrap();
+        assert_eq!(vaults.backup_contents(&folder), Err(AppError::EmptyBackup));
+        assert!(matches!(
+            vaults.backup_contents(dir.path()),
+            Err(AppError::Port(_))
+        ));
+    }
+
+    #[test]
+    fn backup_date_is_the_folder_prefix() {
+        assert_eq!(
+            backup_date(Path::new("E:/pswd-sauvegardes/2026-10-23_14-30-00")),
+            "2026-10-23"
+        );
+        assert_eq!(backup_date(Path::new("E:/copie")), "copie");
+        assert_eq!(backup_date(Path::new("/")), "");
     }
 }

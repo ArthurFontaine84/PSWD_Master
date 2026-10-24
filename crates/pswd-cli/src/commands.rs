@@ -1,9 +1,9 @@
-//! Commandes ponctuelles sur un coffre existant : `passwd`, `recover`, `import`, `export`.
+//! Commandes ponctuelles sur un coffre existant : `passwd`, `recover`, `import`.
 
 use std::fs;
 use std::path::Path;
 
-use pswd_app::{AppError, VaultSession, add_entries, export_to_file};
+use pswd_app::{AppError, VaultSession, add_entries};
 use pswd_core::ports::SecureClipboard;
 use pswd_core::{Credentials, RecoveryKey, import_csv};
 use pswd_infra::Config;
@@ -83,27 +83,6 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
         Ok(())
     }
 
-    /// Double confirmation, puis mot de passe. Un fichier existant n'est jamais écrasé.
-    pub(crate) fn export(&mut self, name: &str, file: &Path) -> Result<(), CliError> {
-        let questions = [
-            "L'export contient tous vos mots de passe en clair. Continuer ? (o/N) : ".to_owned(),
-            format!("Écrire le fichier {} ? (o/N) : ", file.display()),
-        ];
-        for question in questions {
-            if !self.confirm(&question)? {
-                self.terminal.print("Export annulé.");
-                return Ok(());
-            }
-        }
-        let unlocked = self.unlock(name, Unlock::Password)?;
-        let count = export_to_file(unlocked.session.vault(), file)?;
-        self.terminal.print(&format!(
-            "{count} entrée(s) exportée(s) vers {}.",
-            file.display()
-        ));
-        Ok(())
-    }
-
     pub(crate) fn confirm(&mut self, question: &str) -> Result<bool, CliError> {
         let answer = self.terminal.prompt(question)?;
         Ok(matches!(answer.trim().to_lowercase().as_str(), "o" | "oui"))
@@ -113,18 +92,12 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
 #[cfg(test)]
 mod tests {
     use pswd_app::AppError;
-    use pswd_core::{
-        EntryContent, EntryKind, FileError, RecoveryKeyError, SessionError, Timestamp, Vault,
-    };
+    use pswd_core::{FileError, RecoveryKeyError, SessionError, Vault};
 
     use crate::cli::Command;
     use crate::testing::TestEnv;
 
     use super::*;
-
-    fn note(title: &str) -> EntryContent {
-        EntryContent::new(EntryKind::Note, title.to_owned())
-    }
 
     fn titles(vault: &Vault) -> Vec<String> {
         let mut titles: Vec<String> = vault
@@ -290,59 +263,5 @@ mod tests {
             titles(&env.local_vault("a", "maître")),
             Vec::<String>::new()
         );
-    }
-
-    #[test]
-    fn export_writes_the_vault_after_two_confirmations() {
-        let env = TestEnv::with_vault();
-        env.edit_vault("a", |vault| {
-            vault.add(note("Wi-Fi"), Timestamp::from_millis(1));
-        });
-        let file = env.dir.path().join("export.csv");
-        let mut app = env.app("a", &["o", "oui", "maître"]);
-        app.run(Command::Export {
-            name: "perso".to_owned(),
-            file: file.clone(),
-        })
-        .unwrap();
-        assert!(
-            app.terminal
-                .output()
-                .starts_with("1 entrée(s) exportée(s) vers ")
-        );
-        let csv = fs::read_to_string(&file).unwrap();
-        assert!(csv.contains("Wi-Fi,note,"), "{csv}");
-    }
-
-    #[test]
-    fn export_can_be_cancelled_at_each_confirmation() {
-        let env = TestEnv::with_vault();
-        let file = env.dir.path().join("export.csv");
-        for answers in [&[""][..], &["o", "n"]] {
-            let mut app = env.app("a", answers);
-            app.run(Command::Export {
-                name: "perso".to_owned(),
-                file: file.clone(),
-            })
-            .unwrap();
-            assert_eq!(app.terminal.output(), "Export annulé.");
-            assert!(!file.exists());
-        }
-    }
-
-    #[test]
-    fn export_never_overwrites_a_file() {
-        let env = TestEnv::with_vault();
-        let file = env.dir.path().join("export.csv");
-        fs::write(&file, "à garder").unwrap();
-        let mut app = env.app("a", &["o", "o", "maître"]);
-        let error = app
-            .run(Command::Export {
-                name: "perso".to_owned(),
-                file: file.clone(),
-            })
-            .unwrap_err();
-        assert!(error.to_string().starts_with("écriture de "), "{error}");
-        assert_eq!(fs::read_to_string(&file).unwrap(), "à garder");
     }
 }

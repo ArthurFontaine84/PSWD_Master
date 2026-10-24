@@ -52,7 +52,12 @@ beforeEach(() => {
 
 function show() {
   const onExpired = vi.fn();
-  render(OpenVault, { vault: { name: "perso", entries: 1 }, onLocked: vi.fn(), onExpired });
+  render(OpenVault, {
+    vault: { name: "perso", entries: 1 },
+    onLocked: vi.fn(),
+    onExpired,
+    onDeleted: vi.fn(),
+  });
   return { onExpired };
 }
 

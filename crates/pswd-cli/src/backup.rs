@@ -2,9 +2,6 @@
 
 use std::path::Path;
 
-use pswd_core::ports::LocalStore;
-use pswd_infra::{FileStore, backup_vault_file, backup_vault_names};
-
 use crate::app::{App, CliError};
 use crate::terminal::Terminal;
 
@@ -26,20 +23,12 @@ impl<T: Terminal, C> App<T, C> {
     /// Le coffre est restauré sous son nom s'il est libre, sinon sous un nom daté : rien n'est
     /// jamais écrasé ni fusionné.
     pub(crate) fn restore(&mut self, backup: &Path, name: Option<&str>) -> Result<(), CliError> {
-        let names = backup_vault_names(backup)?;
-        if names.is_empty() {
-            return Err(CliError::EmptyBackup);
-        }
+        let names = self.vaults.backup_contents(backup)?;
         let name = match name {
             Some(name) => name.to_owned(),
             None => self.choose_vault(&names)?,
         };
-        if !names.contains(&name) {
-            return Err(CliError::NotInBackup(name));
-        }
-        let source = FileStore::new(backup_vault_file(backup, &name));
-        let file = source.load()?.ok_or(CliError::NotInBackup(name.clone()))?;
-        let target = self.vaults.restore(&name, &file, &backup_date(backup))?;
+        let target = self.vaults.restore_from_backup(backup, &name)?;
 
         if target == name {
             self.terminal.print(&format!("Coffre « {name} » restauré."));
@@ -66,15 +55,6 @@ impl<T: Terminal, C> App<T, C> {
     }
 }
 
-/// Date d'un dossier de sauvegarde `AAAA-MM-JJ_HH-MM-SS` : la partie avant `_`.
-fn backup_date(backup: &Path) -> String {
-    let folder = backup
-        .file_name()
-        .map(|name| name.to_string_lossy())
-        .unwrap_or_default();
-    folder.split('_').next().unwrap_or_default().to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -82,7 +62,7 @@ mod tests {
 
     use pswd_app::AppError;
     use pswd_core::{EntryContent, EntryKind, FileError, SessionError, Timestamp};
-    use pswd_infra::ConfigError;
+    use pswd_infra::{ConfigError, backup_vault_file, backup_vault_names};
 
     use crate::cli::Command;
     use crate::testing::TestEnv;
@@ -277,10 +257,13 @@ mod tests {
         let mut app = env.app("b", &[]);
         assert_eq!(
             app.run(restore(&folder, Some("travail"))),
-            Err(CliError::NotInBackup("travail".to_owned()))
+            Err(CliError::App(AppError::NotInBackup("travail".to_owned())))
         );
         fs::remove_dir_all(folder.join("vaults").join("perso")).unwrap();
-        assert_eq!(app.run(restore(&folder, None)), Err(CliError::EmptyBackup));
+        assert_eq!(
+            app.run(restore(&folder, None)),
+            Err(CliError::App(AppError::EmptyBackup))
+        );
         let error = app.run(restore(env.dir.path(), None)).unwrap_err();
         assert!(
             error.to_string().contains("n'est pas une sauvegarde pswd"),
@@ -335,15 +318,5 @@ mod tests {
             Err(CliError::App(AppError::Port(_)))
         ));
         assert!(env.config("b").vaults.is_empty());
-    }
-
-    #[test]
-    fn backup_date_is_the_folder_prefix() {
-        assert_eq!(
-            backup_date(Path::new("E:/pswd-sauvegardes/2026-10-23_14-30-00")),
-            "2026-10-23"
-        );
-        assert_eq!(backup_date(Path::new("E:/copie")), "copie");
-        assert_eq!(backup_date(Path::new("/")), "");
     }
 }

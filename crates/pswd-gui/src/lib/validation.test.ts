@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newVaultProblem } from "./validation";
+import { newPasswordProblem, newVaultProblem } from "./validation";
 
 describe("newVaultProblem", () => {
   it("accepts a valid form", () => {
@@ -21,5 +21,13 @@ describe("newVaultProblem", () => {
     expect(newVaultProblem("perso", "maître", "maitre")).toBe(
       "Les deux saisies ne correspondent pas.",
     );
+  });
+});
+
+describe("newPasswordProblem", () => {
+  it("requires a confirmed password", () => {
+    expect(newPasswordProblem("maître", "maître")).toBeNull();
+    expect(newPasswordProblem("", "")).toBe("Le mot de passe maître est obligatoire.");
+    expect(newPasswordProblem("a", "b")).toBe("Les deux saisies ne correspondent pas.");
   });
 });

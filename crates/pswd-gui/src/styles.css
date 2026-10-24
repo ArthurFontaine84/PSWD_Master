@@ -19,8 +19,25 @@
   line-height: 1.5;
 }
 
+/* Thème sombre : demandé dans les réglages, ou choisi par le système en mode automatique. */
+:root[data-theme="dark"] {
+  --bg: #15161a;
+  --surface: #1e2026;
+  --text: #e8e9ed;
+  --text-muted: #a2a6b2;
+  --border: #33363f;
+  --accent: #8aa8ff;
+  --danger: #ffb4ab;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #15161a;
     --surface: #1e2026;
     --text: #e8e9ed;
@@ -60,6 +77,11 @@ button.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--bg);
+}
+
+button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 button:disabled {

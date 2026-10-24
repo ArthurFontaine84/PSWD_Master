@@ -1,9 +1,6 @@
 use std::collections::BTreeMap;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::path::Path;
 
-use pswd_core::{Entry, EntryContent, Timestamp, Vault, export_csv};
+use pswd_core::{Entry, EntryContent, Timestamp, Vault};
 
 use crate::{AppError, VaultSession};
 
@@ -69,28 +66,6 @@ pub fn add_entries(
         }
     })?;
     Ok(count)
-}
-
-/// Écrit le coffre en clair (CSV) dans un nouveau fichier et renvoie le nombre d'entrées.
-/// Un fichier existant n'est jamais écrasé.
-///
-/// # Errors
-///
-/// Si le fichier existe déjà ou ne peut pas être écrit.
-pub fn export_to_file(vault: &Vault, file: &Path) -> Result<usize, AppError> {
-    let csv = export_csv(vault).map_err(AppError::Csv)?;
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(file)
-        .and_then(|mut output| output.write_all(&csv))
-        .map_err(|error| {
-            AppError::File(format!(
-                "écriture de {} impossible : {error}",
-                file.display()
-            ))
-        })?;
-    Ok(live_count(vault))
 }
 
 #[cfg(test)]
@@ -208,26 +183,5 @@ mod tests {
             "{result:?}"
         );
         assert_eq!(live_count(session.vault()), 0);
-    }
-
-    #[test]
-    fn export_writes_a_new_csv_file() {
-        let dir = TempDir::new().unwrap();
-        let file = dir.path().join("export.csv");
-        assert_eq!(export_to_file(&sample_vault(), &file), Ok(3));
-        let csv = fs::read_to_string(&file).unwrap();
-        assert!(csv.starts_with("title,kind,username,password,urls,notes,tags\r\n"));
-        assert!(csv.contains("GitHub,login,arthur,"), "{csv}");
-        assert!(!csv.contains("Ancienne"), "{csv}");
-    }
-
-    #[test]
-    fn export_never_overwrites_a_file() {
-        let dir = TempDir::new().unwrap();
-        let file = dir.path().join("export.csv");
-        fs::write(&file, "à garder").unwrap();
-        let error = export_to_file(&sample_vault(), &file).unwrap_err();
-        assert!(error.to_string().starts_with("écriture de "), "{error}");
-        assert_eq!(fs::read_to_string(&file).unwrap(), "à garder");
     }
 }

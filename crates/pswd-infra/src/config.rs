@@ -104,11 +104,24 @@ impl VaultConfig {
     }
 }
 
+/// Thème de l'interface graphique ; `Auto` suit le réglage du système.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    Auto,
+    Light,
+    Dark,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub auto_lock_minutes: u32,
     pub clipboard_clear_seconds: u32,
+    /// Mobile : verrouillage après ce délai en arrière-plan ; 0 = immédiat.
+    pub background_lock_seconds: u32,
+    pub theme: Theme,
     pub vaults: BTreeMap<String, VaultConfig>,
 }
 
@@ -117,6 +130,8 @@ impl Default for Config {
         Self {
             auto_lock_minutes: 10,
             clipboard_clear_seconds: 20,
+            background_lock_seconds: 60,
+            theme: Theme::Auto,
             vaults: BTreeMap::new(),
         }
     }
@@ -291,6 +306,31 @@ mod tests {
         assert_eq!(config, Config::default());
         assert_eq!(config.auto_lock(), Duration::from_secs(600));
         assert_eq!(config.clipboard_clear(), Duration::from_secs(20));
+        assert_eq!(config.background_lock_seconds, 60);
+        assert_eq!(config.theme, Theme::Auto);
+    }
+
+    #[test]
+    fn interface_settings_are_read_and_checked() {
+        let dir = TempDir::new().unwrap();
+        let file = config_file_in(&dir);
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "background_lock_seconds = 0
+theme = \"dark\"
+",
+        )
+        .unwrap();
+        let config = file.load().unwrap();
+        assert_eq!(config.background_lock_seconds, 0);
+        assert_eq!(config.theme, Theme::Dark);
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "theme = \"sombre\"
+",
+        )
+        .unwrap();
+        assert!(matches!(file.load(), Err(ConfigError::Invalid(_))));
     }
 
     #[test]

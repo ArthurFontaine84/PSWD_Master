@@ -3,6 +3,8 @@
 // Tauri impose de recevoir l'état (`State`) et les arguments par valeur.
 #![allow(clippy::needless_pass_by_value)]
 
+use std::path::Path;
+
 use pswd_core::Secret;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
@@ -10,7 +12,8 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 use crate::editing::{EntryInput, HistoryItem};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
-use crate::state::{AppState, VaultInfo};
+use crate::settings::Settings;
+use crate::state::{AppState, BackupDone, VaultInfo};
 
 /// Événement envoyé à l'interface quand le coffre se verrouille par inactivité.
 pub const VAULT_LOCKED: &str = "vault-locked";
@@ -123,6 +126,74 @@ pub fn entry_history(state: State<'_, AppState>, id: String) -> Result<Vec<Histo
     state.history(&id)
 }
 
+/// Le mot de passe actuel est redemandé avant d'accepter le nouveau.
+#[tauri::command]
+pub fn change_password(
+    state: State<'_, AppState>,
+    current: String,
+    password: String,
+) -> Result<(), UiError> {
+    state.change_password(&Secret::new(current), &Secret::new(password))
+}
+
+/// Mot de passe oublié : la clé de récupération fixe un nouveau mot de passe et ouvre le coffre.
+#[tauri::command]
+pub fn recover_vault(
+    state: State<'_, AppState>,
+    name: String,
+    recovery_key: String,
+    password: String,
+) -> Result<VaultInfo, UiError> {
+    state.recover(&name, &Secret::new(recovery_key), &Secret::new(password))
+}
+
+#[tauri::command]
+pub fn delete_vault(
+    state: State<'_, AppState>,
+    name: String,
+    confirmation: String,
+) -> Result<(), UiError> {
+    state.delete_vault(&name, &confirmation)
+}
+
+/// Le fichier est lu par Rust : son contenu en clair ne passe jamais par l'interface.
+#[tauri::command]
+pub fn import_entries(state: State<'_, AppState>, path: String) -> Result<usize, UiError> {
+    state.import_entries(Path::new(&path))
+}
+
+#[tauri::command]
+pub fn backup_vaults(
+    state: State<'_, AppState>,
+    destination: String,
+) -> Result<BackupDone, UiError> {
+    state.backup(Path::new(&destination))
+}
+
+#[tauri::command]
+pub fn backup_contents(state: State<'_, AppState>, folder: String) -> Result<Vec<String>, UiError> {
+    state.backup_contents(Path::new(&folder))
+}
+
+#[tauri::command]
+pub fn restore_vault(
+    state: State<'_, AppState>,
+    folder: String,
+    name: String,
+) -> Result<String, UiError> {
+    state.restore(Path::new(&folder), &name)
+}
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, UiError> {
+    state.settings()
+}
+
+#[tauri::command]
+pub fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<Settings, UiError> {
+    state.save_settings(settings)
+}
+
 /// Prévient l'interface quand le coffre se verrouille par inactivité.
 pub fn lock_notifier<R: Runtime>(app: AppHandle<R>) -> impl Fn() + Send + Sync + 'static {
     move || {
@@ -190,6 +261,15 @@ mod tests {
                     update_entry,
                     delete_entry,
                     entry_history,
+                    change_password,
+                    recover_vault,
+                    delete_vault,
+                    import_entries,
+                    backup_vaults,
+                    backup_contents,
+                    restore_vault,
+                    get_settings,
+                    save_settings,
                     not_allowed
                 ])
                 .build(tauri::generate_context!())
@@ -442,6 +522,84 @@ mod tests {
             app.call("delete_entry", json!({ "id": id })),
             Err(json!({ "code": "entryNotFound", "detail": id }))
         );
+    }
+
+    #[test]
+    fn vaults_are_managed_through_their_commands() {
+        let app = TestApp::new(None);
+        let key = app.create("perso", "maître").unwrap()["recoveryKey"].clone();
+        assert_eq!(
+            app.call(
+                "change_password",
+                json!({ "current": "maître", "password": "nouveau" })
+            ),
+            Ok(Value::Null)
+        );
+        app.call("lock_vault", json!({})).unwrap();
+        assert_eq!(
+            app.call(
+                "recover_vault",
+                json!({ "name": "perso", "recoveryKey": key, "password": "encore" })
+            ),
+            Ok(json!({ "name": "perso", "entries": 0 }))
+        );
+        let csv = app.dir.path().join("import.csv");
+        fs::write(
+            &csv,
+            "title,kind,username,password,urls,notes,tags\r\nWi-Fi,note,,,,ABCD,\r\n",
+        )
+        .unwrap();
+        assert_eq!(
+            app.call(
+                "import_entries",
+                json!({ "path": csv.display().to_string() })
+            ),
+            Ok(json!(1))
+        );
+
+        let usb = app.dir.path().join("usb");
+        fs::create_dir(&usb).unwrap();
+        let done = app
+            .call(
+                "backup_vaults",
+                json!({ "destination": usb.display().to_string() }),
+            )
+            .unwrap();
+        assert_eq!(done["count"], 1);
+        let folder = done["folder"].clone();
+        assert_eq!(
+            app.call("backup_contents", json!({ "folder": folder })),
+            Ok(json!(["perso"]))
+        );
+        assert_eq!(
+            app.call(
+                "restore_vault",
+                json!({ "folder": folder, "name": "perso" })
+            ),
+            Ok(json!("perso-sauvegarde-1970-01-01"))
+        );
+
+        let settings = app.call("get_settings", json!({})).unwrap();
+        assert_eq!(settings["theme"], "auto");
+        let dark = json!({
+            "autoLockMinutes": 5,
+            "clipboardClearSeconds": 30,
+            "backgroundLockSeconds": 60,
+            "theme": "dark",
+        });
+        assert_eq!(
+            app.call("save_settings", json!({ "settings": dark })),
+            Ok(dark)
+        );
+
+        assert_eq!(
+            app.call(
+                "delete_vault",
+                json!({ "name": "perso", "confirmation": "perso" })
+            ),
+            Ok(Value::Null)
+        );
+        assert_eq!(app.call("current_vault", json!({})), Ok(Value::Null));
     }
 
     /// Commande bien enregistrée, mais ni déclarée dans `build.rs` ni autorisée par une capacité.

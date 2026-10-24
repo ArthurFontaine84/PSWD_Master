@@ -1,5 +1,5 @@
 use pswd_app::AppError;
-use pswd_core::{FileError, GeneratorError, SessionError, VaultError};
+use pswd_core::{CsvError, FileError, GeneratorError, LineProblem, SessionError, VaultError};
 use pswd_infra::ConfigError;
 use serde::Serialize;
 
@@ -45,6 +45,9 @@ impl From<AppError> for UiError {
             AppError::Session(SessionError::File(FileError::WrongPassword)) => {
                 Self::code("wrongPassword")
             }
+            AppError::Session(SessionError::File(FileError::WrongRecoveryKey)) => {
+                Self::code("wrongRecoveryKey")
+            }
             AppError::Session(SessionError::LocalVaultExists) => Self::code("vaultFolderExists"),
             AppError::Session(SessionError::File(error)) => {
                 Self::new("vaultUnreadable", error.to_string())
@@ -53,6 +56,20 @@ impl From<AppError> for UiError {
                 Self::new("saveFailed", error.to_string())
             }
             AppError::Generator(GeneratorError::InvalidLength) => Self::code("invalidLength"),
+            AppError::Csv(CsvError::InvalidHeader) => Self::code("csvInvalidHeader"),
+            AppError::Csv(CsvError::InvalidLine { line, problem }) => {
+                let code = match problem {
+                    LineProblem::FieldCount => "csvFieldCount",
+                    LineProblem::UnknownKind => "csvUnknownKind",
+                    LineProblem::InvalidUtf8 => "csvInvalidUtf8",
+                };
+                Self::new(code, line.to_string())
+            }
+            AppError::NothingToBackUp => Self::code("nothingToBackUp"),
+            AppError::EmptyBackup => Self::code("emptyBackup"),
+            AppError::NotInBackup(name) => Self::new("notInBackup", name),
+            AppError::InvalidBackup(error) => Self::new("invalidBackup", error.to_string()),
+            AppError::Port(error) => Self::new("ioError", error.to_string()),
             // EXTENSION(anglais): les autres erreurs reçoivent leur code au fil des écrans ; en
             // attendant, le message français sert de détail.
             other => Self::new("unexpected", other.to_string()),
@@ -80,9 +97,21 @@ mod tests {
 
     use super::*;
 
+    fn check(cases: Vec<(AppError, &'static str, Option<&str>)>) {
+        for (error, code, detail) in cases {
+            assert_eq!(
+                UiError::from(error),
+                UiError {
+                    code,
+                    detail: detail.map(str::to_owned)
+                }
+            );
+        }
+    }
+
     #[test]
-    fn errors_get_a_stable_code_and_a_detail() {
-        let cases = [
+    fn vault_errors_get_a_stable_code_and_a_detail() {
+        check(vec![
             (
                 AppError::Config(ConfigError::Invalid("ligne 2".to_owned())),
                 "configInvalid",
@@ -134,21 +163,69 @@ mod tests {
                 "invalidLength",
                 None,
             ),
+        ]);
+    }
+
+    #[test]
+    fn file_errors_get_a_stable_code_and_a_detail() {
+        check(vec![
             (
-                AppError::NothingToBackUp,
-                "unexpected",
-                Some("aucun coffre à sauvegarder : utiliser init"),
+                AppError::Session(SessionError::File(FileError::WrongRecoveryKey)),
+                "wrongRecoveryKey",
+                None,
             ),
-        ];
-        for (error, code, detail) in cases {
-            assert_eq!(
-                UiError::from(error),
-                UiError {
-                    code,
-                    detail: detail.map(str::to_owned)
-                }
-            );
-        }
+            (
+                AppError::Csv(CsvError::InvalidHeader),
+                "csvInvalidHeader",
+                None,
+            ),
+            (
+                AppError::Csv(CsvError::InvalidLine {
+                    line: 3,
+                    problem: LineProblem::FieldCount,
+                }),
+                "csvFieldCount",
+                Some("3"),
+            ),
+            (
+                AppError::Csv(CsvError::InvalidLine {
+                    line: 4,
+                    problem: LineProblem::UnknownKind,
+                }),
+                "csvUnknownKind",
+                Some("4"),
+            ),
+            (
+                AppError::Csv(CsvError::InvalidLine {
+                    line: 5,
+                    problem: LineProblem::InvalidUtf8,
+                }),
+                "csvInvalidUtf8",
+                Some("5"),
+            ),
+            (AppError::NothingToBackUp, "nothingToBackUp", None),
+            (AppError::EmptyBackup, "emptyBackup", None),
+            (
+                AppError::NotInBackup("perso".to_owned()),
+                "notInBackup",
+                Some("perso"),
+            ),
+            (
+                AppError::InvalidBackup(FileError::Malformed),
+                "invalidBackup",
+                Some("fichier de coffre mal formé"),
+            ),
+            (
+                AppError::Port(PortError::new("disque absent")),
+                "ioError",
+                Some("disque absent"),
+            ),
+            (
+                AppError::Csv(CsvError::Internal),
+                "unexpected",
+                Some("erreur interne de lecture CSV"),
+            ),
+        ]);
     }
 
     #[test]
