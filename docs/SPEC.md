@@ -328,6 +328,8 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 
 **Modification** : un formulaire unique pour ajouter et modifier (une note n'a ni identifiant, ni mot de passe, ni URL ; URLs une par ligne, tags séparés par des espaces ou des virgules). Pour le mot de passe : « Saisir » (le champ est vidé dès l'envoi), « Générer » (longueur 8 à 128, symboles ou non : **tiré en Rust à l'enregistrement**, il ne passe jamais par l'interface), et en modification « Inchangé » (par défaut) ou « Supprimer ». La suppression d'une entrée demande une confirmation dans l'écran. L'historique liste les versions précédentes (date, titre, identifiant, « mot de passe différent »), jamais les anciens mots de passe.
 
+**Écran masqué** (§9) : sur Android, `FLAG_SECURE` est posé dans `MainActivity.kt` (`gen/android`, versionné ; à reporter si le projet Android est régénéré) : écran noir dans les applications récentes, captures et enregistrements refusés. Sur iOS, une vue neutre recouvre l'interface dès que l'application quitte le premier plan ; elle sera ajoutée au projet Xcode généré sur le Mac (sous-étape 6). Vérifié à la main sur appareil.
+
 **Presse-papiers** : sur le bureau, `LazyClipboard` de `pswd-infra` (ouvert à la première copie, partagé avec la CLI). Sur mobile, un plugin Tauri maison (Kotlin et Swift, quelques dizaines de lignes) implémente `SecureClipboard` avec les marqueurs du §9 ; le plugin officiel ne les pose pas.
 
 **Verrouillage**
