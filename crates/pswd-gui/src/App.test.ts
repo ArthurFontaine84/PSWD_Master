@@ -6,6 +6,7 @@ import {
   appShown,
   backupContents,
   createVault,
+  deviceKind,
   currentVault,
   deleteVault,
   getSettings,
@@ -28,6 +29,7 @@ vi.mock("./lib/api", () => ({
   lockVault: vi.fn(),
   currentVault: vi.fn(),
   appHidden: vi.fn(),
+  deviceKind: vi.fn(),
   appShown: vi.fn(),
   onVaultLocked: vi.fn(),
   listEntries: vi.fn(),
@@ -58,6 +60,7 @@ const stopListening = vi.fn();
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(deviceKind).mockResolvedValue("desktop");
   vi.mocked(listVaults).mockResolvedValue(["perso"]);
   vi.mocked(listTags).mockResolvedValue([]);
   vi.mocked(listEntries).mockResolvedValue([
@@ -240,7 +243,7 @@ describe("App", () => {
     vi.mocked(restoreVault).mockResolvedValue("perso-sauvegarde-2026-10-23");
     render(App);
     await fireEvent.click(await screen.findByRole("button", { name: "Restaurer une sauvegarde" }));
-    await fireEvent.click(screen.getByRole("button", { name: "Choisir un dossier" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Choisir un dossier" }));
     await fireEvent.click(await screen.findByRole("button", { name: "perso" }));
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Coffre « perso » restauré sous le nom « perso-sauvegarde-2026-10-23 »",

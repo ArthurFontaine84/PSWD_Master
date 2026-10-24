@@ -8,6 +8,8 @@ export interface UiError {
   detail: string | null;
 }
 
+export type DeviceKind = "desktop" | "mobile";
+
 /** Coffre ouvert, sans aucun secret. */
 export interface VaultInfo {
   name: string;
@@ -116,6 +118,11 @@ export async function appHidden(): Promise<void> {
 /** L'application revient au premier plan : le coffre encore ouvert, ou `null`. */
 export function appShown(): Promise<VaultInfo | null> {
   return invoke<VaultInfo | null>("app_shown");
+}
+
+/** Le type d'appareil : sur mobile, une sauvegarde est un fichier, jamais un dossier. */
+export function deviceKind(): Promise<DeviceKind> {
+  return invoke<DeviceKind>("device_kind");
 }
 
 export function listEntries(text: string, tag: string | null): Promise<EntrySummary[]> {

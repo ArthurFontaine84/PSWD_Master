@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { backupContents, backupFileContents, restoreFromFile, restoreVault } from "../lib/api";
+  import {
+    backupContents,
+    backupFileContents,
+    deviceKind,
+    restoreFromFile,
+    restoreVault,
+    type DeviceKind,
+  } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { pickBackupFile, pickFolder } from "../lib/files";
   import { texts } from "../lib/i18n";
@@ -17,6 +24,13 @@
     kind: "folder" | "file";
     path: string;
   }
+
+  /** Inconnu tant que le backend n'a pas répondu : les dossiers restent cachés. */
+  let device = $state<DeviceKind | null>(null);
+  deviceKind().then(
+    (kind) => (device = kind),
+    () => undefined,
+  );
 
   let source = $state<Source | null>(null);
   let names = $state<string[]>([]);
@@ -71,7 +85,9 @@
   {/if}
   <div class="actions">
     <button type="button" onclick={onCancel}>{texts.cancel}</button>
-    <button type="button" onclick={() => choose("folder")}>{texts.chooseBackupFolder}</button>
+    {#if device === "desktop"}
+      <button type="button" onclick={() => choose("folder")}>{texts.chooseBackupFolder}</button>
+    {/if}
     <button type="button" class="primary" onclick={() => choose("file")}>
       {texts.chooseBackupFile}
     </button>

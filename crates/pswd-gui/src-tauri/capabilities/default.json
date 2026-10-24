@@ -4,6 +4,7 @@
   "description": "Ce que l'interface peut appeler : les commandes de PSWD Master, l'écoute de leurs événements et les fenêtres système d'ouverture et d'enregistrement d'un fichier ou d'un dossier (seul le chemin choisi est transmis) ; ni lecture de fichiers, ni shell, ni réseau.",
   "windows": ["main"],
   "permissions": [
+    "allow-device-kind",
     "allow-list-vaults",
     "allow-create-vault",
     "allow-unlock-vault",

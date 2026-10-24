@@ -15,7 +15,6 @@ use uuid::Uuid;
 use crate::editing::{EntryInput, HistoryItem, history};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
-use crate::files;
 use crate::settings::Settings;
 
 /// Résultat d'une sauvegarde : le dossier daté créé et le nombre de coffres copiés.
@@ -319,9 +318,8 @@ impl AppState {
     }
 
     /// Importe un fichier CSV dans le coffre ouvert, tout ou rien ; renvoie le nombre d'entrées.
-    pub fn import_entries(&self, file: &Path) -> Result<usize, UiError> {
-        let data = files::read(file)?;
-        let contents = import_csv(&data).map_err(AppError::Csv)?;
+    pub fn import_entries(&self, data: &[u8]) -> Result<usize, UiError> {
+        let contents = import_csv(data).map_err(AppError::Csv)?;
         let now = (self.clock)();
         Ok(self.with_session(|session| add_entries(session, contents, now))??)
     }
@@ -349,20 +347,18 @@ impl AppState {
         format!("pswd-sauvegarde_{}.pswd", backup_stamp((self.clock)()))
     }
 
-    /// Sauvegarde tous les coffres dans le fichier `.pswd` choisi ; renvoie leur nombre.
-    pub fn backup_to_file(&self, path: &Path) -> Result<usize, UiError> {
-        let (data, count) = self.vaults.backup_to_file((self.clock)())?;
-        files::write(path, &data)?;
-        Ok(count)
+    /// Tous les coffres en un seul fichier `.pswd`, et leur nombre.
+    pub fn backup_file(&self) -> Result<(Vec<u8>, usize), UiError> {
+        Ok(self.vaults.backup_to_file((self.clock)())?)
     }
 
-    pub fn backup_file_contents(&self, path: &Path) -> Result<Vec<String>, UiError> {
-        Ok(self.vaults.backup_file_contents(&files::read(path)?)?)
+    pub fn backup_file_contents(&self, data: &[u8]) -> Result<Vec<String>, UiError> {
+        Ok(self.vaults.backup_file_contents(data)?)
     }
 
     /// Restaure un coffre d'un fichier `.pswd` ; renvoie le nom retenu.
-    pub fn restore_from_file(&self, path: &Path, name: &str) -> Result<String, UiError> {
-        Ok(self.vaults.restore_from_file(&files::read(path)?, name)?)
+    pub fn restore_from_file(&self, data: &[u8], name: &str) -> Result<String, UiError> {
+        Ok(self.vaults.restore_from_file(data, name)?)
     }
 
     pub fn settings(&self) -> Result<Settings, UiError> {
@@ -1111,9 +1107,8 @@ mod tests {
             state.change_password(&secret("a"), &secret("b")).err(),
             locked
         );
-        let csv = dir.path().join("import.csv");
-        std::fs::write(&csv, "title,kind,username,password,urls,notes,tags\r\n").unwrap();
-        assert_eq!(state.import_entries(&csv).err(), locked);
+        let csv = b"title,kind,username,password,urls,notes,tags\r\n";
+        assert_eq!(state.import_entries(csv).err(), locked);
     }
 
     #[test]
@@ -1213,33 +1208,17 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         open_with_entries(&state);
-        let csv = dir.path().join("import.csv");
-        std::fs::write(
-            &csv,
-            "title,kind,username,password,urls,notes,tags\r\n\
+        let csv = b"title,kind,username,password,urls,notes,tags\r\n\
              Box,login,admin,1234,,,maison\r\n\
-             Code,note,,,,ABCD,\r\n",
-        )
-        .unwrap();
-        assert_eq!(state.import_entries(&csv), Ok(2));
+             Code,note,,,,ABCD,\r\n";
+        assert_eq!(state.import_entries(csv), Ok(2));
         assert_eq!(state.entries("", None).unwrap().len(), 5);
-        std::fs::write(
-            &csv,
-            "title,kind,username,password,urls,notes,tags\r\nA,carte,,,,,\r\n",
-        )
-        .unwrap();
+        let csv = b"title,kind,username,password,urls,notes,tags\r\nA,carte,,,,,\r\n";
         assert_eq!(
-            state.import_entries(&csv).err(),
+            state.import_entries(csv).err(),
             Some(UiError::new("csvUnknownKind", "2"))
         );
         assert_eq!(state.entries("", None).unwrap().len(), 5);
-        let error = state
-            .import_entries(&dir.path().join("absent.csv"))
-            .unwrap_err();
-        assert_eq!(
-            serde_json::to_value(error).unwrap()["code"],
-            "fileUnreadable"
-        );
     }
 
     #[test]
@@ -1279,8 +1258,8 @@ mod tests {
             state.backup_file_name(),
             "pswd-sauvegarde_1970-01-01_00-00-01.pswd"
         );
-        let file = dir.path().join(state.backup_file_name());
-        assert_eq!(state.backup_to_file(&file), Ok(2));
+        let (file, count) = state.backup_file().unwrap();
+        assert_eq!(count, 2);
         assert_eq!(
             state.backup_file_contents(&file),
             Ok(vec!["perso".to_owned(), "travail".to_owned()])
@@ -1301,30 +1280,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         let code = |error: UiError| serde_json::to_value(error).unwrap()["code"].clone();
-        let absent = dir.path().join("absent.pswd");
+        assert_eq!(code(state.backup_file().unwrap_err()), "nothingToBackUp");
+        let foreign = b"pas une sauvegarde";
         assert_eq!(
-            code(state.backup_to_file(&absent).unwrap_err()),
-            "nothingToBackUp"
-        );
-        assert_eq!(
-            code(state.backup_file_contents(&absent).unwrap_err()),
-            "fileUnreadable"
-        );
-        assert_eq!(
-            code(state.restore_from_file(&absent, "perso").unwrap_err()),
-            "fileUnreadable"
-        );
-        let foreign = dir.path().join("photo.pswd");
-        std::fs::write(&foreign, "pas une sauvegarde").unwrap();
-        assert_eq!(
-            code(state.backup_file_contents(&foreign).unwrap_err()),
+            code(state.backup_file_contents(foreign).unwrap_err()),
             "invalidBackup"
         );
-        state.create("perso", &secret("maître")).unwrap();
-        let folder_missing = dir.path().join("débranchée").join("x.pswd");
         assert_eq!(
-            code(state.backup_to_file(&folder_missing).unwrap_err()),
-            "fileUnwritable"
+            code(state.restore_from_file(foreign, "perso").unwrap_err()),
+            "invalidBackup"
         );
     }
 

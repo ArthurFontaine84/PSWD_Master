@@ -1,12 +1,13 @@
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createVault, listVaults, unlockVault } from "../lib/api";
+import { createVault, deviceKind, listVaults, unlockVault } from "../lib/api";
 import CreateVault from "./CreateVault.svelte";
 import RecoveryKey from "./RecoveryKey.svelte";
 import Unlock from "./Unlock.svelte";
 import VaultList from "./VaultList.svelte";
 
 vi.mock("../lib/api", () => ({
+  deviceKind: vi.fn(),
   listVaults: vi.fn(),
   createVault: vi.fn(),
   unlockVault: vi.fn(),
@@ -16,6 +17,7 @@ const created = { vault: { name: "perso", entries: 0 }, recoveryKey: "AAAA-BBBB"
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(deviceKind).mockResolvedValue("desktop");
 });
 
 function field(label: string): HTMLInputElement {

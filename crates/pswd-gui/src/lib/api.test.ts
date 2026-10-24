@@ -11,6 +11,7 @@ import {
   currentVault,
   appHidden,
   appShown,
+  deviceKind,
   deleteEntry,
   deleteVault,
   getSettings,
@@ -50,6 +51,7 @@ describe("api", () => {
     await unlockVault("perso", "maître");
     await lockVault();
     await expect(currentVault()).resolves.toBe("réponse");
+    await deviceKind();
     await appHidden();
     await expect(appShown()).resolves.toBe("réponse");
     await listEntries("git", "dev");
@@ -95,6 +97,7 @@ describe("api", () => {
       ["unlock_vault", { name: "perso", password: "maître" }],
       ["lock_vault"],
       ["current_vault"],
+      ["device_kind"],
       ["app_hidden"],
       ["app_shown"],
       ["list_entries", { text: "git", tag: "dev" }],

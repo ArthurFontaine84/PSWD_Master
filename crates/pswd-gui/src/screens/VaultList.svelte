@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { backupFileName, backupToFile, backupVaults, listVaults } from "../lib/api";
+  import {
+    backupFileName,
+    backupToFile,
+    backupVaults,
+    deviceKind,
+    listVaults,
+    type DeviceKind,
+  } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { pickBackupDestination, pickFolder } from "../lib/files";
   import { texts } from "../lib/i18n";
@@ -14,6 +21,13 @@
 
   const { notice, onOpen, onCreate, onRestore, onSettings }: Props = $props();
   const vaults = listVaults();
+
+  /** Inconnu tant que le backend n'a pas répondu : les dossiers restent cachés. */
+  let device = $state<DeviceKind | null>(null);
+  deviceKind().then(
+    (kind) => (device = kind),
+    () => undefined,
+  );
 
   let backupResult = $state<string | null>(null);
   let backupProblem = $state<string | null>(null);
@@ -76,7 +90,9 @@
     {/if}
     <div class="actions">
       {#if names.length > 0}
-        <button type="button" onclick={backup}>{texts.backup}</button>
+        {#if device === "desktop"}
+          <button type="button" onclick={backup}>{texts.backup}</button>
+        {/if}
         <button type="button" onclick={backupFile}>{texts.backupToFile}</button>
       {/if}
       <button type="button" onclick={onRestore}>{texts.restore}</button>

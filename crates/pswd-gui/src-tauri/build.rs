@@ -4,6 +4,7 @@ use std::path::Path;
 // Seules les commandes déclarées ici sont appelables depuis l'interface, et seulement si une
 // capacité (`capabilities/`) les autorise.
 const COMMANDS: &[&str] = &[
+    "device_kind",
     "list_vaults",
     "create_vault",
     "unlock_vault",

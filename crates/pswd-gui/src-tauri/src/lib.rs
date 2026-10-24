@@ -29,6 +29,7 @@ use crate::state::{AppState, Clipboard};
 pub fn run() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let locations = locations(app.handle())?;
             let on_lock = commands::lock_notifier(app.handle().clone());
@@ -36,6 +37,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::device_kind,
             commands::list_vaults,
             commands::create_vault,
             commands::unlock_vault,

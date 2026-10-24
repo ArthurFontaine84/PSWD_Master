@@ -7,6 +7,7 @@ import {
   backupToFile,
   backupVaults,
   changePassword,
+  deviceKind,
   deleteVault,
   getSettings,
   importEntries,
@@ -37,6 +38,7 @@ vi.mock("../lib/api", () => ({
   importEntries: vi.fn(),
   deleteVault: vi.fn(),
   backupVaults: vi.fn(),
+  deviceKind: vi.fn(),
   backupContents: vi.fn(),
   restoreVault: vi.fn(),
   backupFileName: vi.fn(),
@@ -55,6 +57,7 @@ vi.mock("../lib/files", () => ({
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(deviceKind).mockResolvedValue("desktop");
   vi.mocked(listVaults).mockResolvedValue(["perso"]);
   vi.mocked(listEntries).mockResolvedValue([]);
   vi.mocked(listTags).mockResolvedValue([]);
@@ -229,6 +232,24 @@ describe("backing up the vaults", () => {
     expect(backupToFile).toHaveBeenCalledWith("D:/s.pswd");
   });
 
+  it("is only offered as a file on mobile, or until the device is known", async () => {
+    vi.mocked(deviceKind).mockResolvedValueOnce("mobile").mockRejectedValueOnce(new Error("absent"));
+    for (const calls of [1, 2]) {
+      const { unmount } = render(VaultList, {
+        onOpen: vi.fn(),
+        onCreate: vi.fn(),
+        onRestore: vi.fn(),
+        onSettings: vi.fn(),
+      });
+      await screen.findByRole("button", { name: "Sauvegarder dans un fichier" });
+      await vi.waitFor(() => {
+        expect(deviceKind).toHaveBeenCalledTimes(calls);
+      });
+      expect(screen.queryByRole("button", { name: "Sauvegarder dans un dossier" })).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
   it("is offered only when there is a vault", async () => {
     vi.mocked(listVaults).mockResolvedValue([]);
     const onRestore = vi.fn();
@@ -244,6 +265,19 @@ describe("backing up the vaults", () => {
 });
 
 describe("restoring a vault", () => {
+  it("only reads .pswd files on mobile, or until the device is known", async () => {
+    vi.mocked(deviceKind).mockResolvedValueOnce("mobile").mockRejectedValueOnce(new Error("absent"));
+    for (const calls of [1, 2]) {
+      const { unmount } = render(Restore, { onRestored: vi.fn(), onCancel: vi.fn() });
+      await vi.waitFor(() => {
+        expect(deviceKind).toHaveBeenCalledTimes(calls);
+      });
+      expect(screen.getByRole("button", { name: "Choisir un fichier .pswd" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Choisir un dossier" })).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
   it("restores from a .pswd file, listing its vaults", async () => {
     vi.mocked(pickBackupFile).mockResolvedValueOnce(null).mockResolvedValue("D:/s.pswd");
     vi.mocked(backupFileContents)
@@ -278,7 +312,7 @@ describe("restoring a vault", () => {
     vi.mocked(restoreVault).mockResolvedValue("travail");
     const onRestored = vi.fn();
     render(Restore, { onRestored, onCancel: vi.fn() });
-    const choose = screen.getByRole("button", { name: "Choisir un dossier" });
+    const choose = await screen.findByRole("button", { name: "Choisir un dossier" });
     await fireEvent.click(choose);
     expect(backupContents).not.toHaveBeenCalled();
     await fireEvent.click(choose);
@@ -296,11 +330,11 @@ describe("restoring a vault", () => {
       .mockResolvedValue(["perso"]);
     vi.mocked(restoreVault).mockRejectedValue({ code: "invalidBackup", detail: "altérée" });
     render(Restore, { onRestored: vi.fn(), onCancel: vi.fn() });
-    await fireEvent.click(screen.getByRole("button", { name: "Choisir un dossier" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Choisir un dossier" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Cette sauvegarde ne contient aucun coffre.",
     );
-    await fireEvent.click(screen.getByRole("button", { name: "Choisir un dossier" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Choisir un dossier" }));
     await fireEvent.click(await screen.findByRole("button", { name: "perso" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Sauvegarde inutilisable : altérée");
   });

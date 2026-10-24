@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Runtime, State};
 use crate::editing::{EntryInput, HistoryItem};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
+use crate::files;
 use crate::settings::Settings;
 use crate::state::{AppState, BackupDone, VaultInfo};
 
@@ -25,6 +26,14 @@ pub const VAULT_LOCKED: &str = "vault-locked";
 pub struct CreatedVault {
     vault: VaultInfo,
     recovery_key: String,
+}
+
+/// Le type d'appareil : sur mobile, une sauvegarde ne peut pas être un dossier (SPEC §12).
+const DEVICE_KIND: &str = if cfg!(mobile) { "mobile" } else { "desktop" };
+
+#[tauri::command]
+pub fn device_kind() -> &'static str {
+    DEVICE_KIND
 }
 
 /// Noms des coffres de cet appareil, triés.
@@ -170,8 +179,12 @@ pub fn delete_vault(
 
 /// Le fichier est lu par Rust : son contenu en clair ne passe jamais par l'interface.
 #[tauri::command]
-pub fn import_entries(state: State<'_, AppState>, path: String) -> Result<usize, UiError> {
-    state.import_entries(Path::new(&path))
+pub fn import_entries<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<usize, UiError> {
+    state.import_entries(&files::read(&app, &path)?)
 }
 
 #[tauri::command]
@@ -204,25 +217,33 @@ pub fn backup_file_name(state: State<'_, AppState>) -> String {
 
 /// Tous les coffres dans le fichier `.pswd` choisi, écrit par Rust ; renvoie leur nombre.
 #[tauri::command]
-pub fn backup_to_file(state: State<'_, AppState>, path: String) -> Result<usize, UiError> {
-    state.backup_to_file(Path::new(&path))
+pub fn backup_to_file<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<usize, UiError> {
+    let (data, count) = state.backup_file()?;
+    files::write(&app, &path, &data)?;
+    Ok(count)
 }
 
 #[tauri::command]
-pub fn backup_file_contents(
+pub fn backup_file_contents<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     path: String,
 ) -> Result<Vec<String>, UiError> {
-    state.backup_file_contents(Path::new(&path))
+    state.backup_file_contents(&files::read(&app, &path)?)
 }
 
 #[tauri::command]
-pub fn restore_from_file(
+pub fn restore_from_file<R: Runtime>(
+    app: AppHandle<R>,
     state: State<'_, AppState>,
     path: String,
     name: String,
 ) -> Result<String, UiError> {
-    state.restore_from_file(Path::new(&path), &name)
+    state.restore_from_file(&files::read(&app, &path)?, &name)
 }
 
 #[tauri::command]
@@ -287,7 +308,9 @@ mod tests {
             ));
             let kdf = KdfParams::new(8 * 1024, 1, 1).unwrap();
             let app = mock_builder()
+                .plugin(tauri_plugin_fs::init())
                 .invoke_handler(tauri::generate_handler![
+                    device_kind,
                     list_vaults,
                     create_vault,
                     unlock_vault,
@@ -359,6 +382,12 @@ mod tests {
         fn config_file(&self) -> std::path::PathBuf {
             self.dir.path().join("config").join("config.toml")
         }
+    }
+
+    #[test]
+    fn the_interface_knows_it_runs_on_a_desktop() {
+        let app = TestApp::new(None);
+        assert_eq!(app.call("device_kind", json!({})), Ok(json!("desktop")));
     }
 
     #[test]
@@ -701,13 +730,25 @@ mod tests {
     fn commands_outside_the_capabilities_are_refused() {
         assert_eq!(not_allowed(), "secret");
         let app = TestApp::new(None);
-        let refusal = app.call("not_allowed", json!({})).unwrap_err();
-        assert!(
-            refusal
-                .as_str()
-                .is_some_and(|message| message.contains("not allowed")),
-            "{refusal}"
-        );
-        assert!(app.call("plugin:fs|read_file", json!({})).is_err());
+        let refused = |command: &str, arguments: Value| {
+            let refusal = app.call(command, arguments).unwrap_err();
+            assert!(
+                refusal
+                    .as_str()
+                    .is_some_and(|message| message.contains("not allowed")),
+                "{command} : {refusal}"
+            );
+        };
+        refused("not_allowed", json!({}));
+        // Le plugin `fs` sert au backend seul : l'interface ne lit ni n'écrit aucun fichier.
+        let file = app.config_file();
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "").unwrap();
+        let path = file.display().to_string();
+        refused("plugin:fs|read_file", json!({ "path": path }));
+        refused("plugin:fs|read_text_file", json!({ "path": path }));
+        refused("plugin:fs|write_file", json!({ "path": path }));
+        refused("plugin:fs|remove", json!({ "path": path }));
+        assert!(file.exists());
     }
 }
