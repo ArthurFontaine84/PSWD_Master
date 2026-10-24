@@ -327,6 +327,8 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 
 **Consultation** : la liste et le détail ne contiennent jamais de mot de passe. « Copier » est fait par Rust (`copy_password`) ; « Afficher » (`reveal_password`) envoie le mot de passe à l'interface, qui le masque de nouveau au bout de 30 s, ou dès qu'on change d'entrée. Recherche à chaque frappe (côté Rust, `pswd_app::search`), filtre par tag, `Ctrl+F` pour aller à la recherche. Toute lecture du coffre repousse son verrouillage ; si le coffre s'est verrouillé entre-temps, l'interface revient à la liste.
 
+**Modification** : un formulaire unique pour ajouter et modifier (une note n'a ni identifiant, ni mot de passe, ni URL ; URLs une par ligne, tags séparés par des espaces ou des virgules). Pour le mot de passe : « Saisir » (le champ est vidé dès l'envoi), « Générer » (longueur 8 à 128, symboles ou non : **tiré en Rust à l'enregistrement**, il ne passe jamais par l'interface), et en modification « Inchangé » (par défaut) ou « Supprimer ». La suppression d'une entrée demande une confirmation dans l'écran. L'historique liste les versions précédentes (date, titre, identifiant, « mot de passe différent »), jamais les anciens mots de passe.
+
 **Presse-papiers** : sur le bureau, `LazyClipboard` de `pswd-infra` (ouvert à la première copie, partagé avec la CLI). Sur mobile, un plugin Tauri maison (Kotlin et Swift, quelques dizaines de lignes) implémente `SecureClipboard` avec les marqueurs du §9 ; le plugin officiel ne les pose pas.
 
 **Verrouillage**

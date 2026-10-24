@@ -36,6 +36,31 @@ export interface EntryDetail extends EntrySummary {
   versions: number;
 }
 
+/** Ce que devient le mot de passe ; `generate` le fait tirer par le backend. */
+export type PasswordChoice =
+  | { mode: "keep" }
+  | { mode: "clear" }
+  | { mode: "set"; value: string }
+  | { mode: "generate"; length: number; symbols: boolean };
+
+export interface EntryInput {
+  kind: EntryKind;
+  title: string;
+  username: string;
+  password: PasswordChoice;
+  urls: string[];
+  notes: string;
+  tags: string[];
+}
+
+/** Une version précédente, sans mot de passe. */
+export interface HistoryItem {
+  updatedAt: number;
+  title: string;
+  username: string | null;
+  passwordChanged: boolean;
+}
+
 export interface TagCount {
   tag: string;
   count: number;
@@ -88,6 +113,22 @@ export function revealPassword(id: string): Promise<string> {
 /** Copie faite par le backend ; renvoie le délai d'effacement, en secondes. */
 export function copyPassword(id: string): Promise<number> {
   return invoke<number>("copy_password", { id });
+}
+
+export function addEntry(entry: EntryInput): Promise<EntryDetail> {
+  return invoke<EntryDetail>("add_entry", { entry });
+}
+
+export function updateEntry(id: string, entry: EntryInput): Promise<EntryDetail> {
+  return invoke<EntryDetail>("update_entry", { id, entry });
+}
+
+export async function deleteEntry(id: string): Promise<void> {
+  await invoke("delete_entry", { id });
+}
+
+export function entryHistory(id: string): Promise<HistoryItem[]> {
+  return invoke<HistoryItem[]>("entry_history", { id });
 }
 
 /** Appelle `handler` quand le coffre se verrouille par inactivité. */

@@ -2,10 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  addEntry,
   copyPassword,
   createVault,
   currentVault,
+  deleteEntry,
   entryDetail,
+  entryHistory,
   listEntries,
   listTags,
   listVaults,
@@ -13,6 +16,8 @@ import {
   onVaultLocked,
   revealPassword,
   unlockVault,
+  updateEntry,
+  type EntryInput,
 } from "./api";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -35,6 +40,19 @@ describe("api", () => {
     await listTags();
     await revealPassword("1");
     await copyPassword("1");
+    const entry: EntryInput = {
+      kind: "note",
+      title: "Wi-Fi",
+      username: "",
+      password: { mode: "keep" },
+      urls: [],
+      notes: "",
+      tags: [],
+    };
+    await addEntry(entry);
+    await updateEntry("1", entry);
+    await deleteEntry("1");
+    await entryHistory("1");
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ["list_vaults"],
       ["create_vault", { name: "perso", password: "maître" }],
@@ -46,6 +64,10 @@ describe("api", () => {
       ["list_tags"],
       ["reveal_password", { id: "1" }],
       ["copy_password", { id: "1" }],
+      ["add_entry", { entry }],
+      ["update_entry", { id: "1", entry }],
+      ["delete_entry", { id: "1" }],
+      ["entry_history", { id: "1" }],
     ]);
   });
 

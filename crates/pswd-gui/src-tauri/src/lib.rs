@@ -6,6 +6,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 mod commands;
+mod editing;
 mod entries;
 mod error;
 mod state;
@@ -41,7 +42,11 @@ pub fn run() {
             commands::entry_detail,
             commands::list_tags,
             commands::reveal_password,
-            commands::copy_password
+            commands::copy_password,
+            commands::add_entry,
+            commands::update_entry,
+            commands::delete_entry,
+            commands::entry_history
         ])
         .run(tauri::generate_context!());
     if let Err(error) = result {

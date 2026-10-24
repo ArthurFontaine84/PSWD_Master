@@ -29,6 +29,9 @@ describe("errorMessage", () => {
       ["entryNotFound", "1", "Cette entrée n'existe plus."],
       ["noPassword", "Wi-Fi", "L'entrée « Wi-Fi » n'a pas de mot de passe."],
       ["clipboard", "occupé", "Copie impossible : occupé"],
+      ["emptyTitle", null, "Le titre ne peut pas être vide."],
+      ["invalidLength", null, "La longueur doit être comprise entre 8 et 128."],
+      ["saveFailed", "disque plein", "Enregistrement impossible : disque plein"],
       ["unexpected", "disque plein", "Erreur : disque plein"],
     ];
     for (const [code, detail, message] of cases) {

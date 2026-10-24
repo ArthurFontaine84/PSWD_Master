@@ -1,14 +1,20 @@
 <script lang="ts">
-  import EntryDetail from "../components/EntryDetail.svelte";
+  import EntryDetailView from "../components/EntryDetail.svelte";
+  import EntryForm from "../components/EntryForm.svelte";
   import EntryList from "../components/EntryList.svelte";
   import {
+    addEntry,
     listEntries,
     listTags,
     lockVault,
+    updateEntry,
+    type EntryDetail,
+    type EntryInput,
     type EntrySummary,
     type TagCount,
     type VaultInfo,
   } from "../lib/api";
+  import { emptyForm, formFrom } from "../lib/entryForm";
   import { errorMessage, isVaultLocked } from "../lib/errors";
   import { texts } from "../lib/i18n";
 
@@ -28,6 +34,10 @@
   let tags = $state<TagCount[]>([]);
   let problem = $state<string | null>(null);
   let searchField: HTMLInputElement | undefined = $state();
+  /** Formulaire ouvert à la place du détail : nouvelle entrée, ou modification. */
+  let editor = $state<{ mode: "add" } | { mode: "edit"; detail: EntryDetail } | null>(null);
+  /** Augmente après chaque modification : la liste et les tags sont relus. */
+  let revision = $state(0);
 
   function fail(error: unknown) {
     if (isVaultLocked(error)) {
@@ -46,11 +56,34 @@
     }
   }
 
+  // Relancée à chaque frappe, changement de tag ou modification d'une entrée.
   $effect(() => {
+    void revision;
     void search(text, tag);
   });
 
-  listTags().then((loaded) => (tags = loaded), fail);
+  $effect(() => {
+    void revision;
+    listTags().then((loaded) => (tags = loaded), fail);
+  });
+
+  function select(id: string) {
+    editor = null;
+    selected = id;
+  }
+
+  /** Enregistre le formulaire, puis montre l'entrée enregistrée. */
+  async function save(input: EntryInput) {
+    const saved = editor?.mode === "edit" ? await updateEntry(editor.detail.id, input) : await addEntry(input);
+    editor = null;
+    selected = saved.id;
+    revision += 1;
+  }
+
+  function deleted() {
+    selected = null;
+    revision += 1;
+  }
 
   async function lock() {
     await lockVault();
@@ -67,10 +100,13 @@
 
 <svelte:window onkeydown={shortcut} />
 
-<section class="vault" class:has-selection={selected !== null} aria-labelledby="vault-title">
+<section class="vault" class:has-selection={selected !== null || editor !== null} aria-labelledby="vault-title">
   <header>
     <h2 id="vault-title">{texts.vaultTitle(vault.name)}</h2>
-    <button type="button" onclick={lock}>{texts.lock}</button>
+    <div class="actions">
+      <button type="button" class="primary" onclick={() => (editor = { mode: "add" })}>{texts.newEntry}</button>
+      <button type="button" onclick={lock}>{texts.lock}</button>
+    </div>
   </header>
   <div class="layout">
     <div class="list-pane">
@@ -96,12 +132,29 @@
         <p role="alert">{problem}</p>
       {/if}
       <p class="count">{texts.entryCount(entries.length)}</p>
-      <EntryList {entries} {selected} onSelect={(id) => (selected = id)} />
+      <EntryList {entries} {selected} onSelect={select} />
     </div>
     <div class="detail-pane">
-      {#if selected}
-        {#key selected}
-          <EntryDetail id={selected} onBack={() => (selected = null)} onError={fail} />
+      {#if editor}
+        <h3>{editor.mode === "edit" ? texts.editEntry(editor.detail.title) : texts.newEntry}</h3>
+        {#key editor}
+          <EntryForm
+            initial={editor.mode === "edit" ? formFrom(editor.detail) : emptyForm()}
+            editing={editor.mode === "edit"}
+            onSubmit={save}
+            onCancel={() => (editor = null)}
+            {onExpired}
+          />
+        {/key}
+      {:else if selected}
+        {#key `${selected}:${String(revision)}`}
+          <EntryDetailView
+            id={selected}
+            onBack={() => (selected = null)}
+            onEdit={(detail) => (editor = { mode: "edit", detail })}
+            onDeleted={deleted}
+            onError={fail}
+          />
         {/key}
       {:else}
         <p class="hint">{texts.chooseEntry}</p>

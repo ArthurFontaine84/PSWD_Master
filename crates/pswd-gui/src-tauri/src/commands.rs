@@ -7,6 +7,7 @@ use pswd_core::Secret;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
 
+use crate::editing::{EntryInput, HistoryItem};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
 use crate::state::{AppState, VaultInfo};
@@ -97,6 +98,31 @@ pub fn copy_password(state: State<'_, AppState>, id: String) -> Result<u64, UiEr
     Ok(state.copy_password(&id)?.as_secs())
 }
 
+#[tauri::command]
+pub fn add_entry(state: State<'_, AppState>, entry: EntryInput) -> Result<EntryDetail, UiError> {
+    state.add_entry(entry)
+}
+
+#[tauri::command]
+pub fn update_entry(
+    state: State<'_, AppState>,
+    id: String,
+    entry: EntryInput,
+) -> Result<EntryDetail, UiError> {
+    state.update_entry(&id, entry)
+}
+
+#[tauri::command]
+pub fn delete_entry(state: State<'_, AppState>, id: String) -> Result<(), UiError> {
+    state.delete_entry(&id)
+}
+
+/// Versions précédentes d'une entrée, sans mot de passe.
+#[tauri::command]
+pub fn entry_history(state: State<'_, AppState>, id: String) -> Result<Vec<HistoryItem>, UiError> {
+    state.history(&id)
+}
+
 /// Prévient l'interface quand le coffre se verrouille par inactivité.
 pub fn lock_notifier<R: Runtime>(app: AppHandle<R>) -> impl Fn() + Send + Sync + 'static {
     move || {
@@ -160,6 +186,10 @@ mod tests {
                     list_tags,
                     reveal_password,
                     copy_password,
+                    add_entry,
+                    update_entry,
+                    delete_entry,
+                    entry_history,
                     not_allowed
                 ])
                 .build(tauri::generate_context!())
@@ -368,6 +398,50 @@ mod tests {
         assert_eq!(app.call("entry_detail", unknown.clone()), not_found);
         assert_eq!(app.call("reveal_password", unknown.clone()), not_found);
         assert_eq!(app.call("copy_password", unknown), not_found);
+    }
+
+    #[test]
+    fn entries_are_edited_through_their_commands() {
+        let app = TestApp::new(None);
+        app.create("perso", "maître").unwrap();
+        let form = |title: &str, password: Value| {
+            json!({
+                "kind": "login",
+                "title": title,
+                "username": "arthur",
+                "password": password,
+                "urls": ["https://github.com"],
+                "notes": "",
+                "tags": ["dev"],
+            })
+        };
+        let added = app
+            .call(
+                "add_entry",
+                json!({ "entry": form("GitHub", json!({ "mode": "generate", "length": 24, "symbols": true })) }),
+            )
+            .unwrap();
+        assert_eq!(added["title"], "GitHub");
+        assert_eq!(added["hasPassword"], true);
+        let id = added["id"].clone();
+        let updated = app
+            .call(
+                "update_entry",
+                json!({ "id": id, "entry": form("GitHub pro", json!({ "mode": "keep" })) }),
+            )
+            .unwrap();
+        assert_eq!(updated["versions"], 1);
+        let history = app.call("entry_history", json!({ "id": id })).unwrap();
+        assert_eq!(history[0]["title"], "GitHub");
+        assert_eq!(history[0]["passwordChanged"], false);
+        assert_eq!(
+            app.call("delete_entry", json!({ "id": id })),
+            Ok(Value::Null)
+        );
+        assert_eq!(
+            app.call("delete_entry", json!({ "id": id })),
+            Err(json!({ "code": "entryNotFound", "detail": id }))
+        );
     }
 
     /// Commande bien enregistrée, mais ni déclarée dans `build.rs` ni autorisée par une capacité.

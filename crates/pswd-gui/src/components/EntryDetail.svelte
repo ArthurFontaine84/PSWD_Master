@@ -1,15 +1,25 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { copyPassword, entryDetail, revealPassword, type EntryDetail } from "../lib/api";
+  import {
+    copyPassword,
+    deleteEntry,
+    entryDetail,
+    entryHistory,
+    revealPassword,
+    type EntryDetail,
+    type HistoryItem,
+  } from "../lib/api";
   import { texts } from "../lib/i18n";
 
   interface Props {
     id: string;
     onBack: () => void;
+    onEdit: (detail: EntryDetail) => void;
+    onDeleted: () => void;
     onError: (error: unknown) => void;
   }
 
-  const { id, onBack, onError }: Props = $props();
+  const { id, onBack, onEdit, onDeleted, onError }: Props = $props();
 
   /** Un mot de passe affiché est masqué de nouveau au bout de ce délai (ms). */
   const REVEAL_DURATION = 30_000;
@@ -17,6 +27,8 @@
   let detail = $state<EntryDetail | null>(null);
   let revealed = $state<string | null>(null);
   let copied = $state<string | null>(null);
+  let confirming = $state(false);
+  let history = $state<HistoryItem[] | null>(null);
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
   $effect(() => {
@@ -44,6 +56,27 @@
   async function copy() {
     try {
       copied = texts.copied(await copyPassword(id));
+    } catch (error) {
+      onError(error);
+    }
+  }
+
+  async function remove() {
+    try {
+      await deleteEntry(id);
+      onDeleted();
+    } catch (error) {
+      onError(error);
+    }
+  }
+
+  async function toggleHistory() {
+    if (history !== null) {
+      history = null;
+      return;
+    }
+    try {
+      history = await entryHistory(id);
     } catch (error) {
       onError(error);
     }
@@ -92,6 +125,39 @@
       <p role="status">{copied}</p>
     {/if}
     <p class="meta">{texts.updated(detail.updatedAt)} · {texts.versions(detail.versions)}</p>
+    {@const shown = detail}
+    {#if confirming}
+      <div class="confirm" role="group" aria-label={texts.delete}>
+        <p>{texts.confirmDelete(shown.title)}</p>
+        <div class="actions">
+          <button type="button" onclick={() => (confirming = false)}>{texts.cancel}</button>
+          <button type="button" class="danger" onclick={remove}>{texts.delete}</button>
+        </div>
+      </div>
+    {:else}
+      <div class="actions">
+        {#if shown.versions > 0}
+          <button type="button" onclick={toggleHistory}>
+            {history === null ? texts.history : texts.hideHistory}
+          </button>
+        {/if}
+        <button type="button" onclick={() => (confirming = true)}>{texts.delete}</button>
+        <button type="button" class="primary" onclick={() => onEdit(shown)}>{texts.edit}</button>
+      </div>
+    {/if}
+    {#if history !== null}
+      <ol class="history" aria-label={texts.history}>
+        {#each history as version (version.updatedAt)}
+          <li>
+            <span class="meta">{texts.updated(version.updatedAt)}</span>
+            {version.title}{version.username ? ` — ${version.username}` : ""}
+            {#if version.passwordChanged}
+              <em>({texts.passwordChanged})</em>
+            {/if}
+          </li>
+        {/each}
+      </ol>
+    {/if}
   {:else}
     <p>{texts.loading}</p>
   {/if}
@@ -147,5 +213,26 @@
 
   .meta {
     font-size: 0.875rem;
+  }
+
+  .confirm {
+    padding: var(--space-m);
+    border: 1px solid var(--danger);
+    border-radius: var(--radius);
+  }
+
+  .danger {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+
+  .history {
+    display: grid;
+    gap: var(--space-s);
+    padding-left: var(--space-l);
+  }
+
+  .history .meta {
+    display: block;
   }
 </style>

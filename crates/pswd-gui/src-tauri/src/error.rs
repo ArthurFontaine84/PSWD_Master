@@ -1,5 +1,5 @@
 use pswd_app::AppError;
-use pswd_core::{FileError, SessionError};
+use pswd_core::{FileError, GeneratorError, SessionError, VaultError};
 use pswd_infra::ConfigError;
 use serde::Serialize;
 
@@ -19,7 +19,7 @@ impl UiError {
         }
     }
 
-    fn code(code: &'static str) -> Self {
+    pub fn code(code: &'static str) -> Self {
         Self { code, detail: None }
     }
 
@@ -49,9 +49,27 @@ impl From<AppError> for UiError {
             AppError::Session(SessionError::File(error)) => {
                 Self::new("vaultUnreadable", error.to_string())
             }
+            AppError::Session(SessionError::Local(error)) => {
+                Self::new("saveFailed", error.to_string())
+            }
+            AppError::Generator(GeneratorError::InvalidLength) => Self::code("invalidLength"),
             // EXTENSION(anglais): les autres erreurs reçoivent leur code au fil des écrans ; en
             // attendant, le message français sert de détail.
             other => Self::new("unexpected", other.to_string()),
+        }
+    }
+}
+
+impl From<SessionError> for UiError {
+    fn from(error: SessionError) -> Self {
+        AppError::Session(error).into()
+    }
+}
+
+impl From<VaultError> for UiError {
+    fn from(error: VaultError) -> Self {
+        match error {
+            VaultError::EntryNotFound(id) => Self::new("entryNotFound", id.to_string()),
         }
     }
 }
@@ -107,6 +125,16 @@ mod tests {
                 Some("coffre altéré ou corrompu"),
             ),
             (
+                AppError::Session(SessionError::Local(PortError::new("disque plein"))),
+                "saveFailed",
+                Some("disque plein"),
+            ),
+            (
+                AppError::Generator(GeneratorError::InvalidLength),
+                "invalidLength",
+                None,
+            ),
+            (
                 AppError::NothingToBackUp,
                 "unexpected",
                 Some("aucun coffre à sauvegarder : utiliser init"),
@@ -121,5 +149,18 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn missing_entries_and_session_errors_are_converted() {
+        let id = uuid::Uuid::nil();
+        assert_eq!(
+            UiError::from(VaultError::EntryNotFound(id)),
+            UiError::new("entryNotFound", id.to_string())
+        );
+        assert_eq!(
+            UiError::from(SessionError::LocalVaultExists),
+            UiError::code("vaultFolderExists")
+        );
     }
 }

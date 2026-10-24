@@ -14,6 +14,10 @@ const COMMANDS: &[&str] = &[
     "list_tags",
     "reveal_password",
     "copy_password",
+    "add_entry",
+    "update_entry",
+    "delete_entry",
+    "entry_history",
 ];
 
 fn main() {

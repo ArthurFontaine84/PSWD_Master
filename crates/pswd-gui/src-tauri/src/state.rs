@@ -8,6 +8,7 @@ use pswd_core::{Credentials, Entry, Secret, Timestamp, Vault};
 use serde::Serialize;
 use uuid::Uuid;
 
+use crate::editing::{EntryInput, HistoryItem, history};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
 
@@ -179,12 +180,54 @@ impl AppState {
         Ok(ttl)
     }
 
+    /// Ajoute l'entrée et l'enregistre aussitôt.
+    pub fn add_entry(&self, input: EntryInput) -> Result<EntryDetail, UiError> {
+        let content = input.into_content(None)?;
+        let now = (self.clock)();
+        self.with_session(|session| {
+            let id = session.edit(|vault| vault.add(content, now))?;
+            Ok(EntryDetail::from(find(session.vault(), id)?))
+        })?
+    }
+
+    /// Remplace le contenu de l'entrée ; la version précédente rejoint l'historique.
+    pub fn update_entry(&self, id: &str, input: EntryInput) -> Result<EntryDetail, UiError> {
+        let id = parse_id(id)?;
+        let now = (self.clock)();
+        self.with_session(|session| {
+            let current = find(session.vault(), id)?.content().password.clone();
+            let content = input.into_content(current)?;
+            session.edit(|vault| vault.update(id, content, now))??;
+            Ok(EntryDetail::from(find(session.vault(), id)?))
+        })?
+    }
+
+    pub fn delete_entry(&self, id: &str) -> Result<(), UiError> {
+        let id = parse_id(id)?;
+        let now = (self.clock)();
+        self.with_session(|session| Ok(session.edit(|vault| vault.delete(id, now))??))?
+    }
+
+    /// Versions précédentes de l'entrée, sans mot de passe.
+    pub fn history(&self, id: &str) -> Result<Vec<HistoryItem>, UiError> {
+        let id = parse_id(id)?;
+        self.with_vault(|vault| find(vault, id).map(history))?
+    }
+
     /// Lit le coffre ouvert, et repousse son verrouillage.
     fn with_vault<T>(&self, read: impl FnOnce(&Vault) -> T) -> Result<T, UiError> {
+        self.with_session(|session| read(session.vault()))
+    }
+
+    /// Utilise la session du coffre ouvert, et repousse son verrouillage.
+    fn with_session<T>(
+        &self,
+        use_session: impl FnOnce(&mut VaultSession) -> T,
+    ) -> Result<T, UiError> {
         let open = self.open();
         let open = open.as_ref().ok_or_else(UiError::vault_locked)?;
         open.lock
-            .with(|session| read(session.vault()))
+            .with(use_session)
             .ok_or_else(UiError::vault_locked)
     }
 
@@ -577,5 +620,176 @@ mod tests {
         open_with_entries(&state);
         thread::sleep(Duration::from_millis(400));
         assert_eq!(state.entries("", None).err(), Some(UiError::vault_locked()));
+    }
+
+    fn entry_input(value: serde_json::Value) -> EntryInput {
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn wifi_input(password: &serde_json::Value) -> EntryInput {
+        entry_input(json!({
+            "kind": "login",
+            "title": "Box",
+            "username": "admin",
+            "password": password,
+            "urls": [],
+            "notes": "",
+            "tags": ["maison"],
+        }))
+    }
+
+    #[test]
+    fn editing_needs_an_open_vault() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        let id = Uuid::nil().to_string();
+        let locked = Some(UiError::vault_locked());
+        let keep = || wifi_input(&json!({ "mode": "keep" }));
+        assert_eq!(state.add_entry(keep()).err(), locked);
+        assert_eq!(state.update_entry(&id, keep()).err(), locked);
+        assert_eq!(state.delete_entry(&id).err(), locked);
+        assert_eq!(state.history(&id).err(), locked);
+    }
+
+    #[test]
+    fn added_entry_is_saved_and_listed() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        open_with_entries(&state);
+        let added = state
+            .add_entry(wifi_input(&json!({ "mode": "set", "value": "box-1234" })))
+            .unwrap();
+        let id = serde_json::to_value(&added).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(state.reveal_password(&id).unwrap().expose(), "box-1234");
+        assert_eq!(
+            titles(&state.entries("", None).unwrap()),
+            ["banque", "Box", "GitHub", "Wi-Fi"]
+        );
+        state.lock();
+        state.unlock("perso", &secret("maître")).unwrap();
+        assert_eq!(titles(&state.entries("box", None).unwrap()), ["Box"]);
+    }
+
+    #[test]
+    fn invalid_input_adds_nothing() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        open_with_entries(&state);
+        let blank = entry_input(json!({
+            "kind": "note",
+            "title": "",
+            "username": "",
+            "password": { "mode": "keep" },
+            "urls": [],
+            "notes": "",
+            "tags": [],
+        }));
+        assert_eq!(
+            state.add_entry(blank).err(),
+            Some(UiError::code("emptyTitle"))
+        );
+        assert_eq!(state.entries("", None).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn updated_entry_keeps_its_password_and_its_history() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        let (github, _, _) = open_with_entries(&state);
+        let updated = state
+            .update_entry(&github, wifi_input(&json!({ "mode": "keep" })))
+            .unwrap();
+        let updated = serde_json::to_value(updated).unwrap();
+        assert_eq!(updated["title"], "Box");
+        assert_eq!(updated["versions"], 1);
+        assert_eq!(state.reveal_password(&github).unwrap().expose(), "hunter2");
+        let history = serde_json::to_value(state.history(&github).unwrap()).unwrap();
+        assert_eq!(history[0]["title"], "GitHub");
+        assert_eq!(history[0]["passwordChanged"], false);
+
+        state
+            .update_entry(
+                &github,
+                wifi_input(&json!({ "mode": "generate", "length": 30, "symbols": true })),
+            )
+            .unwrap();
+        assert_eq!(
+            state
+                .reveal_password(&github)
+                .unwrap()
+                .expose()
+                .chars()
+                .count(),
+            30
+        );
+        let history = serde_json::to_value(state.history(&github).unwrap()).unwrap();
+        assert_eq!(history[0]["passwordChanged"], true);
+    }
+
+    #[test]
+    fn missing_entries_cannot_be_edited() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        let (_, _, deleted) = open_with_entries(&state);
+        let not_found = Some(UiError::new("entryNotFound", deleted.clone()));
+        let keep = || wifi_input(&json!({ "mode": "keep" }));
+        assert_eq!(state.update_entry(&deleted, keep()).err(), not_found);
+        assert_eq!(state.delete_entry(&deleted).err(), not_found);
+        assert_eq!(state.history(&deleted).err(), not_found);
+        let bad = Some(UiError::new("entryNotFound", "x"));
+        assert_eq!(state.update_entry("x", keep()).err(), bad);
+        assert_eq!(state.delete_entry("x").err(), bad);
+        assert_eq!(state.history("x").err(), bad);
+    }
+
+    #[test]
+    fn invalid_update_changes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        let (github, _, _) = open_with_entries(&state);
+        let too_short = wifi_input(&json!({ "mode": "generate", "length": 2, "symbols": true }));
+        assert_eq!(
+            state.update_entry(&github, too_short).err(),
+            Some(UiError::code("invalidLength"))
+        );
+        assert_eq!(
+            serde_json::to_value(state.entry(&github).unwrap()).unwrap()["title"],
+            "GitHub"
+        );
+    }
+
+    #[test]
+    fn deleted_entry_disappears() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        let (github, _, _) = open_with_entries(&state);
+        assert_eq!(state.delete_entry(&github), Ok(()));
+        assert_eq!(
+            titles(&state.entries("", None).unwrap()),
+            ["banque", "Wi-Fi"]
+        );
+        assert!(state.entry(&github).is_err());
+    }
+
+    #[test]
+    fn failed_save_is_reported() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        open_with_entries(&state);
+        let file = dir
+            .path()
+            .join("data")
+            .join("vaults")
+            .join("perso")
+            .join("vault.enc.tmp");
+        std::fs::create_dir(&file).unwrap();
+        let error = state
+            .add_entry(wifi_input(&json!({ "mode": "clear" })))
+            .unwrap_err();
+        assert_eq!(serde_json::to_value(error).unwrap()["code"], "saveFailed");
+        assert_eq!(state.entries("", None).unwrap().len(), 3);
     }
 }
