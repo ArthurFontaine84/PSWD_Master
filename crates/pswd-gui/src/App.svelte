@@ -1,6 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { currentVault, getSettings, onVaultLocked, type VaultInfo } from "./lib/api";
+  import {
+    appHidden,
+    appShown,
+    currentVault,
+    getSettings,
+    onVaultLocked,
+    type VaultInfo,
+  } from "./lib/api";
   import { throttle } from "./lib/activity";
   import { texts } from "./lib/i18n";
   import { applyTheme } from "./lib/theme";
@@ -27,22 +34,37 @@
   let screen = $state<Screen>({ kind: "list" });
 
   function showLocked() {
-    screen = { kind: "list", notice: texts.lockedForInactivity };
+    screen = { kind: "list", notice: texts.lockedAutomatically };
   }
 
-  // Une action de l'utilisateur repousse le verrouillage ; si le coffre s'est déjà verrouillé
-  // (événement manqué), on revient à la liste.
+  function showsVault() {
+    return screen.kind === "open" || screen.kind === "recovery";
+  }
+
+  // Le coffre s'est verrouillé sans que l'événement soit reçu : on revient à la liste.
+  function checkStillOpen(vault: VaultInfo | null) {
+    if (vault === null && showsVault()) {
+      showLocked();
+    }
+  }
+
+  // Une action de l'utilisateur repousse le verrouillage.
   const signalActivity = throttle(() => {
-    void currentVault().then((vault) => {
-      if (vault === null && screen.kind !== "list") {
-        showLocked();
-      }
-    });
+    void currentVault().then(checkStillOpen);
   }, ACTIVITY_INTERVAL);
 
   function onActivity() {
-    if (screen.kind === "open" || screen.kind === "recovery") {
+    if (showsVault()) {
       signalActivity();
+    }
+  }
+
+  // Sur mobile, l'arrière-plan rapproche le verrouillage ; au retour, le coffre a pu se fermer.
+  function onVisibilityChange() {
+    if (document.visibilityState === "hidden") {
+      void appHidden();
+    } else {
+      void appShown().then(checkStillOpen);
     }
   }
 
@@ -64,6 +86,7 @@
 </script>
 
 <svelte:window onkeydown={onActivity} onpointerdown={onActivity} />
+<svelte:document onvisibilitychange={onVisibilityChange} />
 
 <main>
   <h1>{texts.appTitle}</h1>

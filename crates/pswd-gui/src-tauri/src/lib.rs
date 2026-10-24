@@ -40,6 +40,8 @@ pub fn run() {
             commands::unlock_vault,
             commands::lock_vault,
             commands::current_vault,
+            commands::app_hidden,
+            commands::app_shown,
             commands::list_entries,
             commands::entry_detail,
             commands::list_tags,

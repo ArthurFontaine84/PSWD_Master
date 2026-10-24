@@ -36,6 +36,16 @@ struct OpenVault {
     lock: IdleLock<VaultSession>,
 }
 
+/// L'application est en arrière-plan depuis `since` ; le coffre se verrouille après `delay`.
+struct Hidden {
+    since: Timestamp,
+    delay: Duration,
+}
+
+/// Le verrouillage en arrière-plan ne concerne que le mobile : sur le bureau, une fenêtre
+/// réduite reste soumise au seul verrouillage par inactivité.
+const BACKGROUND_LOCK: bool = cfg!(mobile);
+
 /// Prévient l'interface qu'un coffre s'est verrouillé par inactivité.
 type LockNotifier = Arc<dyn Fn() + Send + Sync>;
 
@@ -49,9 +59,11 @@ pub struct AppState {
     clock: fn() -> Timestamp,
     /// Délai de verrouillage imposé ; `None` : celui de la configuration.
     auto_lock: Option<Duration>,
+    background_lock: bool,
     on_lock: LockNotifier,
     clipboard: Mutex<Clipboard>,
     open: Mutex<Option<OpenVault>>,
+    hidden: Mutex<Option<Hidden>>,
 }
 
 impl AppState {
@@ -66,6 +78,7 @@ impl AppState {
             KdfParams::DEFAULT,
             pswd_app::now,
             None,
+            BACKGROUND_LOCK,
             on_lock,
         )
     }
@@ -76,6 +89,7 @@ impl AppState {
         kdf: KdfParams,
         clock: fn() -> Timestamp,
         auto_lock: Option<Duration>,
+        background_lock: bool,
         on_lock: impl Fn() + Send + Sync + 'static,
     ) -> Self {
         Self {
@@ -83,9 +97,11 @@ impl AppState {
             kdf,
             clock,
             auto_lock,
+            background_lock,
             on_lock: Arc::new(on_lock),
             clipboard: Mutex::new(clipboard),
             open: Mutex::new(None),
+            hidden: Mutex::new(None),
         }
     }
 
@@ -136,6 +152,38 @@ impl AppState {
         if let Some(open) = self.open().take() {
             drop(open.lock.close());
         }
+    }
+
+    /// L'application passe en arrière-plan : le coffre ouvert se verrouillera après
+    /// `background_lock_seconds`, ou tout de suite si la configuration est illisible.
+    pub fn hide(&self) {
+        if !self.background_lock {
+            return;
+        }
+        let delay = self
+            .vaults
+            .config()
+            .map_or(Duration::ZERO, |config| config.background_lock());
+        let since = (self.clock)();
+        let delay = self.hidden().get_or_insert(Hidden { since, delay }).delay;
+        if let Some(open) = self.open().as_ref() {
+            open.lock.expire_within(delay);
+        }
+    }
+
+    /// L'application revient au premier plan. Son minuteur a pu être suspendu avec elle : si
+    /// l'horloge du système dit le délai dépassé, ou si elle a reculé, le coffre est verrouillé.
+    /// Renvoie le coffre encore ouvert, comme [`AppState::current`].
+    pub fn show(&self) -> Option<VaultInfo> {
+        let hidden = self.hidden().take();
+        if let Some(hidden) = hidden {
+            let elapsed = (self.clock)().as_millis() - hidden.since.as_millis();
+            match u64::try_from(elapsed) {
+                Ok(elapsed) if Duration::from_millis(elapsed) < hidden.delay => {}
+                _ => self.lock(),
+            }
+        }
+        self.current()
     }
 
     /// Le coffre ouvert, et repousse son verrouillage ; `None` s'il n'y en a pas, ou s'il s'est
@@ -335,6 +383,10 @@ impl AppState {
     fn open(&self) -> MutexGuard<'_, Option<OpenVault>> {
         self.open.lock().unwrap_or_else(PoisonError::into_inner)
     }
+
+    fn hidden(&self) -> MutexGuard<'_, Option<Hidden>> {
+        self.hidden.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 }
 
 /// Un identifiant illisible désigne une entrée qui n'existe pas.
@@ -360,6 +412,7 @@ fn password_of(vault: &Vault, id: Uuid) -> Result<Secret, UiError> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
 
@@ -405,6 +458,28 @@ mod tests {
         ))
     }
 
+    thread_local! {
+        static NOW: Cell<i64> = const { Cell::new(1_000) };
+    }
+
+    /// Horloge propre à chaque test, avancée par [`advance`].
+    fn test_clock() -> Timestamp {
+        Timestamp::from_millis(NOW.with(Cell::get))
+    }
+
+    fn advance(millis: i64) {
+        NOW.with(|now| now.set(now.get() + millis));
+    }
+
+    /// Notification de verrouillage qui compte ses appels.
+    fn lock_counter() -> (Arc<AtomicUsize>, impl Fn() + Send + Sync + 'static) {
+        let count = Arc::new(AtomicUsize::new(0));
+        let notified = Arc::clone(&count);
+        (count, move || {
+            notified.fetch_add(1, Ordering::SeqCst);
+        })
+    }
+
     /// État dans un dossier temporaire, et le nombre de verrouillages par inactivité signalés.
     fn state_with(
         dir: &TempDir,
@@ -412,17 +487,15 @@ mod tests {
         clipboard: FakeClipboard,
     ) -> (AppState, Arc<AtomicUsize>) {
         let kdf = KdfParams::new(8 * 1024, 1, 1).unwrap();
-        let count = Arc::new(AtomicUsize::new(0));
-        let notified = Arc::clone(&count);
+        let (count, on_lock) = lock_counter();
         let state = AppState::with_settings(
             vaults_in(dir),
             Box::new(clipboard),
             kdf,
-            || Timestamp::from_millis(1_000),
+            test_clock,
             auto_lock,
-            move || {
-                notified.fetch_add(1, Ordering::SeqCst);
-            },
+            true,
+            on_lock,
         );
         (state, count)
     }
@@ -540,6 +613,120 @@ mod tests {
         thread::sleep(Duration::from_millis(300));
         assert_eq!(state.current(), None);
         assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
+
+    fn lock_in_background_after(state: &AppState, seconds: u32) {
+        state
+            .vaults
+            .update_config(|config| config.background_lock_seconds = seconds)
+            .unwrap();
+    }
+
+    #[test]
+    fn vault_locks_at_once_in_background_when_the_delay_is_zero() {
+        let dir = TempDir::new().unwrap();
+        let (state, count) = state_in(&dir, None);
+        state.create("perso", &secret("maître")).unwrap();
+        lock_in_background_after(&state, 0);
+        state.hide();
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert_eq!(state.show(), None);
+    }
+
+    #[test]
+    fn vault_stays_open_after_a_short_absence() {
+        let dir = TempDir::new().unwrap();
+        let (state, count) = state_in(&dir, None);
+        state.create("perso", &secret("maître")).unwrap();
+        state.hide();
+        advance(59_999);
+        assert_eq!(state.show(), Some(info("perso", 0)));
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(state.current(), Some(info("perso", 0)));
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn long_absence_locks_the_vault_on_return() {
+        let dir = TempDir::new().unwrap();
+        let (state, count) = state_in(&dir, None);
+        state.create("perso", &secret("maître")).unwrap();
+        state.hide();
+        advance(60_000);
+        assert_eq!(state.show(), None);
+        assert_eq!(state.current(), None);
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn clock_going_back_locks_the_vault_on_return() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        state.create("perso", &secret("maître")).unwrap();
+        state.hide();
+        advance(-1);
+        assert_eq!(state.show(), None);
+    }
+
+    #[test]
+    fn hiding_twice_keeps_the_first_moment() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        state.create("perso", &secret("maître")).unwrap();
+        state.hide();
+        advance(30_000);
+        state.hide();
+        advance(30_000);
+        assert_eq!(state.show(), None);
+    }
+
+    #[test]
+    fn hiding_without_an_open_vault_changes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        state.hide();
+        assert_eq!(state.show(), None);
+        state.create("perso", &secret("maître")).unwrap();
+        advance(3_600_000);
+        assert_eq!(state.show(), Some(info("perso", 0)));
+    }
+
+    #[test]
+    fn showing_without_hiding_changes_nothing() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        assert_eq!(state.show(), None);
+        state.create("perso", &secret("maître")).unwrap();
+        advance(3_600_000);
+        assert_eq!(state.show(), Some(info("perso", 0)));
+    }
+
+    #[test]
+    fn unreadable_configuration_locks_at_once_in_background() {
+        let dir = TempDir::new().unwrap();
+        let (state, count) = state_in(&dir, None);
+        state.create("perso", &secret("maître")).unwrap();
+        std::fs::write(dir.path().join("config").join("config.toml"), "couleur = 1").unwrap();
+        state.hide();
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert_eq!(state.show(), None);
+    }
+
+    #[cfg(desktop)]
+    #[test]
+    fn desktop_ignores_the_background() {
+        let dir = TempDir::new().unwrap();
+        let clipboard = Box::new(FakeClipboard::default());
+        let (count, on_lock) = lock_counter();
+        let state = AppState::new(vaults_in(&dir), clipboard, on_lock);
+        state.create("perso", &secret("maître")).unwrap();
+        lock_in_background_after(&state, 0);
+        state.hide();
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(state.show(), Some(info("perso", 0)));
+        assert_eq!(count.load(Ordering::SeqCst), 0);
     }
 
     #[test]

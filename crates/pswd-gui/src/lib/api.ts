@@ -108,6 +108,16 @@ export function currentVault(): Promise<VaultInfo | null> {
   return invoke<VaultInfo | null>("current_vault");
 }
 
+/** L'application passe en arrière-plan : sur mobile, le verrouillage approche. */
+export async function appHidden(): Promise<void> {
+  await invoke("app_hidden");
+}
+
+/** L'application revient au premier plan : le coffre encore ouvert, ou `null`. */
+export function appShown(): Promise<VaultInfo | null> {
+  return invoke<VaultInfo | null>("app_shown");
+}
+
 export function listEntries(text: string, tag: string | null): Promise<EntrySummary[]> {
   return invoke<EntrySummary[]>("list_entries", { text, tag });
 }

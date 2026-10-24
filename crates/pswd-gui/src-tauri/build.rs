@@ -9,6 +9,8 @@ const COMMANDS: &[&str] = &[
     "unlock_vault",
     "lock_vault",
     "current_vault",
+    "app_hidden",
+    "app_shown",
     "list_entries",
     "entry_detail",
     "list_tags",

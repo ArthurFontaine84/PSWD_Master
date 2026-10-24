@@ -194,6 +194,11 @@ impl Config {
     pub fn clipboard_clear(&self) -> Duration {
         Duration::from_secs(u64::from(self.clipboard_clear_seconds))
     }
+
+    #[must_use]
+    pub fn background_lock(&self) -> Duration {
+        Duration::from_secs(u64::from(self.background_lock_seconds))
+    }
 }
 
 /// Le nom sert de nom de dossier : ni séparateur, ni `..`, ni
@@ -306,7 +311,7 @@ mod tests {
         assert_eq!(config, Config::default());
         assert_eq!(config.auto_lock(), Duration::from_secs(600));
         assert_eq!(config.clipboard_clear(), Duration::from_secs(20));
-        assert_eq!(config.background_lock_seconds, 60);
+        assert_eq!(config.background_lock(), Duration::from_secs(60));
         assert_eq!(config.theme, Theme::Auto);
     }
 

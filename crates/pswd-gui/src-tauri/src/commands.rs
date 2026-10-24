@@ -68,6 +68,18 @@ pub fn current_vault(state: State<'_, AppState>) -> Option<VaultInfo> {
     state.current()
 }
 
+/// L'application passe en arrière-plan : sur mobile, le verrouillage approche.
+#[tauri::command]
+pub fn app_hidden(state: State<'_, AppState>) {
+    state.hide();
+}
+
+/// L'application revient au premier plan : le coffre encore ouvert, s'il y en a un.
+#[tauri::command]
+pub fn app_shown(state: State<'_, AppState>) -> Option<VaultInfo> {
+    state.show()
+}
+
 /// Entrées du coffre ouvert qui correspondent à `text` et à `tag`, sans mot de passe.
 #[tauri::command]
 pub fn list_entries(
@@ -252,6 +264,8 @@ mod tests {
                     unlock_vault,
                     lock_vault,
                     current_vault,
+                    app_hidden,
+                    app_shown,
                     list_entries,
                     entry_detail,
                     list_tags,
@@ -280,6 +294,7 @@ mod tests {
                 kdf,
                 || Timestamp::from_millis(1_000),
                 auto_lock,
+                true,
                 lock_notifier(app.handle().clone()),
             ));
             let webview = tauri::WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
@@ -391,6 +406,28 @@ mod tests {
         app.create("perso", "maître").unwrap();
         assert_eq!(receiver.recv_timeout(Duration::from_secs(5)), Ok(()));
         assert_eq!(app.call("current_vault", json!({})), Ok(Value::Null));
+    }
+
+    #[test]
+    fn vault_in_background_locks_itself_and_warns_the_interface() {
+        let app = TestApp::new(None);
+        let (sender, receiver) = mpsc::channel();
+        app.app.listen_any(VAULT_LOCKED, move |_| {
+            let _ = sender.send(());
+        });
+        app.create("perso", "maître").unwrap();
+        assert_eq!(app.call("app_hidden", json!({})), Ok(Value::Null));
+        assert_eq!(
+            app.call("app_shown", json!({})),
+            Ok(json!({ "name": "perso", "entries": 0 }))
+        );
+        let mut settings = app.call("get_settings", json!({})).unwrap();
+        settings["backgroundLockSeconds"] = json!(0);
+        app.call("save_settings", json!({ "settings": settings }))
+            .unwrap();
+        app.call("app_hidden", json!({})).unwrap();
+        assert_eq!(receiver.recv_timeout(Duration::from_secs(5)), Ok(()));
+        assert_eq!(app.call("app_shown", json!({})), Ok(Value::Null));
     }
 
     /// Presse-papiers qui accepte tout, sans rien garder.

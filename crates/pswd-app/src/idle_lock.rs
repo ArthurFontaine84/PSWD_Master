@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 struct State<S> {
     session: Option<S>,
-    deadline: Instant,
+    /// `None` : pas d'échéance.
+    deadline: Option<Instant>,
     closed: bool,
 }
 
@@ -20,7 +21,7 @@ pub struct IdleLock<S> {
 }
 
 impl<S: Send + 'static> IdleLock<S> {
-    /// Un délai nul désactive le verrouillage.
+    /// Un délai nul désactive le verrouillage par inactivité.
     pub fn new(session: S, timeout: Duration) -> Self {
         Self::notifying(session, timeout, || {})
     }
@@ -35,19 +36,17 @@ impl<S: Send + 'static> IdleLock<S> {
         let shared: Shared<S> = Arc::new((
             Mutex::new(State {
                 session: Some(session),
-                deadline: Instant::now() + timeout,
+                deadline: deadline_after(timeout),
                 closed: false,
             }),
             Condvar::new(),
         ));
-        if !timeout.is_zero() {
-            let watched = Arc::clone(&shared);
-            thread::spawn(move || {
-                if watch(&watched) {
-                    on_lock();
-                }
-            });
-        }
+        let watched = Arc::clone(&shared);
+        thread::spawn(move || {
+            if watch(&watched) {
+                on_lock();
+            }
+        });
         Self { shared, timeout }
     }
 
@@ -55,8 +54,17 @@ impl<S: Send + 'static> IdleLock<S> {
     pub fn with<R>(&self, use_session: impl FnOnce(&mut S) -> R) -> Option<R> {
         let mut state = lock(&self.shared.0);
         let result = state.session.as_mut().map(use_session);
-        state.deadline = Instant::now() + self.timeout;
+        state.deadline = deadline_after(self.timeout);
         result
+    }
+
+    /// Avance l'échéance : sans utilisation d'ici là, la session sera détruite dans `delay` au
+    /// plus tard, même si le verrouillage par inactivité est désactivé. Ne la repousse jamais.
+    pub fn expire_within(&self, delay: Duration) {
+        let mut state = lock(&self.shared.0);
+        let soon = Instant::now() + delay;
+        state.deadline = Some(state.deadline.map_or(soon, |deadline| deadline.min(soon)));
+        self.shared.1.notify_all();
     }
 
     /// Arrête la surveillance et rend la session, si elle n'a pas été verrouillée.
@@ -69,6 +77,16 @@ impl<S: Send + 'static> IdleLock<S> {
     }
 }
 
+/// Abandonné sans [`IdleLock::close`], il détruit la session et arrête la surveillance.
+impl<S> Drop for IdleLock<S> {
+    fn drop(&mut self) {
+        let mut state = lock(&self.shared.0);
+        state.closed = true;
+        state.session = None;
+        self.shared.1.notify_all();
+    }
+}
+
 /// Dort jusqu'à l'échéance ; une utilisation l'a peut-être repoussée entre-temps. Renvoie
 /// `true` si la session a été détruite à l'échéance, `false` si l'`IdleLock` a été fermé avant.
 fn watch<S>(shared: &(Mutex<State<S>>, Condvar)) -> bool {
@@ -76,18 +94,27 @@ fn watch<S>(shared: &(Mutex<State<S>>, Condvar)) -> bool {
     let mut state = lock(mutex);
     while !state.closed {
         let now = Instant::now();
-        if now >= state.deadline {
-            // La session est détruite ici : sa clé est effacée de la mémoire.
-            state.session = None;
-            return true;
-        }
-        let remaining = state.deadline - now;
-        state = wakeup
-            .wait_timeout(state, remaining)
-            .unwrap_or_else(PoisonError::into_inner)
-            .0;
+        state = match state.deadline {
+            Some(deadline) if now >= deadline => {
+                // La session est détruite ici : sa clé est effacée de la mémoire.
+                state.session = None;
+                return true;
+            }
+            Some(deadline) => {
+                wakeup
+                    .wait_timeout(state, deadline - now)
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .0
+            }
+            None => wakeup.wait(state).unwrap_or_else(PoisonError::into_inner),
+        };
     }
     false
+}
+
+/// Un délai nul désactive le verrouillage.
+fn deadline_after(timeout: Duration) -> Option<Instant> {
+    (!timeout.is_zero()).then(|| Instant::now() + timeout)
 }
 
 fn lock<S>(mutex: &Mutex<State<S>>) -> MutexGuard<'_, State<S>> {
@@ -181,5 +208,48 @@ mod tests {
         thread::sleep(Duration::from_millis(50));
         assert_eq!(guarded.with(|_| ()), Some(()));
         assert_eq!(events(&log), Vec::<&str>::new());
+        assert!(guarded.close().is_some());
+    }
+
+    #[test]
+    fn dropping_destroys_the_session() {
+        let (guarded, log) = guarded(Duration::ZERO);
+        drop(guarded);
+        assert_eq!(events(&log), ["détruite"]);
+    }
+
+    #[test]
+    fn an_earlier_deadline_locks_sooner() {
+        let (guarded, log) = guarded(Duration::from_secs(60));
+        guarded.expire_within(Duration::from_millis(30));
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(events(&log), ["détruite"]);
+        assert!(guarded.close().is_none());
+    }
+
+    #[test]
+    fn an_earlier_deadline_applies_even_without_timeout() {
+        let (guarded, log) = guarded(Duration::ZERO);
+        guarded.expire_within(Duration::ZERO);
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(events(&log), ["détruite"]);
+    }
+
+    #[test]
+    fn a_later_deadline_does_not_postpone_the_lock() {
+        let (guarded, log) = guarded(Duration::from_millis(30));
+        guarded.expire_within(Duration::from_secs(60));
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(events(&log), ["détruite"]);
+    }
+
+    #[test]
+    fn use_after_an_earlier_deadline_restores_the_timeout() {
+        let (guarded, log) = guarded(Duration::from_secs(60));
+        guarded.expire_within(Duration::from_millis(100));
+        assert_eq!(guarded.with(|_| ()), Some(()));
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(events(&log), Vec::<&str>::new());
+        assert!(guarded.close().is_some());
     }
 }

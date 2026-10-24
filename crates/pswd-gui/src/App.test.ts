@@ -2,6 +2,8 @@ import { fireEvent, render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.svelte";
 import {
+  appHidden,
+  appShown,
   backupContents,
   createVault,
   currentVault,
@@ -25,6 +27,8 @@ vi.mock("./lib/api", () => ({
   unlockVault: vi.fn(),
   lockVault: vi.fn(),
   currentVault: vi.fn(),
+  appHidden: vi.fn(),
+  appShown: vi.fn(),
   onVaultLocked: vi.fn(),
   listEntries: vi.fn(),
   listTags: vi.fn(),
@@ -61,6 +65,12 @@ beforeEach(() => {
     return Promise.resolve(stopListening);
   });
 });
+
+/** Simule le passage de l'application en arrière-plan, ou son retour. */
+async function setVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+  await fireEvent(document, new Event("visibilitychange"));
+}
 
 function field(label: string): HTMLInputElement {
   return screen.getByLabelText(label, { exact: false });
@@ -117,7 +127,7 @@ describe("App", () => {
     await unlockPerso();
     lockHandler();
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Coffre verrouillé après une période d'inactivité.",
+      "Coffre verrouillé automatiquement.",
     );
   });
 
@@ -130,7 +140,7 @@ describe("App", () => {
     await fireEvent.pointerDown(window);
     expect(currentVault).toHaveBeenCalledTimes(1);
     expect(await screen.findByRole("status")).toHaveTextContent(
-      "Coffre verrouillé après une période d'inactivité.",
+      "Coffre verrouillé automatiquement.",
     );
   });
 
@@ -143,6 +153,45 @@ describe("App", () => {
       expect(currentVault).toHaveBeenCalled();
     });
     expect(screen.getByText("2 entrées")).toBeInTheDocument();
+  });
+
+  it("warns the backend in background, and notices a lock on return", async () => {
+    vi.mocked(appHidden).mockResolvedValue();
+    vi.mocked(appShown).mockResolvedValue(null);
+    render(App);
+    await unlockPerso();
+    await setVisibility("hidden");
+    expect(appHidden).toHaveBeenCalledTimes(1);
+    expect(appShown).not.toHaveBeenCalled();
+    await setVisibility("visible");
+    expect(appShown).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Coffre verrouillé automatiquement.",
+    );
+  });
+
+  it("keeps the vault open on return when the backend still has it", async () => {
+    vi.mocked(appHidden).mockResolvedValue();
+    vi.mocked(appShown).mockResolvedValue({ name: "perso", entries: 2 });
+    render(App);
+    await unlockPerso();
+    await setVisibility("hidden");
+    await setVisibility("visible");
+    await vi.waitFor(() => {
+      expect(appShown).toHaveBeenCalled();
+    });
+    expect(screen.getByText("2 entrées")).toBeInTheDocument();
+  });
+
+  it("shows no lock notice on return to the vault list", async () => {
+    vi.mocked(appShown).mockResolvedValue(null);
+    render(App);
+    await screen.findByRole("button", { name: "perso" });
+    await setVisibility("visible");
+    await vi.waitFor(() => {
+      expect(appShown).toHaveBeenCalled();
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("stops listening when closed", async () => {

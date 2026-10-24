@@ -145,7 +145,7 @@ export const fr = {
   theme: "Thème",
   themes: { auto: "Comme le système", light: "Clair", dark: "Sombre" },
   settingsSaved: "Réglages enregistrés.",
-  lockedForInactivity: "Coffre verrouillé après une période d'inactivité.",
+  lockedAutomatically: "Coffre verrouillé automatiquement.",
   validation: {
     nameRequired: "Le nom du coffre est obligatoire.",
     nameInvalid: "Nom invalide : lettres, chiffres, - et _ uniquement, 64 caractères au plus.",

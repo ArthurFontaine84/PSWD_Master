@@ -335,6 +335,9 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 - Après `auto_lock_minutes` (10) sans action dans l'interface ; le minuteur vit en Rust. À l'échéance, la session est détruite et Rust envoie l'événement `vault-locked` : l'interface revient à la liste des coffres avec un message.
 - Une touche ou un clic compte comme une action : l'interface le signale au backend (`current_vault`) au plus une fois toutes les 30 s. Si le coffre s'est verrouillé entre-temps, elle revient aussi à la liste.
 - Mobile : application en arrière-plan plus de `background_lock_seconds` (60 ; 0 = immédiat) → verrouillage. Le délai permet d'aller coller un identifiant dans une autre application.
+  - L'interface signale le départ et le retour (`visibilitychange` → `app_hidden`, `app_shown`). Au départ, Rust avance l'échéance de l'`IdleLock`, sans jamais la repousser ; une configuration illisible verrouille tout de suite.
+  - Au retour, Rust compare l'horloge du système à l'heure du départ, car une application suspendue (iOS) gèle aussi son minuteur : délai dépassé ou heure reculée → verrouillage, et l'interface revient à la liste.
+  - Sur le bureau, ces signaux sont ignorés : une fenêtre réduite n'est soumise qu'au verrouillage par inactivité.
 - Bouton « Verrouiller » toujours visible. Pas de biométrie à cette étape (`EXTENSION(biometrie)`).
 
 **Tests**
