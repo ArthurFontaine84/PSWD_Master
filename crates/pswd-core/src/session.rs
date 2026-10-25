@@ -64,6 +64,9 @@ pub struct Session<L> {
     local: L,
     file: VaultFile,
     vault: Vault,
+    /// Dernier contenu lu ou écrit dans la copie locale : s'il a changé, un autre programme l'a
+    /// réécrit.
+    saved: Vec<u8>,
     pending: bool,
 }
 
@@ -83,7 +86,7 @@ impl<L: LocalStore> Session<L> {
     ) -> Result<(Self, RecoveryKey), SessionError> {
         ensure_no_local_vault(&local)?;
         let (file, recovery_key) = VaultFile::create(password, params, now)?;
-        let mut session = Self::new(local, file, Vault::new());
+        let mut session = Self::new(local, file, Vault::new(), Vec::new());
         session.save_local()?;
         session.pending = true;
         Ok((session, recovery_key))
@@ -111,7 +114,7 @@ impl<L: LocalStore> Session<L> {
         local
             .save_atomic(&remote_file.file)
             .map_err(SessionError::Local)?;
-        Ok(Self::new(local, file, vault))
+        Ok(Self::new(local, file, vault, remote_file.file))
     }
 
     /// Déverrouille la copie locale.
@@ -121,19 +124,20 @@ impl<L: LocalStore> Session<L> {
     /// [`SessionError::NoLocalVault`] s'il n'y a pas de copie locale, sinon une erreur de
     /// lecture ou de déverrouillage.
     pub fn open(local: L, credentials: Credentials<'_>) -> Result<Self, SessionError> {
-        let file = local
+        let saved = local
             .load()
             .map_err(SessionError::Local)?
             .ok_or(SessionError::NoLocalVault)?;
-        let (file, vault) = unlock(&file, credentials)?;
-        Ok(Self::new(local, file, vault))
+        let (file, vault) = unlock(&saved, credentials)?;
+        Ok(Self::new(local, file, vault, saved))
     }
 
-    fn new(local: L, file: VaultFile, vault: Vault) -> Self {
+    fn new(local: L, file: VaultFile, vault: Vault, saved: Vec<u8>) -> Self {
         Self {
             local,
             file,
             vault,
+            saved,
             pending: false,
         }
     }
@@ -149,11 +153,13 @@ impl<L: LocalStore> Session<L> {
         self.pending
     }
 
-    /// Applique `change`. Si le coffre a changé, il est enregistré localement.
+    /// Applique `change`. Si le coffre a changé, il est fusionné avec la copie locale, puis
+    /// enregistré.
     ///
     /// # Errors
     ///
-    /// Si l'écriture locale échoue : le coffre revient alors à son état précédent.
+    /// Si la copie locale est illisible, absente ou inutilisable, ou si l'écriture échoue : le
+    /// coffre revient alors à son état précédent et rien n'est écrit.
     pub fn edit<T>(&mut self, change: impl FnOnce(&mut Vault) -> T) -> Result<T, SessionError> {
         let before = self.vault.clone();
         let result = change(&mut self.vault);
@@ -166,7 +172,7 @@ impl<L: LocalStore> Session<L> {
         if self.vault == before {
             return Ok(());
         }
-        if let Err(error) = self.save_local() {
+        if let Err(error) = self.merge_local().and_then(|()| self.save_local()) {
             self.vault = before;
             return Err(error);
         }
@@ -174,15 +180,20 @@ impl<L: LocalStore> Session<L> {
         Ok(())
     }
 
+    /// Fusionne d'abord la copie locale : un mot de passe changé ailleurs entre-temps est
+    /// remplacé par celui-ci.
+    ///
     /// # Errors
     ///
-    /// Si le générateur aléatoire ou l'écriture locale échoue.
+    /// Si la copie locale est illisible, absente ou inutilisable, ou si le générateur aléatoire
+    /// ou l'écriture locale échoue.
     pub fn change_password(
         &mut self,
         password: &Secret,
         params: KdfParams,
         now: Timestamp,
     ) -> Result<(), SessionError> {
+        self.merge_local()?;
         self.file.change_password(password, params, now)?;
         self.save_local()?;
         self.pending = true;
@@ -215,6 +226,7 @@ impl<L: LocalStore> Session<L> {
                     };
                     if merge.local_outdated {
                         self.vault = merge.vault;
+                        self.merge_local()?;
                         self.save_local()?;
                     }
                     if !merge.remote_outdated {
@@ -233,9 +245,27 @@ impl<L: LocalStore> Session<L> {
         Ok(SyncStatus::Conflict)
     }
 
+    /// Fusionne la copie locale si un autre programme (CLI, interface graphique) l'a réécrite :
+    /// l'écriture suivante ne perd rien de ce qu'il a enregistré. Notre propre écriture n'est pas
+    /// refusionnée : plus ancienne que le coffre en mémoire, elle pourrait, à date égale, annuler
+    /// la dernière modification. Un fichier disparu ou inutilisable n'est jamais remplacé.
+    fn merge_local(&mut self) -> Result<(), SessionError> {
+        let file = self
+            .local
+            .load()
+            .map_err(SessionError::Local)?
+            .ok_or(SessionError::NoLocalVault)?;
+        if file != self.saved {
+            self.vault = self.file.merge_remote(&self.vault, &file)?.vault;
+        }
+        Ok(())
+    }
+
     fn save_local(&mut self) -> Result<(), SessionError> {
         let file = self.file.encrypt(&self.vault)?;
-        self.local.save_atomic(&file).map_err(SessionError::Local)
+        self.local.save_atomic(&file).map_err(SessionError::Local)?;
+        self.saved = file;
+        Ok(())
     }
 }
 
@@ -265,7 +295,10 @@ mod tests {
     struct FakeLocal {
         file: Option<Vec<u8>>,
         saves: usize,
+        /// Lecture impossible.
         broken: bool,
+        /// Écriture impossible.
+        full: bool,
     }
 
     impl LocalStore for FakeLocal {
@@ -277,7 +310,7 @@ mod tests {
         }
 
         fn save_atomic(&mut self, file: &[u8]) -> Result<(), PortError> {
-            if self.broken {
+            if self.full {
                 return Err(PortError::new("disque plein"));
             }
             self.file = Some(file.to_vec());
@@ -477,7 +510,7 @@ mod tests {
     fn failed_local_save_restores_the_vault() {
         let (file, _) = initial_file();
         let mut session = open(local_holding(&file));
-        session.local.broken = true;
+        session.local.full = true;
         let result = session.edit(|vault| vault.add(note("perdue"), at(3)));
         assert_eq!(
             result.err(),
@@ -485,6 +518,137 @@ mod tests {
         );
         assert_eq!(titles(session.vault()), ["départ"]);
         assert!(!session.has_pending_changes());
+    }
+
+    #[test]
+    fn edit_keeps_what_another_program_saved_since_opening() {
+        let (file, _) = initial_file();
+        let mut session = open(local_holding(&file));
+        session.local.file = Some(changed_elsewhere(&file, "ailleurs"));
+        session
+            .edit(|vault| vault.add(note("nouvelle"), at(3)))
+            .unwrap();
+        assert_eq!(titles(session.vault()), ["ailleurs", "départ", "nouvelle"]);
+        let saved = session.local.file.as_deref().unwrap();
+        assert_eq!(
+            titles(&decrypt(saved, "maître")),
+            ["ailleurs", "départ", "nouvelle"]
+        );
+    }
+
+    #[test]
+    fn edit_does_not_merge_back_its_own_earlier_save() {
+        let (file, _) = initial_file();
+        let mut session = open(local_holding(&file));
+        let id = session
+            .edit(|vault| vault.add(note("éphémère"), at(3)))
+            .unwrap();
+        session
+            .edit(|vault| vault.delete(id, at(3)))
+            .unwrap()
+            .unwrap();
+        assert!(session.vault().get(id).is_none());
+        let saved = session.local.file.as_deref().unwrap();
+        assert!(decrypt(saved, "maître").get(id).is_none());
+    }
+
+    #[test]
+    fn edit_keeps_a_password_changed_by_another_program() {
+        let (file, _) = initial_file();
+        let mut session = open(local_holding(&file));
+        let mut other = open(local_holding(&file));
+        other
+            .change_password(&secret("nouveau"), fast_params(), at(3))
+            .unwrap();
+        session.local.file.clone_from(&other.local.file);
+        session
+            .edit(|vault| vault.add(note("nouvelle"), at(4)))
+            .unwrap();
+        let saved = session.local.file.as_deref().unwrap();
+        assert_eq!(titles(&decrypt(saved, "nouveau")), ["départ", "nouvelle"]);
+    }
+
+    #[test]
+    fn edit_never_replaces_a_local_file_gone_or_unusable() {
+        let (file, _) = initial_file();
+        let (foreign, _) = initial_file();
+        let unreadable = FakeLocal {
+            broken: true,
+            ..FakeLocal::default()
+        };
+        let cases = [
+            (None, SessionError::NoLocalVault),
+            (
+                Some(foreign.clone()),
+                SessionError::File(FileError::Corrupted),
+            ),
+        ];
+        for (on_disk, expected) in cases {
+            let mut session = open(local_holding(&file));
+            session.local.file.clone_from(&on_disk);
+            let result = session.edit(|vault| vault.add(note("perdue"), at(3)));
+            assert_eq!(result.err(), Some(expected));
+            assert_eq!(titles(session.vault()), ["départ"]);
+            assert_eq!(session.local.file, on_disk);
+            assert_eq!(session.local.saves, 0);
+            assert!(!session.has_pending_changes());
+        }
+        let mut session = open(local_holding(&file));
+        session.local = unreadable;
+        assert_eq!(
+            session.edit(|vault| vault.add(note("perdue"), at(3))).err(),
+            Some(SessionError::Local(PortError::new("disque illisible")))
+        );
+        assert_eq!(titles(session.vault()), ["départ"]);
+    }
+
+    #[test]
+    fn changed_password_replaces_one_changed_elsewhere_and_keeps_its_entries() {
+        let (file, _) = initial_file();
+        let mut session = open(local_holding(&file));
+        let mut other = open(local_holding(&file));
+        other
+            .edit(|vault| vault.add(note("ailleurs"), at(2)))
+            .unwrap();
+        other
+            .change_password(&secret("autre"), fast_params(), at(5))
+            .unwrap();
+        session.local.file.clone_from(&other.local.file);
+        session
+            .change_password(&secret("nouveau"), fast_params(), at(3))
+            .unwrap();
+        let saved = session.local.file.as_deref().unwrap();
+        assert_eq!(titles(&decrypt(saved, "nouveau")), ["ailleurs", "départ"]);
+        assert!(VaultFile::unlock_with_password(saved, &secret("autre")).is_err());
+    }
+
+    #[test]
+    fn changed_password_needs_a_usable_local_file() {
+        let (file, _) = initial_file();
+        let mut session = open(local_holding(&file));
+        session.local.file = None;
+        assert_eq!(
+            session
+                .change_password(&secret("nouveau"), fast_params(), at(3))
+                .err(),
+            Some(SessionError::NoLocalVault)
+        );
+        assert_eq!(session.local.saves, 0);
+        assert!(!session.has_pending_changes());
+    }
+
+    #[test]
+    fn sync_keeps_what_another_program_saved_locally() {
+        let (mut session, mut remote, file) = synced();
+        remote.file = Some(changed_elsewhere(&file, "distante"));
+        session.local.file = Some(changed_elsewhere(&file, "ailleurs"));
+        assert_eq!(session.sync(&mut remote).unwrap(), SyncStatus::Synced);
+        assert_eq!(titles(session.vault()), ["ailleurs", "distante", "départ"]);
+        let saved = session.local.file.as_deref().unwrap();
+        assert_eq!(
+            titles(&decrypt(saved, "maître")),
+            ["ailleurs", "distante", "départ"]
+        );
     }
 
     #[test]
@@ -681,7 +845,7 @@ mod tests {
     fn sync_reports_a_local_write_failure() {
         let (mut session, mut remote, file) = synced();
         remote.file = Some(changed_elsewhere(&file, "distante"));
-        session.local.broken = true;
+        session.local.full = true;
         assert_eq!(
             session.sync(&mut remote).err(),
             Some(SessionError::Local(PortError::new("disque plein")))

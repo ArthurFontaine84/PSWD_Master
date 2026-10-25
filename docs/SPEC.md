@@ -60,7 +60,7 @@ Futur : `pswd-server` et l'adaptateur `RemoteStore` HTTP (étape 3).
 - `SecureClipboard` : `copy_secret(value, ttl)`.
 - Les erreurs des adaptateurs sont des `PortError` (un message, jamais de secret).
 
-**Session** (`pswd-core`) : coffre ouvert, déverrouillé par mot de passe ou clé de récupération (`Credentials`, extensible au fichier-clé). Toute modification est enregistrée localement et marque le coffre comme ayant des modifications non publiées. La synchro (§7) est une opération distincte qui reçoit le distant en paramètre : une session n'a besoin d'aucun distant. Les magasins en mémoire la rendent testable, et elle sera réutilisée par les interfaces graphiques.
+**Session** (`pswd-core`) : coffre ouvert, déverrouillé par mot de passe ou clé de récupération (`Credentials`, extensible au fichier-clé). Toute modification est enregistrée localement et marque le coffre comme ayant des modifications non publiées. Avant chaque écriture (modification, changement de mot de passe, synchro), la copie locale est relue : si un autre programme l'a réécrite depuis la dernière lecture ou écriture de la session, elle est fusionnée (§6) ; sinon elle ne l'est pas, car refusionner sa propre écriture, plus ancienne, pourrait annuler à date égale la dernière modification. Un mot de passe changé ailleurs est remplacé par le nouveau. Une copie locale disparue ou inutilisable n'est jamais remplacée : l'écriture est refusée. La synchro (§7) est une opération distincte qui reçoit le distant en paramètre : une session n'a besoin d'aucun distant. Les magasins en mémoire la rendent testable, et elle sera réutilisée par les interfaces graphiques.
 
 La crypto n'est **pas** un port : déterministe, sans E/S, identique partout.
 
@@ -339,7 +339,7 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 - Français d'abord ; tous les textes passent par `src/lib/i18n/<langue>.ts` (cf. `EXTENSION(anglais)`).
 
 **Fichiers et dossiers**
-- Bureau : les mêmes dossiers que la CLI (`Locations::system`) ; les deux programmes voient les mêmes coffres. **Limite actuelle** : un même coffre ne doit pas être modifié dans les deux programmes à la fois (la dernière écriture l'emporterait) ; à traiter avant la fin de l'étape 2 en fusionnant avec la copie sur le disque avant chaque écriture (§6).
+- Bureau : les mêmes dossiers que la CLI (`Locations::system`) ; les deux programmes voient les mêmes coffres et peuvent modifier le même à la fois : chaque écriture fusionne d'abord la copie sur le disque (§3, Session). Un programme ne voit les modifications de l'autre qu'à sa prochaine écriture ou réouverture. **Limite acceptée** : sans verrou de fichier, deux écritures dans la même fraction de seconde peuvent encore se recouvrir.
 - Mobile : le dossier privé de l'application fourni par Tauri (`app_data_dir`), passé à `Locations::new` ; `FileStore` fonctionne tel quel.
 - Bureau : sauvegarde et restauration par dossier, comme la CLI (§7), choisi dans une boîte de dialogue. Le bureau sait aussi écrire et restaurer un fichier `.pswd` (« Sauvegarder dans un fichier », « Choisir un fichier .pswd »). Les fichiers choisis sont lus et écrits par Rust (module `files`), jamais par l'interface ; une écriture se termine par `sync_all`.
 - Mobile : une sauvegarde = un fichier `.pswd` (§7). « Sauvegarder » ouvre la fenêtre système d'enregistrement ; « Restaurer » ouvre le sélecteur de fichiers, liste les coffres du fichier comme ceux d'un dossier, puis applique les règles du §7. `pswd-app` restaure donc à partir des octets du fichier, pas d'un chemin.
