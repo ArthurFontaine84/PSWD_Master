@@ -2,8 +2,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use pswd_app::{
-    AppError, IdleLock, VaultSession, Vaults, add_entries, backup_file_name, live_count, search,
-    tag_counts,
+    AppError, IdleLock, VaultSession, Vaults, add_entries, backup_file_name, check_master_password,
+    live_count, search, tag_counts,
 };
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::SecureClipboard;
@@ -268,10 +268,8 @@ impl AppState {
 
     /// Change le mot de passe maître du coffre ouvert ; l'actuel est redemandé.
     pub fn change_password(&self, current: &Secret, new: &Secret) -> Result<(), UiError> {
-        if new.expose().is_empty() {
-            return Err(AppError::EmptyPassword.into());
-        }
         let name = self.open_name()?;
+        check_master_password(new)?;
         self.vaults.open(&name, Credentials::Password(current))?;
         let now = (self.clock)();
         self.with_session(|session| session.change_password(new, self.kdf, now))??;
@@ -288,9 +286,7 @@ impl AppState {
     ) -> Result<VaultInfo, UiError> {
         let key = RecoveryKey::parse(recovery_key.expose())
             .map_err(|_| UiError::code("invalidRecoveryKey"))?;
-        if new.expose().is_empty() {
-            return Err(AppError::EmptyPassword.into());
-        }
+        check_master_password(new)?;
         let timeout = self.auto_lock()?;
         let mut session = self.vaults.open(name, Credentials::RecoveryKey(&key))?;
         session.change_password(new, self.kdf, (self.clock)())?;
@@ -407,7 +403,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
 
-    use pswd_app::AppError;
     use pswd_core::ports::PortError;
     use pswd_core::{EntryContent, EntryKind, Tags};
     use pswd_infra::Locations;
@@ -513,10 +508,10 @@ mod tests {
         });
         (state.on_lock)();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         state.lock();
         assert_eq!(
-            state.unlock("perso", &secret("maître")),
+            state.unlock("perso", &secret("Maître-2026!")),
             Ok(info("perso", 0))
         );
     }
@@ -525,7 +520,7 @@ mod tests {
     fn created_vault_stays_open_and_gives_its_recovery_key() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        let (vault, recovery_key) = state.create("perso", &secret("maître")).unwrap();
+        let (vault, recovery_key) = state.create("perso", &secret("Maître-2026!")).unwrap();
         assert_eq!(vault, info("perso", 0));
         assert_eq!(recovery_key.expose().split('-').count(), 13);
         assert_eq!(state.current(), Some(info("perso", 0)));
@@ -537,7 +532,11 @@ mod tests {
         let (state, _) = state_in(&dir, None);
         assert_eq!(
             state.create("perso", &secret("")).err(),
-            Some(UiError::from(AppError::EmptyPassword))
+            Some(UiError::code("passwordTooShort"))
+        );
+        assert_eq!(
+            state.create("perso", &secret("mot de passe maître")).err(),
+            Some(UiError::code("passwordTooSimple"))
         );
         assert_eq!(state.current(), None);
     }
@@ -550,7 +549,7 @@ mod tests {
             .vaults
             .create(
                 "perso",
-                &secret("maître"),
+                &secret("Maître-2026!"),
                 state.kdf,
                 Timestamp::from_millis(0),
             )
@@ -567,7 +566,7 @@ mod tests {
         assert!(state.unlock("perso", &secret("autre")).is_err());
         assert_eq!(state.current(), None);
         assert_eq!(
-            state.unlock("perso", &secret("maître")),
+            state.unlock("perso", &secret("Maître-2026!")),
             Ok(info("perso", 1))
         );
         assert_eq!(state.current(), Some(info("perso", 1)));
@@ -577,10 +576,10 @@ mod tests {
     fn only_one_vault_is_open_at_a_time() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
-        state.create("travail", &secret("autre")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state.create("travail", &secret("Autre-mot-2026!")).unwrap();
         assert_eq!(state.current(), Some(info("travail", 0)));
-        state.unlock("perso", &secret("maître")).unwrap();
+        state.unlock("perso", &secret("Maître-2026!")).unwrap();
         assert_eq!(state.current(), Some(info("perso", 0)));
     }
 
@@ -588,7 +587,7 @@ mod tests {
     fn locking_closes_the_vault_without_notification() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, Some(Duration::from_millis(50)));
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         state.lock();
         state.lock();
         thread::sleep(Duration::from_millis(200));
@@ -600,7 +599,7 @@ mod tests {
     fn idle_vault_locks_itself_and_says_so() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, Some(Duration::from_millis(30)));
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         thread::sleep(Duration::from_millis(300));
         assert_eq!(state.current(), None);
         assert_eq!(count.load(Ordering::SeqCst), 1);
@@ -617,7 +616,7 @@ mod tests {
     fn vault_locks_at_once_in_background_when_the_delay_is_zero() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         lock_in_background_after(&state, 0);
         state.hide();
         thread::sleep(Duration::from_millis(300));
@@ -629,7 +628,7 @@ mod tests {
     fn vault_stays_open_after_a_short_absence() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         state.hide();
         advance(59_999);
         assert_eq!(state.show(), Some(info("perso", 0)));
@@ -642,7 +641,7 @@ mod tests {
     fn long_absence_locks_the_vault_on_return() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         state.hide();
         advance(60_000);
         assert_eq!(state.show(), None);
@@ -654,7 +653,7 @@ mod tests {
     fn clock_going_back_locks_the_vault_on_return() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         state.hide();
         advance(-1);
         assert_eq!(state.show(), None);
@@ -664,7 +663,7 @@ mod tests {
     fn hiding_twice_keeps_the_first_moment() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         state.hide();
         advance(30_000);
         state.hide();
@@ -678,7 +677,7 @@ mod tests {
         let (state, _) = state_in(&dir, None);
         state.hide();
         assert_eq!(state.show(), None);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         advance(3_600_000);
         assert_eq!(state.show(), Some(info("perso", 0)));
     }
@@ -688,7 +687,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         assert_eq!(state.show(), None);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         advance(3_600_000);
         assert_eq!(state.show(), Some(info("perso", 0)));
     }
@@ -697,7 +696,7 @@ mod tests {
     fn unreadable_configuration_locks_at_once_in_background() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         std::fs::write(dir.path().join("config").join("config.toml"), "couleur = 1").unwrap();
         state.hide();
         thread::sleep(Duration::from_millis(300));
@@ -712,7 +711,7 @@ mod tests {
         let clipboard = Box::new(FakeClipboard::default());
         let (count, on_lock) = lock_counter();
         let state = AppState::new(vaults_in(&dir), clipboard, on_lock);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         lock_in_background_after(&state, 0);
         state.hide();
         thread::sleep(Duration::from_millis(300));
@@ -724,7 +723,7 @@ mod tests {
     fn default_delay_comes_from_the_configuration() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         thread::sleep(Duration::from_millis(100));
         assert_eq!(state.current(), Some(info("perso", 0)));
         assert_eq!(count.load(Ordering::SeqCst), 0);
@@ -734,12 +733,12 @@ mod tests {
     fn unreadable_configuration_keeps_the_vault_closed() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         state.lock();
         let config = dir.path().join("config").join("config.toml");
         let text = std::fs::read_to_string(&config).unwrap();
         std::fs::write(&config, format!("{text}\nauto_lock_minutes = \"dix\"\n")).unwrap();
-        assert!(state.unlock("perso", &secret("maître")).is_err());
+        assert!(state.unlock("perso", &secret("Maître-2026!")).is_err());
         assert_eq!(state.current(), None);
     }
 
@@ -759,7 +758,7 @@ mod tests {
             .vaults
             .create(
                 "perso",
-                &secret("maître"),
+                &secret("Maître-2026!"),
                 state.kdf,
                 Timestamp::from_millis(0),
             )
@@ -776,7 +775,7 @@ mod tests {
             })
             .unwrap();
         drop(session);
-        state.unlock("perso", &secret("maître")).unwrap();
+        state.unlock("perso", &secret("Maître-2026!")).unwrap();
         ids
     }
 
@@ -948,7 +947,7 @@ mod tests {
             ["banque", "Box", "GitHub", "Wi-Fi"]
         );
         state.lock();
-        state.unlock("perso", &secret("maître")).unwrap();
+        state.unlock("perso", &secret("Maître-2026!")).unwrap();
         assert_eq!(titles(&state.entries("box", None).unwrap()), ["Box"]);
     }
 
@@ -1089,25 +1088,27 @@ mod tests {
     fn master_password_is_changed_after_checking_the_current_one() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         assert_eq!(
             state
-                .change_password(&secret("faux"), &secret("nouveau"))
+                .change_password(&secret("faux"), &secret("Nouveau-2026!"))
                 .err(),
             Some(UiError::code("wrongPassword"))
         );
         assert_eq!(
-            state.change_password(&secret("maître"), &secret("")).err(),
-            Some(UiError::code("emptyPassword"))
+            state
+                .change_password(&secret("Maître-2026!"), &secret(""))
+                .err(),
+            Some(UiError::code("passwordTooShort"))
         );
         assert_eq!(
-            state.change_password(&secret("maître"), &secret("nouveau")),
+            state.change_password(&secret("Maître-2026!"), &secret("Nouveau-2026!")),
             Ok(())
         );
         state.lock();
-        assert!(state.unlock("perso", &secret("maître")).is_err());
+        assert!(state.unlock("perso", &secret("Maître-2026!")).is_err());
         assert_eq!(
-            state.unlock("perso", &secret("nouveau")),
+            state.unlock("perso", &secret("Nouveau-2026!")),
             Ok(info("perso", 0))
         );
     }
@@ -1116,17 +1117,17 @@ mod tests {
     fn recovery_key_sets_a_new_password_and_opens_the_vault() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        let (_, key) = state.create("perso", &secret("oublié")).unwrap();
+        let (_, key) = state.create("perso", &secret("Oublié-mot-2026!")).unwrap();
         state.lock();
         let other = secret(&key.expose().to_lowercase().replace('-', " "));
         assert_eq!(
-            state.recover("perso", &other, &secret("nouveau")),
+            state.recover("perso", &other, &secret("Nouveau-2026!")),
             Ok(info("perso", 0))
         );
         assert_eq!(state.current(), Some(info("perso", 0)));
         state.lock();
         assert_eq!(
-            state.unlock("perso", &secret("nouveau")),
+            state.unlock("perso", &secret("Nouveau-2026!")),
             Ok(info("perso", 0))
         );
     }
@@ -1135,7 +1136,7 @@ mod tests {
     fn recovery_errors_are_reported() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        let (_, key) = state.create("perso", &secret("maître")).unwrap();
+        let (_, key) = state.create("perso", &secret("Maître-2026!")).unwrap();
         state.lock();
         assert_eq!(
             state
@@ -1145,11 +1146,13 @@ mod tests {
         );
         assert_eq!(
             state.recover("perso", &key, &secret("")).err(),
-            Some(UiError::code("emptyPassword"))
+            Some(UiError::code("passwordTooShort"))
         );
         let other_key = RecoveryKey::generate().unwrap().encode();
         assert_eq!(
-            state.recover("perso", &other_key, &secret("x")).err(),
+            state
+                .recover("perso", &other_key, &secret("Nouveau-2026!"))
+                .err(),
             Some(UiError::code("wrongRecoveryKey"))
         );
         assert_eq!(state.current(), None);
@@ -1159,8 +1162,10 @@ mod tests {
     fn a_vault_is_deleted_once_its_name_is_retyped() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("travail", &secret("x")).unwrap();
-        state.create("perso", &secret("maître")).unwrap();
+        state
+            .create("travail", &secret("Travail-mot-2026!"))
+            .unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
         assert_eq!(
             state.delete_vault("perso", "Perso").err(),
             Some(UiError::code("confirmationMismatch"))
@@ -1199,8 +1204,8 @@ mod tests {
     fn vaults_are_backed_up_to_a_file_then_restored() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
-        state.create("travail", &secret("maître")).unwrap();
+        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state.create("travail", &secret("Maître-2026!")).unwrap();
         assert_eq!(
             state.backup_file_name(),
             "pswd-sauvegarde_1970-01-01_00-00-01.pswd"

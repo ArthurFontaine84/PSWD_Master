@@ -218,7 +218,7 @@ mod tests {
     /// Ouvre `perso` sur `a`, exécute `commands` (réponses comprises), renvoie ce qui a été
     /// affiché après l'ouverture.
     fn session_output(env: &TestEnv, commands: &[&str]) -> String {
-        let mut answers = vec!["maître"];
+        let mut answers = vec!["Maître-2026!"];
         answers.extend_from_slice(commands);
         let mut app = env.app("a", &answers);
         app.run(Command::Open {

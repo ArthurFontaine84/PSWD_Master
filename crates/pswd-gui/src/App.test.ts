@@ -93,7 +93,7 @@ function field(label: string): HTMLInputElement {
 async function unlockPerso() {
   vi.mocked(unlockVault).mockResolvedValue({ name: "perso", entries: 2 });
   await fireEvent.click(await screen.findByRole("button", { name: "perso" }));
-  await fireEvent.input(field("Mot de passe maître"), { target: { value: "maître" } });
+  await fireEvent.input(field("Mot de passe maître"), { target: { value: "Maître-2026!" } });
   await fireEvent.click(screen.getByRole("button", { name: "Déverrouiller" }));
   await screen.findByText("2 entrées");
 }
@@ -119,8 +119,8 @@ describe("back button", () => {
     render(App);
     await fireEvent.click(await screen.findByRole("button", { name: "Nouveau coffre" }));
     await fireEvent.input(field("Nom du coffre"), { target: { value: "neuf" } });
-    await fireEvent.input(field("Mot de passe maître"), { target: { value: "maître" } });
-    await fireEvent.input(field("Confirmation"), { target: { value: "maître" } });
+    await fireEvent.input(field("Mot de passe maître"), { target: { value: "Maître-2026!" } });
+    await fireEvent.input(field("Confirmation"), { target: { value: "Maître-2026!" } });
     await fireEvent.click(screen.getByRole("button", { name: "Créer" }));
     await screen.findByText("AAAA-BBBB");
     goBack();
@@ -176,8 +176,8 @@ describe("App", () => {
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("PSWD Master");
     await fireEvent.click(await screen.findByRole("button", { name: "Nouveau coffre" }));
     await fireEvent.input(field("Nom du coffre"), { target: { value: "neuf" } });
-    await fireEvent.input(field("Mot de passe maître"), { target: { value: "maître" } });
-    await fireEvent.input(field("Confirmation"), { target: { value: "maître" } });
+    await fireEvent.input(field("Mot de passe maître"), { target: { value: "Maître-2026!" } });
+    await fireEvent.input(field("Confirmation"), { target: { value: "Maître-2026!" } });
     await fireEvent.click(screen.getByRole("button", { name: "Créer" }));
     expect(await screen.findByText("AAAA-BBBB")).toBeInTheDocument();
     await fireEvent.click(screen.getByRole("checkbox"));

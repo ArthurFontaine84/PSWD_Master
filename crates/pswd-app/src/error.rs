@@ -4,6 +4,8 @@ use pswd_core::ports::PortError;
 use pswd_core::{BackupFileError, CsvError, FileError, GeneratorError, SessionError};
 use pswd_infra::ConfigError;
 
+use crate::password::{MIN_CHARACTER_KINDS, MIN_PASSWORD_LENGTH};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppError {
     Config(ConfigError),
@@ -11,7 +13,8 @@ pub enum AppError {
     Port(PortError),
     Csv(CsvError),
     Generator(GeneratorError),
-    EmptyPassword,
+    PasswordTooShort,
+    PasswordTooSimple,
     NothingToBackUp,
     InvalidBackup(FileError),
     BackupFile(BackupFileError),
@@ -29,7 +32,15 @@ impl fmt::Display for AppError {
             Self::Port(error) => error.fmt(f),
             Self::Csv(error) => error.fmt(f),
             Self::Generator(error) => error.fmt(f),
-            Self::EmptyPassword => f.write_str("le mot de passe maître ne peut pas être vide"),
+            Self::PasswordTooShort => write!(
+                f,
+                "le mot de passe maître doit contenir au moins {MIN_PASSWORD_LENGTH} caractères"
+            ),
+            Self::PasswordTooSimple => write!(
+                f,
+                "le mot de passe maître doit mélanger au moins {MIN_CHARACTER_KINDS} types de \
+                 caractères parmi : minuscules, majuscules, chiffres, symboles"
+            ),
             Self::NothingToBackUp => f.write_str("aucun coffre à sauvegarder : utiliser init"),
             Self::InvalidBackup(error) => write!(f, "fichier de sauvegarde inutilisable : {error}"),
             Self::BackupFile(error) => error.fmt(f),
@@ -97,8 +108,13 @@ mod tests {
                 "la longueur doit être comprise entre 8 et 128",
             ),
             (
-                AppError::EmptyPassword,
-                "le mot de passe maître ne peut pas être vide",
+                AppError::PasswordTooShort,
+                "le mot de passe maître doit contenir au moins 12 caractères",
+            ),
+            (
+                AppError::PasswordTooSimple,
+                "le mot de passe maître doit mélanger au moins 3 types de caractères parmi : \
+                 minuscules, majuscules, chiffres, symboles",
             ),
             (
                 AppError::NothingToBackUp,

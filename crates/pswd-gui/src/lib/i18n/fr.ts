@@ -8,7 +8,9 @@ const errors = {
   vaultExists: (detail: string) => `Un coffre nommé ${detail} existe déjà.`,
   invalidVaultName: (detail: string) =>
     `Nom de coffre invalide : « ${detail} » (lettres, chiffres, - et _ ; 64 caractères au plus).`,
-  emptyPassword: () => "Le mot de passe maître ne peut pas être vide.",
+  passwordTooShort: () => "Le mot de passe maître doit contenir au moins 12 caractères.",
+  passwordTooSimple: () =>
+    "Le mot de passe maître doit mélanger au moins 3 types de caractères parmi : minuscules, majuscules, chiffres, symboles.",
   wrongPassword: () => "Mot de passe maître incorrect.",
   vaultFolderExists: () => "Un dossier de coffre existe déjà à cet emplacement.",
   vaultUnreadable: (detail: string) => `Coffre illisible : ${detail}`,
@@ -144,10 +146,14 @@ export const fr = {
   themes: { auto: "Comme le système", light: "Clair", dark: "Sombre" },
   settingsSaved: "Réglages enregistrés.",
   lockedAutomatically: "Coffre verrouillé automatiquement.",
+  passwordRule: "Au moins 12 caractères, dont au moins 3 types parmi : minuscules, majuscules, chiffres, symboles.",
   validation: {
     nameRequired: "Le nom du coffre est obligatoire.",
     nameInvalid: "Nom invalide : lettres, chiffres, - et _ uniquement, 64 caractères au plus.",
     passwordRequired: "Le mot de passe maître est obligatoire.",
+    passwordTooShort: "Le mot de passe maître doit contenir au moins 12 caractères.",
+    passwordTooSimple:
+      "Le mot de passe maître doit mélanger au moins 3 types de caractères parmi : minuscules, majuscules, chiffres, symboles.",
     passwordMismatch: "Les deux saisies ne correspondent pas.",
     titleRequired: "Le titre est obligatoire.",
     lengthInvalid: "La longueur doit être un nombre entier entre 8 et 128.",

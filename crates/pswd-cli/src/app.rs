@@ -126,8 +126,8 @@ mod tests {
                 "presse-papiers indisponible",
             ),
             (
-                CliError::from(AppError::EmptyPassword),
-                "le mot de passe maître ne peut pas être vide",
+                CliError::from(AppError::PasswordTooShort),
+                "le mot de passe maître doit contenir au moins 12 caractères",
             ),
             (
                 CliError::Input("console absente".to_owned()),

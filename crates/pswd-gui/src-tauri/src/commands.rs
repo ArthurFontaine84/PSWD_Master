@@ -367,8 +367,8 @@ mod tests {
     fn vault_names_are_listed_in_order() {
         let app = TestApp::new(None);
         assert_eq!(app.call("list_vaults", json!({})), Ok(json!([])));
-        app.create("travail", "maître").unwrap();
-        app.create("perso", "maître").unwrap();
+        app.create("travail", "Maître-2026!").unwrap();
+        app.create("perso", "Maître-2026!").unwrap();
         assert_eq!(
             app.call("list_vaults", json!({})),
             Ok(json!(["perso", "travail"]))
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn created_vault_is_open_and_shows_its_recovery_key() {
         let app = TestApp::new(None);
-        let created = app.create("perso", "maître").unwrap();
+        let created = app.create("perso", "Maître-2026!").unwrap();
         assert_eq!(created["vault"], json!({ "name": "perso", "entries": 0 }));
         let key = created["recoveryKey"].as_str().unwrap();
         assert_eq!(key.split('-').count(), 13, "{key}");
@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn vault_is_unlocked_with_its_password_and_locked_on_demand() {
         let app = TestApp::new(None);
-        app.create("perso", "maître").unwrap();
+        app.create("perso", "Maître-2026!").unwrap();
         assert_eq!(app.call("lock_vault", json!({})), Ok(Value::Null));
         assert_eq!(app.call("current_vault", json!({})), Ok(Value::Null));
         assert_eq!(
@@ -418,7 +418,7 @@ mod tests {
         assert_eq!(
             app.call(
                 "unlock_vault",
-                json!({ "name": "perso", "password": "maître" })
+                json!({ "name": "perso", "password": "Maître-2026!" })
             ),
             Ok(json!({ "name": "perso", "entries": 0 }))
         );
@@ -438,7 +438,7 @@ mod tests {
         app.app.listen_any(VAULT_LOCKED, move |_| {
             let _ = sender.send(());
         });
-        app.create("perso", "maître").unwrap();
+        app.create("perso", "Maître-2026!").unwrap();
         assert_eq!(receiver.recv_timeout(Duration::from_secs(5)), Ok(()));
         assert_eq!(app.call("current_vault", json!({})), Ok(Value::Null));
     }
@@ -450,7 +450,7 @@ mod tests {
         app.app.listen_any(VAULT_LOCKED, move |_| {
             let _ = sender.send(());
         });
-        app.create("perso", "maître").unwrap();
+        app.create("perso", "Maître-2026!").unwrap();
         assert_eq!(app.call("app_hidden", json!({})), Ok(Value::Null));
         assert_eq!(
             app.call("app_shown", json!({})),
@@ -477,14 +477,14 @@ mod tests {
     #[test]
     fn existing_entries_are_returned_without_their_password() {
         let app = TestApp::new(None);
-        app.create("perso", "maître").unwrap();
+        app.create("perso", "Maître-2026!").unwrap();
         let state = app.app.state::<AppState>();
         state.lock();
         let (mut session, _) = state
             .vaults
             .create(
                 "travail",
-                &Secret::new("maître".to_owned()),
+                &Secret::new("Maître-2026!".to_owned()),
                 KdfParams::new(8 * 1024, 1, 1).unwrap(),
                 Timestamp::from_millis(0),
             )
@@ -505,7 +505,7 @@ mod tests {
         drop(session);
         app.call(
             "unlock_vault",
-            json!({ "name": "travail", "password": "maître" }),
+            json!({ "name": "travail", "password": "Maître-2026!" }),
         )
         .unwrap();
         let listed = app
@@ -538,7 +538,7 @@ mod tests {
             app.call("list_entries", empty.clone()),
             Err(json!({ "code": "vaultLocked", "detail": null }))
         );
-        app.create("perso", "maître").unwrap();
+        app.create("perso", "Maître-2026!").unwrap();
         assert_eq!(app.call("list_entries", empty), Ok(json!([])));
         assert_eq!(
             app.call("list_entries", json!({ "text": "x", "tag": "dev" })),
@@ -555,7 +555,7 @@ mod tests {
     #[test]
     fn entries_are_edited_through_their_commands() {
         let app = TestApp::new(None);
-        app.create("perso", "maître").unwrap();
+        app.create("perso", "Maître-2026!").unwrap();
         let form = |title: &str, password: Value| {
             json!({
                 "kind": "login",
@@ -599,11 +599,11 @@ mod tests {
     #[test]
     fn vaults_are_managed_through_their_commands() {
         let app = TestApp::new(None);
-        let key = app.create("perso", "maître").unwrap()["recoveryKey"].clone();
+        let key = app.create("perso", "Maître-2026!").unwrap()["recoveryKey"].clone();
         assert_eq!(
             app.call(
                 "change_password",
-                json!({ "current": "maître", "password": "nouveau" })
+                json!({ "current": "Maître-2026!", "password": "Nouveau-2026!" })
             ),
             Ok(Value::Null)
         );
@@ -611,7 +611,7 @@ mod tests {
         assert_eq!(
             app.call(
                 "recover_vault",
-                json!({ "name": "perso", "recoveryKey": key, "password": "encore" })
+                json!({ "name": "perso", "recoveryKey": key, "password": "Encore-mot-2026!" })
             ),
             Ok(json!({ "name": "perso", "entries": 0 }))
         );

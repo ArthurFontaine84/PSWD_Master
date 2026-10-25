@@ -44,7 +44,7 @@ Pour mettre à jour après un `git pull`, relancer la même commande `cargo inst
 pswd init perso
 ```
 
-`perso` est le nom du coffre : lettres, chiffres, `-` et `_`. Le programme demande un **nouveau mot de passe maître**, saisi deux fois et masqué. Il doit être long et unique : c'est la seule chose à retenir.
+`perso` est le nom du coffre : lettres, chiffres, `-` et `_`. Le programme demande un **nouveau mot de passe maître**, saisi deux fois et masqué. Il doit avoir au moins 12 caractères et mélanger au moins 3 types parmi minuscules, majuscules, chiffres et symboles ; il doit aussi être unique : c'est la seule chose à retenir.
 
 Le coffre est créé et chiffré. La **clé de récupération** s'affiche alors, **une seule fois** :
 

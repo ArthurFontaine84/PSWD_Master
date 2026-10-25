@@ -103,7 +103,7 @@ impl TestEnv {
         }
     }
 
-    /// Coffre `perso` créé sur l'appareil `a`, mot de passe « maître ».
+    /// Coffre `perso` créé sur l'appareil `a`, mot de passe « Maître-2026! ».
     pub fn with_vault() -> Self {
         Self::with_vault_and_recovery_key().0
     }
@@ -111,7 +111,7 @@ impl TestEnv {
     /// Comme [`TestEnv::with_vault`], avec la clé de récupération affichée.
     pub fn with_vault_and_recovery_key() -> (Self, String) {
         let env = Self::new();
-        let mut app = env.app("a", &["maître", "maître"]);
+        let mut app = env.app("a", &["Maître-2026!", "Maître-2026!"]);
         app.run(Command::Init {
             name: "perso".to_owned(),
         })
@@ -172,10 +172,10 @@ impl TestEnv {
         self.session(device).edit(change).unwrap();
     }
 
-    /// Session ouverte sur le coffre `perso` de l'appareil, mot de passe « maître ».
+    /// Session ouverte sur le coffre `perso` de l'appareil, mot de passe « Maître-2026! ».
     pub fn session(&self, device: &str) -> Session<FileStore> {
         let vault = self.config(device).vault("perso").unwrap().clone();
-        let password = Secret::new("maître".to_owned());
+        let password = Secret::new("Maître-2026!".to_owned());
         Session::open(
             FileStore::new(vault.vault_file()),
             Credentials::Password(&password),

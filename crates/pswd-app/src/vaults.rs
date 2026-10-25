@@ -8,6 +8,7 @@ use pswd_core::{
 };
 use pswd_infra::{Config, ConfigFile, FileStore, Locations, VaultConfig};
 
+use crate::password::check_master_password;
 use crate::utc::backup_day;
 use crate::{AppError, VaultSession};
 
@@ -63,7 +64,8 @@ impl Vaults {
     ///
     /// # Errors
     ///
-    /// Si le mot de passe est vide, si le nom est invalide ou pris, ou si l'écriture échoue.
+    /// Si le mot de passe est trop faible, si le nom est invalide ou pris, ou si l'écriture
+    /// échoue.
     pub fn create(
         &self,
         name: &str,
@@ -71,12 +73,10 @@ impl Vaults {
         params: KdfParams,
         now: Timestamp,
     ) -> Result<(VaultSession, RecoveryKey), AppError> {
-        if password.expose().is_empty() {
-            return Err(AppError::EmptyPassword);
-        }
         let mut config_file = self.config_file();
         let mut config = config_file.load()?;
         config.ensure_available(name)?;
+        check_master_password(password)?;
         let vault = VaultConfig {
             path: self.locations.vault_dir(name),
         };
@@ -265,13 +265,13 @@ mod tests {
 
     fn create(vaults: &Vaults, name: &str) -> VaultSession {
         vaults
-            .create(name, &secret("maître"), fast(), at(0))
+            .create(name, &secret("Maître-2026!"), fast(), at(0))
             .unwrap()
             .0
     }
 
     fn open(vaults: &Vaults, name: &str) -> Result<VaultSession, AppError> {
-        vaults.open(name, Credentials::Password(&secret("maître")))
+        vaults.open(name, Credentials::Password(&secret("Maître-2026!")))
     }
 
     fn names(vaults: &Vaults) -> Vec<String> {
@@ -287,7 +287,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let vaults = device(&dir, "a");
         let (_, recovery_key) = vaults
-            .create("perso", &secret("maître"), fast(), at(0))
+            .create("perso", &secret("Maître-2026!"), fast(), at(0))
             .unwrap();
         assert_eq!(names(&vaults), ["perso"]);
         assert_eq!(
@@ -333,8 +333,16 @@ mod tests {
             )))
         );
         assert_eq!(
-            vaults.create("travail", &secret(""), fast(), at(0)).err(),
-            Some(AppError::EmptyPassword)
+            vaults
+                .create("travail", &secret("maître"), fast(), at(0))
+                .err(),
+            Some(AppError::PasswordTooShort)
+        );
+        assert_eq!(
+            vaults
+                .create("travail", &secret("mot de passe maître"), fast(), at(0))
+                .err(),
+            Some(AppError::PasswordTooSimple)
         );
         assert_eq!(names(&vaults), ["perso"]);
     }
@@ -353,7 +361,7 @@ mod tests {
         fs::write(folder.join("vault.enc"), b"ancien").unwrap();
         assert_eq!(
             vaults
-                .create("perso", &secret("maître"), fast(), at(0))
+                .create("perso", &secret("Maître-2026!"), fast(), at(0))
                 .err(),
             Some(AppError::Session(SessionError::LocalVaultExists))
         );
@@ -368,7 +376,7 @@ mod tests {
         let data = dir.path().join("a").join("data");
         fs::create_dir_all(&data).unwrap();
         fs::write(data.join("vaults"), b"").unwrap();
-        let result = vaults.create("perso", &secret("maître"), fast(), at(0));
+        let result = vaults.create("perso", &secret("Maître-2026!"), fast(), at(0));
         assert!(
             matches!(
                 result,

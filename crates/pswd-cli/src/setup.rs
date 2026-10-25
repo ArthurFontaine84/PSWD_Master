@@ -1,6 +1,6 @@
 //! Création (`init`) et suppression (`delete`) d'un coffre.
 
-use pswd_app::AppError;
+use pswd_app::check_master_password;
 use pswd_core::Secret;
 
 use crate::app::{App, CliError};
@@ -49,9 +49,7 @@ impl<T: Terminal, C> App<T, C> {
         let password = self
             .terminal
             .prompt_secret("Nouveau mot de passe maître : ")?;
-        if password.expose().is_empty() {
-            return Err(AppError::EmptyPassword.into());
-        }
+        check_master_password(&password)?;
         let confirmation = self.terminal.prompt_secret("Confirmation : ")?;
         if confirmation != password {
             return Err(CliError::PasswordMismatch);
@@ -64,6 +62,7 @@ impl<T: Terminal, C> App<T, C> {
 mod tests {
     use std::fs;
 
+    use pswd_app::AppError;
     use pswd_core::SessionError;
     use pswd_core::ports::PortError;
     use pswd_infra::ConfigError;
@@ -82,7 +81,7 @@ mod tests {
     #[test]
     fn init_creates_and_registers_the_vault() {
         let env = TestEnv::new();
-        let mut app = env.app("a", &["maître", "maître"]);
+        let mut app = env.app("a", &["Maître-2026!", "Maître-2026!"]);
         app.run(init("perso")).unwrap();
 
         let config = env.config("a");
@@ -91,7 +90,12 @@ mod tests {
             config.vault("perso").unwrap().path,
             env.vault_dir("a", "perso")
         );
-        assert!(env.local_vault("a", "maître").entries().next().is_none());
+        assert!(
+            env.local_vault("a", "Maître-2026!")
+                .entries()
+                .next()
+                .is_none()
+        );
 
         let output = app.terminal.output();
         assert!(output.starts_with("Coffre « perso » créé.\n"), "{output}");
@@ -122,14 +126,19 @@ mod tests {
     }
 
     #[test]
-    fn master_password_must_be_confirmed_and_not_empty() {
+    fn master_password_must_be_strong_and_confirmed() {
         let env = TestEnv::new();
-        let mut app = env.app("a", &["maître", "maitre"]);
+        let mut app = env.app("a", &["Maître-2026!", "maitre"]);
         assert_eq!(app.run(init("perso")), Err(CliError::PasswordMismatch));
-        let mut app = env.app("a", &[""]);
+        let mut app = env.app("a", &["maître"]);
         assert_eq!(
             app.run(init("perso")),
-            Err(CliError::App(AppError::EmptyPassword))
+            Err(CliError::App(AppError::PasswordTooShort))
+        );
+        let mut app = env.app("a", &["mot de passe maître"]);
+        assert_eq!(
+            app.run(init("perso")),
+            Err(CliError::App(AppError::PasswordTooSimple))
         );
         assert!(env.config("a").vaults.is_empty());
         assert!(!env.vault_dir("a", "perso").exists());
@@ -141,7 +150,7 @@ mod tests {
         let existing = env.vault_dir("a", "perso");
         fs::create_dir_all(&existing).unwrap();
         fs::write(existing.join("vault.enc"), b"ancien").unwrap();
-        let mut app = env.app("a", &["maître", "maître"]);
+        let mut app = env.app("a", &["Maître-2026!", "Maître-2026!"]);
         assert_eq!(
             app.run(init("perso")),
             Err(CliError::App(AppError::Session(
@@ -158,7 +167,7 @@ mod tests {
         let data = env.dir.path().join("a").join("data");
         fs::create_dir_all(&data).unwrap();
         fs::write(data.join("vaults"), b"").unwrap();
-        let mut app = env.app("a", &["maître", "maître"]);
+        let mut app = env.app("a", &["Maître-2026!", "Maître-2026!"]);
         let error = app.run(init("perso")).unwrap_err();
         assert!(
             matches!(
@@ -179,7 +188,7 @@ mod tests {
     /// Coffres `perso` et `travail` sur l'appareil `a`.
     fn env_with_two_vaults() -> TestEnv {
         let env = TestEnv::with_vault();
-        env.app("a", &["autre", "autre"])
+        env.app("a", &["Autre-mot-2026!", "Autre-mot-2026!"])
             .run(init("travail"))
             .unwrap();
         env
@@ -208,7 +217,7 @@ mod tests {
                 app.terminal.output().ends_with("Suppression annulée."),
                 "{answer:?}"
             );
-            env.local_vault("a", "maître");
+            env.local_vault("a", "Maître-2026!");
         }
     }
 
@@ -231,8 +240,10 @@ mod tests {
         let config = env.config("a");
         assert!(config.vaults.is_empty());
 
-        env.app("a", &["neuf", "neuf"]).run(init("perso")).unwrap();
-        env.local_vault("a", "neuf");
+        env.app("a", &["Neuf-mot-2026!", "Neuf-mot-2026!"])
+            .run(init("perso"))
+            .unwrap();
+        env.local_vault("a", "Neuf-mot-2026!");
     }
 
     #[test]

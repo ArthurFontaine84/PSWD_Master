@@ -41,7 +41,8 @@ impl From<AppError> for UiError {
             AppError::Config(ConfigError::InvalidVaultName(name)) => {
                 Self::new("invalidVaultName", name)
             }
-            AppError::EmptyPassword => Self::code("emptyPassword"),
+            AppError::PasswordTooShort => Self::code("passwordTooShort"),
+            AppError::PasswordTooSimple => Self::code("passwordTooSimple"),
             AppError::Session(SessionError::File(FileError::WrongPassword)) => {
                 Self::code("wrongPassword")
             }
@@ -140,7 +141,8 @@ mod tests {
                 "invalidVaultName",
                 Some("a/b"),
             ),
-            (AppError::EmptyPassword, "emptyPassword", None),
+            (AppError::PasswordTooShort, "passwordTooShort", None),
+            (AppError::PasswordTooSimple, "passwordTooSimple", None),
             (
                 AppError::Session(SessionError::File(FileError::WrongPassword)),
                 "wrongPassword",

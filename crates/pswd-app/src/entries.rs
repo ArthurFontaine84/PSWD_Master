@@ -149,9 +149,14 @@ mod tests {
     fn session_in(dir: &TempDir) -> VaultSession {
         let local = FileStore::new(dir.path().join("vault.enc"));
         let params = KdfParams::new(8 * 1024, 1, 1).unwrap();
-        Session::create(local, &Secret::new("maître".to_owned()), params, at(0))
-            .unwrap()
-            .0
+        Session::create(
+            local,
+            &Secret::new("Maître-2026!".to_owned()),
+            params,
+            at(0),
+        )
+        .unwrap()
+        .0
     }
 
     #[test]
@@ -162,7 +167,7 @@ mod tests {
         assert_eq!(add_entries(&mut session, contents, at(3)), Ok(2));
         let reopened = Session::open(
             FileStore::new(dir.path().join("vault.enc")),
-            Credentials::Password(&Secret::new("maître".to_owned())),
+            Credentials::Password(&Secret::new("Maître-2026!".to_owned())),
         )
         .unwrap();
         assert_eq!(live_count(reopened.vault()), 2);

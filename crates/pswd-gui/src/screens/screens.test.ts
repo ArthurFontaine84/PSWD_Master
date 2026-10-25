@@ -72,9 +72,24 @@ describe("CreateVault", () => {
 
   it("checks the form before sending anything", async () => {
     render(CreateVault, { onCreated: vi.fn(), onCancel: vi.fn() });
-    fill("perso", "maître", "maitre");
+    fill("perso", "Maître-2026!", "Maitre-2026!");
     await fireEvent.click(screen.getByRole("button", { name: "Créer" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Les deux saisies ne correspondent pas.");
+    expect(createVault).not.toHaveBeenCalled();
+  });
+
+  it("states the password rule and refuses a weak one", async () => {
+    render(CreateVault, { onCreated: vi.fn(), onCancel: vi.fn() });
+    expect(
+      screen.getByText(
+        "Au moins 12 caractères, dont au moins 3 types parmi : minuscules, majuscules, chiffres, symboles.",
+      ),
+    ).toBeInTheDocument();
+    fill("perso", "motdepasse12", "motdepasse12");
+    await fireEvent.click(screen.getByRole("button", { name: "Créer" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Le mot de passe maître doit mélanger au moins 3 types de caractères",
+    );
     expect(createVault).not.toHaveBeenCalled();
   });
 
@@ -82,12 +97,12 @@ describe("CreateVault", () => {
     vi.mocked(createVault).mockResolvedValue(created);
     const onCreated = vi.fn();
     render(CreateVault, { onCreated, onCancel: vi.fn() });
-    fill("perso", "maître", "maître");
+    fill("perso", "Maître-2026!", "Maître-2026!");
     await fireEvent.click(screen.getByRole("button", { name: "Créer" }));
     await vi.waitFor(() => {
       expect(onCreated).toHaveBeenCalledWith(created);
     });
-    expect(createVault).toHaveBeenCalledWith("perso", "maître");
+    expect(createVault).toHaveBeenCalledWith("perso", "Maître-2026!");
     expect(field("Mot de passe maître").value).toBe("");
     expect(field("Confirmation").value).toBe("");
   });
@@ -95,7 +110,7 @@ describe("CreateVault", () => {
   it("shows the backend refusal", async () => {
     vi.mocked(createVault).mockRejectedValue({ code: "vaultExists", detail: "perso" });
     render(CreateVault, { onCreated: vi.fn(), onCancel: vi.fn() });
-    fill("perso", "maître", "maître");
+    fill("perso", "Maître-2026!", "Maître-2026!");
     await fireEvent.click(screen.getByRole("button", { name: "Créer" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Un coffre nommé perso existe déjà.",
@@ -135,12 +150,12 @@ describe("Unlock", () => {
     const onUnlocked = vi.fn();
     render(Unlock, { name: "perso", onUnlocked, onCancel: vi.fn() });
     expect(screen.getByRole("heading")).toHaveTextContent("Déverrouiller « perso »");
-    await fireEvent.input(field("Mot de passe maître"), { target: { value: "maître" } });
+    await fireEvent.input(field("Mot de passe maître"), { target: { value: "Maître-2026!" } });
     await fireEvent.click(screen.getByRole("button", { name: "Déverrouiller" }));
     await vi.waitFor(() => {
       expect(onUnlocked).toHaveBeenCalledWith({ name: "perso", entries: 3 });
     });
-    expect(unlockVault).toHaveBeenCalledWith("perso", "maître");
+    expect(unlockVault).toHaveBeenCalledWith("perso", "Maître-2026!");
     expect(field("Mot de passe maître").value).toBe("");
   });
 

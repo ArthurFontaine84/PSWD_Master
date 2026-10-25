@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn passwd_replaces_the_master_password() {
         let env = TestEnv::with_vault();
-        let mut app = env.app("a", &["maître", "nouveau", "nouveau"]);
+        let mut app = env.app("a", &["Maître-2026!", "Nouveau-2026!", "Nouveau-2026!"]);
         app.run(Command::Passwd {
             name: "perso".to_owned(),
         })
@@ -125,8 +125,8 @@ mod tests {
             app.terminal.output(),
             "Mot de passe maître de « perso » changé."
         );
-        assert!(env.local_vault_result("a", "maître").is_err());
-        env.local_vault("a", "nouveau");
+        assert!(env.local_vault_result("a", "Maître-2026!").is_err());
+        env.local_vault("a", "Nouveau-2026!");
     }
 
     #[test]
@@ -146,26 +146,26 @@ mod tests {
     #[test]
     fn passwd_requires_a_confirmed_new_password() {
         let env = TestEnv::with_vault();
-        let mut app = env.app("a", &["maître", "nouveau", "nouvau"]);
+        let mut app = env.app("a", &["Maître-2026!", "Nouveau-2026!", "Nouvau-2026!"]);
         assert_eq!(
             app.run(Command::Passwd {
                 name: "perso".to_owned()
             }),
             Err(CliError::PasswordMismatch)
         );
-        env.local_vault("a", "maître");
+        env.local_vault("a", "Maître-2026!");
     }
 
     #[test]
     fn recover_sets_a_new_password_with_the_recovery_key() {
         let (env, recovery_key) = TestEnv::with_vault_and_recovery_key();
         let typed = recovery_key.to_lowercase().replace('-', " ");
-        let mut app = env.app("a", &[&typed, "retrouvé", "retrouvé"]);
+        let mut app = env.app("a", &[&typed, "Retrouvé-2026!", "Retrouvé-2026!"]);
         app.run(Command::Recover {
             name: "perso".to_owned(),
         })
         .unwrap();
-        env.local_vault("a", "retrouvé");
+        env.local_vault("a", "Retrouvé-2026!");
     }
 
     #[test]
@@ -195,7 +195,7 @@ mod tests {
         let env = TestEnv::with_vault();
         let file = env.dir.path().join("import.csv");
         fs::write(&file, CSV).unwrap();
-        let mut app = env.app("a", &["maître"]);
+        let mut app = env.app("a", &["Maître-2026!"]);
         app.run(Command::Import {
             name: "perso".to_owned(),
             file: file.clone(),
@@ -207,7 +207,10 @@ mod tests {
             "{output}"
         );
         assert!(output.ends_with("contient vos mots de passe en clair : supprimez-le."));
-        assert_eq!(titles(&env.local_vault("a", "maître")), ["GitHub", "Wi-Fi"]);
+        assert_eq!(
+            titles(&env.local_vault("a", "Maître-2026!")),
+            ["GitHub", "Wi-Fi"]
+        );
     }
 
     #[test]
@@ -215,7 +218,7 @@ mod tests {
         let env = TestEnv::with_vault();
         let file = env.dir.path().join("import.csv");
         fs::write(&file, format!("{CSV}incomplète,login\r\n")).unwrap();
-        let mut app = env.app("a", &["maître"]);
+        let mut app = env.app("a", &["Maître-2026!"]);
         assert_eq!(
             app.run(Command::Import {
                 name: "perso".to_owned(),
@@ -237,7 +240,7 @@ mod tests {
             .unwrap_err();
         assert!(error.to_string().starts_with("lecture de "), "{error}");
         assert_eq!(
-            titles(&env.local_vault("a", "maître")),
+            titles(&env.local_vault("a", "Maître-2026!")),
             Vec::<String>::new()
         );
     }
@@ -251,7 +254,7 @@ mod tests {
         let mut temporary = vault.vault_file().into_os_string();
         temporary.push(".tmp");
         fs::create_dir(&temporary).unwrap();
-        let mut app = env.app("a", &["maître"]);
+        let mut app = env.app("a", &["Maître-2026!"]);
         assert!(matches!(
             app.run(Command::Import {
                 name: "perso".to_owned(),
@@ -260,7 +263,7 @@ mod tests {
             Err(CliError::App(AppError::Session(SessionError::Local(_))))
         ));
         assert_eq!(
-            titles(&env.local_vault("a", "maître")),
+            titles(&env.local_vault("a", "Maître-2026!")),
             Vec::<String>::new()
         );
     }

@@ -209,7 +209,7 @@ Précisions :
 
 | Commande | Effet |
 |---|---|
-| `pswd init <nom>` | Crée un coffre local : mot de passe maître (saisi 2 fois), affichage unique de la clé de récupération. **Refuse** si le nom est déjà pris. |
+| `pswd init <nom>` | Crée un coffre local : mot de passe maître fort (§9, saisi 2 fois), affichage unique de la clé de récupération. **Refuse** si le nom est déjà pris. |
 | `pswd open <nom>` | Déverrouille et lance le shell interactif. |
 | `pswd passwd <nom>` | Change le mot de passe maître (ancien requis), refait l'enveloppe 1. |
 | `pswd recover <nom>` | Clé de récupération + nouveau mot de passe, refait l'enveloppe 1. |
@@ -255,6 +255,7 @@ Code Wi-Fi,note,,,,"Box: ABCD-1234",maison
   - Windows : formats `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory = 0`, `CanUploadToCloudClipboard = 0` ;
   - Linux : type MIME `x-kde-passwordManagerHint = secret` (partiel : avertissement affiché) ;
   - Android 13+ (futur) : `EXTRA_IS_SENSITIVE` ; iOS (futur) : `localOnly` + `expirationDate`.
+- **Mot de passe maître** : tout nouveau mot de passe (création, `passwd`, `recover`, et leurs équivalents graphiques) doit avoir au moins 12 caractères (comptés en caractères, pas en octets) et mélanger au moins 3 types parmi minuscules, majuscules, chiffres et symboles (tout autre caractère : ponctuation, espace, lettre sans casse). La règle vit dans `pswd-app` (`check_master_password`) ; l'interface la refait avant l'envoi (`validation.ts`) et l'affiche sous le champ. Un mot de passe déjà en place n'est jamais revérifié : il ouvre toujours son coffre.
 - Mot de passe maître **et** clé de récupération perdus = coffre perdu. Aucune récupération possible côté serveur.
 - **Anciennes copies** : après `passwd` / `recover`, l'ancien mot de passe ouvre toujours les copies antérieures du fichier (sauvegardes externes, versions conservées par le serveur). Si le mot de passe a fuité, une rotation de clé est nécessaire (hors feuille de route).
 - **Interface graphique** : JavaScript ne peut pas effacer une chaîne de la mémoire ; le moins de secrets possible traversent vers la webview (§12).

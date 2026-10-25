@@ -82,14 +82,14 @@ describe("changing the master password", () => {
     await manage();
     await fireEvent.click(screen.getByRole("button", { name: "Changer le mot de passe maître" }));
     await type("Mot de passe maître actuel", "maître");
-    await type("Nouveau mot de passe maître", "nouveau");
-    await type("Confirmation", "nouvau");
+    await type("Nouveau mot de passe maître", "Nouveau-2026!");
+    await type("Confirmation", "Nouvau-2026!");
     await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Les deux saisies ne correspondent pas.");
-    await type("Confirmation", "nouveau");
+    await type("Confirmation", "Nouveau-2026!");
     await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Mot de passe maître changé.");
-    expect(changePassword).toHaveBeenCalledWith("maître", "nouveau");
+    expect(changePassword).toHaveBeenCalledWith("maître", "Nouveau-2026!");
     expect(field("Mot de passe maître actuel").value).toBe("");
     await fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
     expect(screen.getByText("Choisissez une entrée dans la liste.")).toBeInTheDocument();
@@ -101,8 +101,8 @@ describe("changing the master password", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Changer le mot de passe maître" }));
     const fill = async () => {
       await type("Mot de passe maître actuel", "faux");
-      await type("Nouveau mot de passe maître", "nouveau");
-      await type("Confirmation", "nouveau");
+      await type("Nouveau mot de passe maître", "Nouveau-2026!");
+      await type("Confirmation", "Nouveau-2026!");
       await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
     };
     await fill();
@@ -332,16 +332,16 @@ describe("forgotten master password", () => {
     expect(screen.getByRole("heading")).toHaveTextContent("Récupérer « perso »");
     expectVerbatim(field("Clé de récupération"));
     await type("Clé de récupération", "AAAA-BBBB");
-    await type("Nouveau mot de passe maître", "nouveau");
+    await type("Nouveau mot de passe maître", "Nouveau-2026!");
     await type("Confirmation", "autre");
     await fireEvent.click(screen.getByRole("button", { name: "Choisir le nouveau mot de passe" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Les deux saisies ne correspondent pas.");
-    await type("Confirmation", "nouveau");
+    await type("Confirmation", "Nouveau-2026!");
     await fireEvent.click(screen.getByRole("button", { name: "Choisir le nouveau mot de passe" }));
     await vi.waitFor(() => {
       expect(onUnlocked).toHaveBeenCalledWith({ name: "perso", entries: 3 });
     });
-    expect(recoverVault).toHaveBeenCalledWith("perso", "AAAA-BBBB", "nouveau");
+    expect(recoverVault).toHaveBeenCalledWith("perso", "AAAA-BBBB", "Nouveau-2026!");
     expect(field("Clé de récupération").value).toBe("");
   });
 
@@ -352,8 +352,8 @@ describe("forgotten master password", () => {
     render(Unlock, { name: "perso", onUnlocked, onCancel: vi.fn() });
     await fireEvent.click(screen.getByRole("button", { name: "Mot de passe oublié ?" }));
     await type("Clé de récupération", "faux");
-    await type("Nouveau mot de passe maître", "n");
-    await type("Confirmation", "n");
+    await type("Nouveau mot de passe maître", "Nouveau-2026!");
+    await type("Confirmation", "Nouveau-2026!");
     await fireEvent.click(screen.getByRole("button", { name: "Choisir le nouveau mot de passe" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Clé de récupération incorrecte.");
     await fireEvent.click(screen.getByRole("button", { name: "Mot de passe maître" }));

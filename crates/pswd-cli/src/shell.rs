@@ -354,7 +354,7 @@ mod tests {
     /// Ouvre `perso` sur `a` avec le bon mot de passe, exécute `commands`, puis renvoie ce qui
     /// a été affiché après l'ouverture.
     fn session_output(env: &TestEnv, commands: &[&str]) -> String {
-        let mut answers = vec!["maître"];
+        let mut answers = vec!["Maître-2026!"];
         answers.extend_from_slice(commands);
         let mut app = env.app("a", &answers);
         app.run(open()).unwrap();
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn open_unlocks_and_closes_at_end_of_input() {
         let env = env_with_entries();
-        let mut app = env.app("a", &["maître"]);
+        let mut app = env.app("a", &["Maître-2026!"]);
         app.run(open()).unwrap();
         assert_eq!(
             app.terminal.output(),
@@ -377,7 +377,7 @@ mod tests {
     #[test]
     fn input_failure_ends_the_shell_with_an_error() {
         let env = env_with_entries();
-        let mut app = env.app("a", &["maître", "list", BROKEN_INPUT, "list"]);
+        let mut app = env.app("a", &["Maître-2026!", "list", BROKEN_INPUT, "list"]);
         assert_eq!(
             app.run(open()),
             Err(CliError::Input("clavier débranché".to_owned()))
@@ -579,7 +579,7 @@ mod tests {
     #[test]
     fn idle_vault_is_locked_while_waiting_for_input() {
         let env = env_with_entries();
-        let mut app = env.app("a", &["maître", "list", "<pause:300>", "list"]);
+        let mut app = env.app("a", &["Maître-2026!", "list", "<pause:300>", "list"]);
         app.auto_lock = Some(Duration::from_millis(50));
         app.run(open()).unwrap();
         let output = app.terminal.output();

@@ -21,7 +21,12 @@ describe("errorMessage", () => {
         "a/b",
         "Nom de coffre invalide : « a/b » (lettres, chiffres, - et _ ; 64 caractères au plus).",
       ],
-      ["emptyPassword", null, "Le mot de passe maître ne peut pas être vide."],
+      ["passwordTooShort", null, "Le mot de passe maître doit contenir au moins 12 caractères."],
+      [
+        "passwordTooSimple",
+        null,
+        "Le mot de passe maître doit mélanger au moins 3 types de caractères parmi : minuscules, majuscules, chiffres, symboles.",
+      ],
       ["wrongPassword", null, "Mot de passe maître incorrect."],
       ["vaultFolderExists", null, "Un dossier de coffre existe déjà à cet emplacement."],
       ["vaultUnreadable", "altéré", "Coffre illisible : altéré"],

@@ -114,10 +114,10 @@ mod tests {
         }
     }
 
-    /// Coffres `perso` (mot de passe « maître ») et `travail` sur l'appareil `a`.
+    /// Coffres `perso` (mot de passe « Maître-2026! ») et `travail` sur l'appareil `a`.
     fn env_with_two_vaults() -> TestEnv {
         let env = TestEnv::with_vault();
-        let mut app = env.app("a", &["autre", "autre"]);
+        let mut app = env.app("a", &["Autre-mot-2026!", "Autre-mot-2026!"]);
         app.run(Command::Init {
             name: "travail".to_owned(),
         })
@@ -214,7 +214,7 @@ mod tests {
                 .output()
                 .starts_with("Coffre « perso » restauré.\n"),
         );
-        let vault = env.local_vault("b", "maître");
+        let vault = env.local_vault("b", "Maître-2026!");
         assert_eq!(vault.entries().count(), 1);
     }
 
@@ -238,7 +238,7 @@ mod tests {
             "{}",
             app.terminal.output()
         );
-        assert_eq!(env.local_vault("a", "maître").entries().count(), 1);
+        assert_eq!(env.local_vault("a", "Maître-2026!").entries().count(), 1);
         let config = env.config("a");
         let restored = config.vault("perso-sauvegarde-1970-01-01").unwrap();
         let data = fs::read(&file).unwrap();

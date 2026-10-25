@@ -55,6 +55,7 @@
   <label>
     {texts.newPassword}
     <input type="password" bind:value={password} autocomplete="new-password" />
+    <small>{texts.passwordRule}</small>
   </label>
   <label>
     {texts.confirmation}
