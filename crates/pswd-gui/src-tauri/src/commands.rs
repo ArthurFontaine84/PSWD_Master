@@ -740,6 +740,11 @@ mod tests {
             );
         };
         refused("not_allowed", json!({}));
+        // Bouton retour et fermeture : capacité réservée à Android.
+        refused(
+            "plugin:app|register_listener",
+            json!({ "event": "back-button", "handler": 0 }),
+        );
         // Le plugin `fs` sert au backend seul : l'interface ne lit ni n'écrit aucun fichier.
         let file = app.config_file();
         fs::create_dir_all(file.parent().unwrap()).unwrap();

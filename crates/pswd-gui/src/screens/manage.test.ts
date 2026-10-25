@@ -21,6 +21,7 @@ import {
   unlockVault,
 } from "../lib/api";
 import { pickBackupDestination, pickBackupFile, pickCsvFile, pickFolder } from "../lib/files";
+import { goBack } from "../lib/back";
 import OpenVault from "./OpenVault.svelte";
 import Restore from "./Restore.svelte";
 import Settings from "./Settings.svelte";
@@ -69,6 +70,12 @@ function field(label: string): HTMLInputElement {
 
 async function type(label: string, value: string) {
   await fireEvent.input(field(label), { target: { value } });
+}
+
+function expectVerbatim(element: HTMLElement) {
+  expect(element).toHaveAttribute("autocapitalize", "off");
+  expect(element).toHaveAttribute("autocorrect", "off");
+  expect(element).toHaveAttribute("spellcheck", "false");
 }
 
 /** Coffre `perso` ouvert, avec le menu de gestion déplié. */
@@ -165,6 +172,7 @@ describe("deleting the vault", () => {
     const confirm = () => screen.getByRole("button", { name: "Supprimer définitivement" });
     expect(screen.getByText(/Pour confirmer, retapez son nom\./)).toBeInTheDocument();
     expect(confirm()).toBeDisabled();
+    expectVerbatim(field("Nom du coffre"));
     await type("Nom du coffre", "perso");
     await fireEvent.click(confirm());
     expect(await screen.findByRole("alert")).toHaveTextContent("Erreur de fichier : occupé");
@@ -175,6 +183,13 @@ describe("deleting the vault", () => {
     expect(deleteVault).toHaveBeenCalledWith("perso", "perso");
     await fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
     expect(screen.getByText("Choisissez une entrée dans la liste.")).toBeInTheDocument();
+  });
+
+  it("is closed by the back button", async () => {
+    await manage();
+    await fireEvent.click(screen.getByRole("button", { name: "Supprimer ce coffre" }));
+    goBack();
+    expect(await screen.findByText("Choisissez une entrée dans la liste.")).toBeInTheDocument();
   });
 
   it("closes the management menu on demand", async () => {
@@ -372,6 +387,7 @@ describe("forgotten master password", () => {
     render(Unlock, { name: "perso", onUnlocked, onCancel: vi.fn() });
     await fireEvent.click(screen.getByRole("button", { name: "Mot de passe oublié ?" }));
     expect(screen.getByRole("heading")).toHaveTextContent("Récupérer « perso »");
+    expectVerbatim(field("Clé de récupération"));
     await type("Clé de récupération", "AAAA-BBBB");
     await type("Nouveau mot de passe maître", "nouveau");
     await type("Confirmation", "autre");

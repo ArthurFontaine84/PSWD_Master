@@ -334,6 +334,8 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 - Thème clair ou sombre selon le système, réglable (auto, clair, sombre).
 - Mise en page de départ, appelée à évoluer : deux colonnes sur le bureau (liste à gauche, détail à droite), une colonne sur mobile (liste, puis détail en plein écran).
 - Bureau entièrement utilisable au clavier (Tab, Entrée, Échap, `Ctrl+F`) ; contrastes suffisants.
+- Tactile : cibles d'au moins 48 px sur un écran tactile (`pointer: coarse`), survol réservé aux pointeurs qui survolent, marges des zones sûres (affichage bord à bord d'Android 15+, encoche) ; les champs saisis tels quels (nom de coffre, identifiant, clé de récupération, adresses, tags, recherche) désactivent majuscule et correction automatiques (`src/lib/keyboard.ts`).
+- Bouton retour d'Android (`src/lib/back.ts`) : chaque écran ouvert s'inscrit, le dernier répond en premier. Il referme le formulaire ou le panneau, puis l'entrée ; dans la liste des entrées, il verrouille le coffre ; ailleurs, il revient à la liste des coffres, d'où il ferme l'application. La clé de récupération ne se quitte que par « Continuer ». Permissions dans `capabilities/mobile.json`, limitée à Android (écoute du bouton, fermeture) ; un test vérifie qu'elle ne s'applique pas au bureau.
 - Français d'abord ; tous les textes passent par `src/lib/i18n/<langue>.ts` (cf. `EXTENSION(anglais)`).
 
 **Fichiers et dossiers**

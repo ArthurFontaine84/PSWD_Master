@@ -2,6 +2,7 @@
   import { createVault, type CreatedVault } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
+  import { verbatim } from "../lib/keyboard";
   import { newVaultProblem } from "../lib/validation";
 
   interface Props {
@@ -43,7 +44,7 @@
   <form onsubmit={submit} novalidate>
     <label>
       {texts.vaultName}
-      <input bind:value={name} autocomplete="off" spellcheck="false" />
+      <input bind:value={name} {...verbatim} />
       <small>{texts.vaultNameHint}</small>
     </label>
     <label>

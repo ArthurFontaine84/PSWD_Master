@@ -11,6 +11,7 @@ import {
   type EntryDetail,
   type EntrySummary,
 } from "../lib/api";
+import { goBack } from "../lib/back";
 import OpenVault from "./OpenVault.svelte";
 
 vi.mock("../lib/api", () => ({
@@ -69,6 +70,12 @@ async function type(label: string, value: string) {
   await fireEvent.input(field(label), { target: { value } });
 }
 
+function expectVerbatim(element: HTMLElement) {
+  expect(element).toHaveAttribute("autocapitalize", "off");
+  expect(element).toHaveAttribute("autocorrect", "off");
+  expect(element).toHaveAttribute("spellcheck", "false");
+}
+
 async function startNewEntry() {
   show();
   await screen.findByText("1 entrée");
@@ -80,6 +87,17 @@ async function openGithub() {
   await fireEvent.click(await screen.findByRole("button", { name: /^GitHub/ }));
   await screen.findByRole("heading", { level: 3, name: "GitHub" });
 }
+
+describe("the back button inside a vault", () => {
+  it("closes the form, then the entry, one at a time", async () => {
+    await openGithub();
+    await fireEvent.click(screen.getByRole("button", { name: "Modifier" }));
+    goBack();
+    expect(await screen.findByRole("heading", { level: 3, name: "GitHub" })).toBeInTheDocument();
+    goBack();
+    expect(await screen.findByText("Choisissez une entrée dans la liste.")).toBeInTheDocument();
+  });
+});
 
 describe("adding an entry", () => {
   it("saves a login with a typed password, then shows it", async () => {
@@ -106,6 +124,15 @@ describe("adding an entry", () => {
     });
     expect(listEntries).toHaveBeenCalledTimes(2);
     expect(listTags).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps identifiers, addresses, tags and the search as typed on a phone keyboard", async () => {
+    await startNewEntry();
+    expectVerbatim(field("Identifiant"));
+    expectVerbatim(field("Adresses"));
+    expectVerbatim(field("Tags"));
+    expectVerbatim(screen.getByRole("searchbox"));
+    expect(field("Titre")).not.toHaveAttribute("autocapitalize");
   });
 
   it("lets the backend generate the password", async () => {

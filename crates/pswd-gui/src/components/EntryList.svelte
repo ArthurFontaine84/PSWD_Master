@@ -54,10 +54,16 @@
     background: none;
   }
 
-  .entry:hover,
   .entry:focus-visible,
   .entry[aria-current="true"] {
     background: var(--surface);
+  }
+
+  /* Sur un écran tactile, le survol resterait affiché après le toucher. */
+  @media (hover: hover) {
+    .entry:hover {
+      background: var(--surface);
+    }
   }
 
   .title {

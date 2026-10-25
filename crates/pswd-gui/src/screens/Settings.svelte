@@ -82,14 +82,3 @@
     <p>{texts.loading}</p>
   {/if}
 </section>
-
-<style>
-  select {
-    font: inherit;
-    padding: var(--space-s);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    color: var(--text);
-  }
-</style>

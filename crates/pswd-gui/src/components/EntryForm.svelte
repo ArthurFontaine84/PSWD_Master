@@ -11,6 +11,7 @@
   } from "../lib/entryForm";
   import { errorMessage, isVaultLocked } from "../lib/errors";
   import { texts } from "../lib/i18n";
+  import { verbatim } from "../lib/keyboard";
 
   interface Props {
     initial: FormValues;
@@ -73,7 +74,7 @@
   {#if values.kind === "login"}
     <label>
       {texts.username}
-      <input bind:value={values.username} autocomplete="off" spellcheck="false" />
+      <input bind:value={values.username} {...verbatim} />
     </label>
     <fieldset>
       <legend>{texts.password}</legend>
@@ -107,7 +108,7 @@
     </fieldset>
     <label>
       {texts.urls}
-      <textarea bind:value={values.urls} rows="2" spellcheck="false"></textarea>
+      <textarea bind:value={values.urls} rows="2" {...verbatim}></textarea>
       <small>{texts.urlsHint}</small>
     </label>
   {/if}
@@ -117,7 +118,7 @@
   </label>
   <label>
     {texts.tags}
-    <input bind:value={values.tags} autocomplete="off" spellcheck="false" />
+    <input bind:value={values.tags} {...verbatim} />
     <small>{texts.tagsHint}</small>
   </label>
   {#if problem}
@@ -148,15 +149,5 @@
 
   .generator input[type="number"] {
     width: 6rem;
-  }
-
-  textarea,
-  select {
-    font: inherit;
-    padding: var(--space-s);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
-    color: var(--text);
   }
 </style>

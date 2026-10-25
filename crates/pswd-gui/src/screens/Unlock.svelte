@@ -2,6 +2,7 @@
   import { recoverVault, unlockVault, type VaultInfo } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
+  import { verbatim } from "../lib/keyboard";
   import { newPasswordProblem } from "../lib/validation";
 
   interface Props {
@@ -67,7 +68,7 @@
     {#if recovering}
       <label>
         {texts.recoveryKey}
-        <input bind:value={recoveryKey} autocomplete="off" spellcheck="false" />
+        <input bind:value={recoveryKey} {...verbatim} />
       </label>
       <label>
         {texts.newPassword}

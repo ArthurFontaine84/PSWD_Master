@@ -127,12 +127,14 @@
     background: none;
   }
 
-  .vault:hover,
   .vault:focus-visible {
     background: var(--surface);
   }
 
-  .actions {
-    flex-wrap: wrap;
+  /* Sur un écran tactile, le survol resterait affiché après le toucher. */
+  @media (hover: hover) {
+    .vault:hover {
+      background: var(--surface);
+    }
   }
 </style>

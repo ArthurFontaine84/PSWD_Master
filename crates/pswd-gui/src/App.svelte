@@ -4,11 +4,13 @@
     appHidden,
     appShown,
     currentVault,
+    deviceKind,
     getSettings,
     onVaultLocked,
     type VaultInfo,
   } from "./lib/api";
   import { throttle } from "./lib/activity";
+  import { listenBackButton, onBack } from "./lib/back";
   import { texts } from "./lib/i18n";
   import { applyTheme } from "./lib/theme";
   import CreateVault from "./screens/CreateVault.svelte";
@@ -68,7 +70,27 @@
     }
   }
 
+  // Bouton retour : vers la liste des coffres. La clé de récupération, affichée une seule fois,
+  // ne se quitte que par « Continuer » ; un coffre ouvert répond lui-même.
+  function back(): boolean {
+    switch (screen.kind) {
+      case "list":
+      case "open":
+        return false;
+      case "recovery":
+        return true;
+      default:
+        screen = { kind: "list" };
+        return true;
+    }
+  }
+
   onMount(() => {
+    const stopBack = onBack(back);
+    const stopButton = deviceKind().then(
+      (kind) => (kind === "mobile" ? listenBackButton() : undefined),
+      () => undefined,
+    );
     // Sans réglages lisibles, le thème reste celui du système.
     getSettings().then(
       (settings) => {
@@ -78,9 +100,11 @@
     );
     const unlisten = onVaultLocked(showLocked);
     return () => {
+      stopBack();
       void unlisten.then((stop) => {
         stop();
       });
+      void stopButton.then((stop) => stop?.());
     };
   });
 </script>
@@ -131,9 +155,17 @@
 </main>
 
 <style>
+  /* Les marges laissent libres l'encoche et les barres du système (affichage bord à bord). */
   main {
     max-width: 64rem;
     margin: 0 auto;
-    padding: var(--space-l) var(--space-m);
+    padding: max(var(--space-m), env(safe-area-inset-top)) max(var(--space-m), env(safe-area-inset-right))
+      max(var(--space-m), env(safe-area-inset-bottom)) max(var(--space-m), env(safe-area-inset-left));
+  }
+
+  @media (min-width: 48rem) {
+    main {
+      padding-top: max(var(--space-l), env(safe-area-inset-top));
+    }
   }
 </style>

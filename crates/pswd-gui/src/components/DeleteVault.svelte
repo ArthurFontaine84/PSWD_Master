@@ -2,6 +2,7 @@
   import { deleteVault } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
+  import { verbatim } from "../lib/keyboard";
 
   interface Props {
     name: string;
@@ -30,7 +31,7 @@
   <p>{texts.deleteVaultExplanation(name)}</p>
   <label>
     {texts.vaultName}
-    <input bind:value={confirmation} autocomplete="off" spellcheck="false" />
+    <input bind:value={confirmation} {...verbatim} />
   </label>
   {#if problem}
     <p role="alert">{problem}</p>

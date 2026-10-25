@@ -1,6 +1,9 @@
+import { exit, onBackButtonPress } from "@tauri-apps/api/app";
+import type { PluginListener } from "@tauri-apps/api/core";
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.svelte";
+import { goBack } from "./lib/back";
 import {
   appHidden,
   appShown,
@@ -39,6 +42,10 @@ vi.mock("./lib/api", () => ({
   backupContents: vi.fn(),
   restoreVault: vi.fn(),
   deleteVault: vi.fn(),
+}));
+vi.mock("@tauri-apps/api/app", () => ({
+  exit: vi.fn(),
+  onBackButtonPress: vi.fn(),
 }));
 vi.mock("./lib/files", () => ({
   pickFolder: vi.fn(),
@@ -91,6 +98,74 @@ async function unlockPerso() {
   await fireEvent.click(screen.getByRole("button", { name: "Déverrouiller" }));
   await screen.findByText("2 entrées");
 }
+
+describe("back button", () => {
+  it("returns to the vault list, and closes the application from there", async () => {
+    render(App);
+    await fireEvent.click(await screen.findByRole("button", { name: "Réglages" }));
+    goBack();
+    await fireEvent.click(await screen.findByRole("button", { name: "perso" }));
+    goBack();
+    expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
+    expect(exit).not.toHaveBeenCalled();
+    goBack();
+    expect(exit).toHaveBeenCalledTimes(1);
+  });
+
+  it("never leaves the recovery key before it is noted", async () => {
+    vi.mocked(createVault).mockResolvedValue({
+      vault: { name: "neuf", entries: 0 },
+      recoveryKey: "AAAA-BBBB",
+    });
+    render(App);
+    await fireEvent.click(await screen.findByRole("button", { name: "Nouveau coffre" }));
+    await fireEvent.input(field("Nom du coffre"), { target: { value: "neuf" } });
+    await fireEvent.input(field("Mot de passe maître"), { target: { value: "maître" } });
+    await fireEvent.input(field("Confirmation"), { target: { value: "maître" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Créer" }));
+    await screen.findByText("AAAA-BBBB");
+    goBack();
+    await Promise.resolve();
+    expect(screen.getByText("AAAA-BBBB")).toBeInTheDocument();
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("closes the entry, then locks the vault", async () => {
+    vi.mocked(lockVault).mockResolvedValue();
+    render(App);
+    await unlockPerso();
+    goBack();
+    await vi.waitFor(() => {
+      expect(lockVault).toHaveBeenCalled();
+    });
+    expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
+  });
+
+  it("is taken over from the system on mobile only, until the application closes", async () => {
+    const unregister = vi.fn();
+    vi.mocked(onBackButtonPress).mockResolvedValue({ unregister } as unknown as PluginListener);
+    const desktop = render(App);
+    await screen.findByRole("button", { name: "perso" });
+    expect(onBackButtonPress).not.toHaveBeenCalled();
+    desktop.unmount();
+    vi.mocked(deviceKind).mockResolvedValue("mobile");
+    const mobile = render(App);
+    await vi.waitFor(() => {
+      expect(onBackButtonPress).toHaveBeenCalledWith(goBack);
+    });
+    mobile.unmount();
+    await vi.waitFor(() => {
+      expect(unregister).toHaveBeenCalled();
+    });
+  });
+
+  it("keeps the system behaviour when the device is unknown", async () => {
+    vi.mocked(deviceKind).mockRejectedValue(new Error("absent"));
+    render(App);
+    await screen.findByRole("button", { name: "perso" });
+    expect(onBackButtonPress).not.toHaveBeenCalled();
+  });
+});
 
 describe("App", () => {
   it("creates a vault, shows its recovery key once, then opens it", async () => {

@@ -24,6 +24,12 @@ function field(label: string): HTMLInputElement {
   return screen.getByLabelText(label, { exact: false });
 }
 
+function expectVerbatim(element: HTMLElement) {
+  expect(element).toHaveAttribute("autocapitalize", "off");
+  expect(element).toHaveAttribute("autocorrect", "off");
+  expect(element).toHaveAttribute("spellcheck", "false");
+}
+
 describe("VaultList", () => {
   it("opens a vault or starts a new one", async () => {
     vi.mocked(listVaults).mockResolvedValue(["perso", "travail"]);
@@ -95,6 +101,11 @@ describe("CreateVault", () => {
       "Un coffre nommé perso existe déjà.",
     );
     expect(screen.getByRole("button", { name: "Créer" })).toBeEnabled();
+  });
+
+  it("keeps the name as typed on a phone keyboard", () => {
+    render(CreateVault, { onCreated: vi.fn(), onCancel: vi.fn() });
+    expectVerbatim(field("Nom du coffre"));
   });
 
   it("can be cancelled", async () => {

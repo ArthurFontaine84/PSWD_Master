@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import ChangePassword from "../components/ChangePassword.svelte";
   import DeleteVault from "../components/DeleteVault.svelte";
   import EntryDetailView from "../components/EntryDetail.svelte";
@@ -17,9 +18,11 @@
     type TagCount,
     type VaultInfo,
   } from "../lib/api";
+  import { onBack } from "../lib/back";
   import { emptyForm, formFrom } from "../lib/entryForm";
   import { errorMessage, isVaultLocked } from "../lib/errors";
   import { texts } from "../lib/i18n";
+  import { verbatim } from "../lib/keyboard";
 
   interface Props {
     vault: VaultInfo;
@@ -109,6 +112,22 @@
     onLocked();
   }
 
+  // Bouton retour : referme ce qui est ouvert à la place du détail, puis verrouille le coffre.
+  function back(): boolean {
+    if (panel !== null) {
+      panel = null;
+    } else if (editor !== null) {
+      editor = null;
+    } else if (selected !== null) {
+      selected = null;
+    } else {
+      void lock();
+    }
+    return true;
+  }
+
+  onMount(() => onBack(back));
+
   function shortcut(event: KeyboardEvent) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
       event.preventDefault();
@@ -146,7 +165,7 @@
           bind:value={text}
           aria-label={texts.search}
           placeholder={texts.searchHint}
-          spellcheck="false"
+          {...verbatim}
         />
         {#if tags.length > 0}
           <select bind:value={tag} aria-label={texts.tagFilter}>
@@ -206,12 +225,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: var(--space-m);
   }
 
   .manage {
     justify-content: flex-start;
-    flex-wrap: wrap;
     margin-bottom: var(--space-m);
   }
 

@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Android seulement : l'écoute du bouton retour du système, et la fermeture de l'application quand il n'y a plus d'écran à remonter.",
+  "windows": ["main"],
+  "platforms": ["android"],
+  "permissions": [
+    "core:app:allow-register-listener",
+    "core:app:allow-remove-listener",
+    "core:app:allow-exit"
+  ]
+}
