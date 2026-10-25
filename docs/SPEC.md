@@ -331,7 +331,7 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 **Fonctionnement** : la webview du système affiche l'interface (HTML/CSS/JS intégrés à l'exécutable, aucun serveur web, aucun réseau). L'interface appelle les commandes Tauri du backend Rust, qui s'appuie sur `pswd-app`. La session (clé du coffre, coffre déchiffré) reste en Rust. Règles de sécurité : §9.
 
 **Interface** : Svelte 5 + TypeScript, construite par Vite ; CSS maison avec des variables (couleurs, espacements), sans bibliothèque de composants.
-- Thème clair ou sombre selon le système, réglable (auto, clair, sombre).
+- Thème clair ou sombre selon le système, réglable (auto, clair, sombre). C'est le seul réglage de l'écran « Réglages » : les délais (verrouillage, presse-papiers, arrière-plan) gardent leurs valeurs par défaut, modifiables à la main dans `config.toml` sur le bureau.
 - Mise en page de départ, appelée à évoluer : deux colonnes sur le bureau (liste à gauche, détail à droite), une colonne sur mobile (liste, puis détail en plein écran).
 - Bureau entièrement utilisable au clavier (Tab, Entrée, Échap, `Ctrl+F`) ; contrastes suffisants.
 - Tactile : cibles d'au moins 48 px sur un écran tactile (`pointer: coarse`), survol réservé aux pointeurs qui survolent, marges des zones sûres (affichage bord à bord d'Android 15+, encoche) ; les champs saisis tels quels (nom de coffre, identifiant, clé de récupération, adresses, tags, recherche) désactivent majuscule et correction automatiques (`src/lib/keyboard.ts`).

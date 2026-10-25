@@ -303,10 +303,10 @@ describe("App", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Réglages" }));
     const theme = await screen.findByRole("combobox", { name: "Thème" });
     await fireEvent.change(theme, { target: { value: "dark" } });
-    await fireEvent.input(field("Verrouillage après inactivité"), { target: { value: "5" } });
     await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Réglages enregistrés.");
-    expect(saveSettings).toHaveBeenCalledWith({ ...defaults, autoLockMinutes: 5, theme: "dark" });
+    expect(saveSettings).toHaveBeenCalledWith({ ...defaults, theme: "dark" });
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
     expect(document.documentElement.dataset.theme).toBe("dark");
     await fireEvent.click(screen.getByRole("button", { name: "Retour" }));
     expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();

@@ -12,6 +12,8 @@
 
   const themes: Theme[] = ["auto", "light", "dark"];
 
+  // Seul le thème se règle ici ; les autres valeurs, renvoyées telles quelles, restent dans
+  // `config.toml`.
   let settings = $state<Settings | null>(null);
   let problem = $state<string | null>(null);
   let saved = $state(false);
@@ -42,18 +44,6 @@
   <h2 id="settings-title">{texts.settings}</h2>
   {#if settings}
     <form onsubmit={submit}>
-      <label>
-        {texts.autoLock}
-        <input type="number" min="0" max="1440" bind:value={settings.autoLockMinutes} />
-      </label>
-      <label>
-        {texts.clipboardClear}
-        <input type="number" min="5" max="300" bind:value={settings.clipboardClearSeconds} />
-      </label>
-      <label>
-        {texts.backgroundLock}
-        <input type="number" min="0" max="3600" bind:value={settings.backgroundLockSeconds} />
-      </label>
       <label>
         {texts.theme}
         <select bind:value={settings.theme}>

@@ -144,9 +144,6 @@ export const fr = {
       ? `Coffre « ${name} » restauré.`
       : `Coffre « ${name} » restauré sous le nom « ${target} » : ce nom était déjà pris.`,
   settings: "Réglages",
-  autoLock: "Verrouillage après inactivité (minutes, 0 = jamais)",
-  clipboardClear: "Effacement du presse-papiers (secondes)",
-  backgroundLock: "Verrouillage en arrière-plan sur mobile (secondes, 0 = immédiat)",
   theme: "Thème",
   themes: { auto: "Comme le système", light: "Clair", dark: "Sombre" },
   settingsSaved: "Réglages enregistrés.",
