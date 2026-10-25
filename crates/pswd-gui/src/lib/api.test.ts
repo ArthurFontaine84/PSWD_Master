@@ -3,8 +3,6 @@ import { listen } from "@tauri-apps/api/event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   addEntry,
-  backupContents,
-  backupVaults,
   changePassword,
   copyPassword,
   createVault,
@@ -17,7 +15,6 @@ import {
   getSettings,
   importEntries,
   recoverVault,
-  restoreVault,
   backupFileName,
   backupToFile,
   backupFileContents,
@@ -76,9 +73,6 @@ describe("api", () => {
     await recoverVault("perso", "AAAA", "nouveau");
     await deleteVault("perso", "perso");
     await importEntries("C:/import.csv");
-    await backupVaults("E:/");
-    await backupContents("E:/pswd-sauvegardes/1");
-    await restoreVault("E:/pswd-sauvegardes/1", "perso");
     await backupFileName();
     await backupToFile("E:/s.pswd");
     await backupFileContents("E:/s.pswd");
@@ -113,9 +107,6 @@ describe("api", () => {
       ["recover_vault", { name: "perso", recoveryKey: "AAAA", password: "nouveau" }],
       ["delete_vault", { name: "perso", confirmation: "perso" }],
       ["import_entries", { path: "C:/import.csv" }],
-      ["backup_vaults", { destination: "E:/" }],
-      ["backup_contents", { folder: "E:/pswd-sauvegardes/1" }],
-      ["restore_vault", { folder: "E:/pswd-sauvegardes/1", name: "perso" }],
       ["backup_file_name"],
       ["backup_to_file", { path: "E:/s.pswd" }],
       ["backup_file_contents", { path: "E:/s.pswd" }],

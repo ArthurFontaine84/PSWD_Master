@@ -1,9 +1,8 @@
-use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use pswd_app::{
-    AppError, IdleLock, VaultSession, Vaults, add_entries, backup_stamp, live_count, search,
+    AppError, IdleLock, VaultSession, Vaults, add_entries, backup_file_name, live_count, search,
     tag_counts,
 };
 use pswd_core::crypto::KdfParams;
@@ -16,13 +15,6 @@ use crate::editing::{EntryInput, HistoryItem, history};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
 use crate::settings::Settings;
-
-/// Résultat d'une sauvegarde : le dossier daté créé et le nombre de coffres copiés.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct BackupDone {
-    pub folder: String,
-    pub count: usize,
-}
 
 /// Coffre ouvert, tel que l'interface le voit : jamais de secret.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -324,32 +316,14 @@ impl AppState {
         Ok(self.with_session(|session| add_entries(session, contents, now))??)
     }
 
-    /// Sauvegarde tous les coffres dans un nouveau dossier daté de `destination`.
-    pub fn backup(&self, destination: &Path) -> Result<BackupDone, UiError> {
-        let (folder, count) = self.vaults.backup(destination, None, (self.clock)())?;
-        Ok(BackupDone {
-            folder: folder.display().to_string(),
-            count,
-        })
-    }
-
-    pub fn backup_contents(&self, folder: &Path) -> Result<Vec<String>, UiError> {
-        Ok(self.vaults.backup_contents(folder)?)
-    }
-
-    /// Restaure un coffre d'une sauvegarde ; renvoie le nom retenu.
-    pub fn restore(&self, folder: &Path, name: &str) -> Result<String, UiError> {
-        Ok(self.vaults.restore_from_backup(folder, name)?)
-    }
-
-    /// Nom proposé pour une sauvegarde en un seul fichier : `pswd-sauvegarde_<date>.pswd`.
+    /// Nom proposé pour une sauvegarde : `pswd-sauvegarde_<date>.pswd`.
     pub fn backup_file_name(&self) -> String {
-        format!("pswd-sauvegarde_{}.pswd", backup_stamp((self.clock)()))
+        backup_file_name((self.clock)())
     }
 
     /// Tous les coffres en un seul fichier `.pswd`, et leur nombre.
     pub fn backup_file(&self) -> Result<(Vec<u8>, usize), UiError> {
-        Ok(self.vaults.backup_to_file((self.clock)())?)
+        Ok(self.vaults.backup_to_file(None, (self.clock)())?)
     }
 
     pub fn backup_file_contents(&self, data: &[u8]) -> Result<Vec<String>, UiError> {
@@ -1219,33 +1193,6 @@ mod tests {
             Some(UiError::new("csvUnknownKind", "2"))
         );
         assert_eq!(state.entries("", None).unwrap().len(), 5);
-    }
-
-    #[test]
-    fn vaults_are_backed_up_then_restored() {
-        let dir = TempDir::new().unwrap();
-        let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("maître")).unwrap();
-        let usb = dir.path().join("usb");
-        std::fs::create_dir(&usb).unwrap();
-        let done = state.backup(&usb).unwrap();
-        assert_eq!(done.count, 1);
-        let folder = Path::new(&done.folder).to_owned();
-        assert_eq!(
-            folder,
-            usb.join("pswd-sauvegardes").join("1970-01-01_00-00-01")
-        );
-        assert_eq!(state.backup_contents(&folder), Ok(vec!["perso".to_owned()]));
-        assert_eq!(
-            state.restore(&folder, "perso"),
-            Ok("perso-sauvegarde-1970-01-01".to_owned())
-        );
-        assert_eq!(
-            state.restore(&folder, "travail").err(),
-            Some(UiError::new("notInBackup", "travail"))
-        );
-        let error = state.backup(&dir.path().join("débranchée")).unwrap_err();
-        assert_eq!(serde_json::to_value(error).unwrap()["code"], "ioError");
     }
 
     #[test]

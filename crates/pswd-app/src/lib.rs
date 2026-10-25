@@ -18,7 +18,7 @@ pub use entries::{add_entries, live_count, search, tag_counts};
 pub use error::AppError;
 pub use idle_lock::IdleLock;
 pub use random::generate;
-pub use utc::{backup_stamp, format_timestamp, now};
+pub use utc::{backup_file_name, format_timestamp, now};
 pub use vaults::Vaults;
 
 /// Coffre ouvert, enregistré dans un fichier local.

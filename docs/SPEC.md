@@ -158,14 +158,10 @@ Fonction pure `merge(local: Vault, remote: Vault) -> Result<Vault, MergeError>` 
 - Nom d'un coffre : lettres ASCII, chiffres, `-` et `_`, 64 caractères au plus, hors noms réservés de Windows (`con`, `nul`…) ; il sert de nom de dossier. Un nom pris est refusé tant que le coffre existe. Il n'y a pas de coffre par défaut : chaque commande nomme son coffre.
 - Les restes de la v1 (dossiers `repo.git/`, jetons `pswd` du trousseau) ne sont plus utilisés et peuvent être supprimés à la main ; les entrées `url` et `default_vault` de `config.toml` doivent être retirées.
 
-**Sauvegarde sur disque externe** (clé USB, disque dur)
-- Chaque sauvegarde crée un dossier daté (UTC) : `<destination>/pswd-sauvegardes/<AAAA-MM-JJ_HH-MM-SS>/vaults/<nom>/vault.enc`, pour chaque coffre local (ou un seul, au choix).
-- La destination doit exister : sinon, une clé débranchée donnerait une sauvegarde sur le disque de la machine (sous Linux, le point de montage est un dossier ordinaire).
-- Copie brute des fichiers chiffrés : aucun mot de passe demandé, rien de lisible sur le disque. Chaque fichier est écrit sur le disque (`sync_all`) avant la fin de la commande.
-- Une sauvegarde ne touche jamais aux précédentes (même dossier daté : refus). Une copie ratée retire la sauvegarde incomplète. Supprimer les anciennes sauvegardes est laissé à l'utilisateur.
-
-**Sauvegarde en un seul fichier `.pswd`** (mobile, où une sauvegarde ne peut pas être un dossier ; le bureau sait aussi la lire et l'écrire, par exemple pour passer ses coffres sur le téléphone)
-- Même contenu qu'un dossier daté : tous les coffres locaux, copiés bruts, toujours chiffrés. Nom proposé : `pswd-sauvegarde_<AAAA-MM-JJ_HH-MM-SS>.pswd`. Les noms des coffres sont rangés dans le fichier : un sélecteur de fichiers mobile ne donne pas toujours le nom du fichier, et celui-ci a pu être renommé.
+**Sauvegarde** : un seul format sur tous les appareils, un fichier `.pswd` (sur mobile, une sauvegarde ne peut pas être un dossier). Il sert aussi à passer ses coffres d'un appareil à l'autre.
+- Contenu : tous les coffres locaux (ou un seul, au choix, dans la CLI), copiés bruts, toujours chiffrés : aucun mot de passe demandé, rien de lisible sur le disque. Nom proposé : `pswd-sauvegarde_<AAAA-MM-JJ_HH-MM-SS>.pswd` (UTC). Les noms des coffres sont rangés dans le fichier : un sélecteur de fichiers mobile ne donne pas toujours le nom du fichier, et celui-ci a pu être renommé.
+- CLI : `pswd backup <dossier>` écrit ce fichier dans le dossier, qui doit exister : sinon, une clé débranchée donnerait une sauvegarde sur le disque de la machine (sous Linux, le point de montage est un dossier ordinaire). Un fichier existant n'est jamais remplacé ; une écriture ratée retire le fichier incomplet. Interface graphique : la fenêtre système d'enregistrement choisit l'emplacement (§12).
+- Le fichier est sur le disque (`sync_all`) avant la fin de la commande. Supprimer les anciennes sauvegardes est laissé à l'utilisateur.
 - Format (`pswd-core`, binaire, little-endian) :
 
 ```
@@ -183,7 +179,7 @@ pour chaque coffre, noms triés et distincts :
 - Le fichier est lu en entier et chaque coffre vérifié avant d'en restaurer un ; rien après le dernier coffre. Une sauvegarde n'a qu'une écriture (noms triés) : le fuzzing vérifie que tout fichier accepté se réencode à l'identique.
 
 **Restauration**
-- L'utilisateur donne une sauvegarde datée et, au choix, un coffre ; sinon les coffres de la sauvegarde sont listés et le nom est demandé.
+- L'utilisateur donne un fichier `.pswd` et, au choix, un coffre ; sinon les coffres de la sauvegarde sont listés et le nom est demandé.
 - Le fichier est vérifié (structure, version) avant toute écriture ; un fichier altéré à l'intérieur du chiffrement ne se voit qu'à l'ouverture.
 - Le coffre est restauré comme **nouveau coffre local** : sous son nom d'origine s'il est libre, sinon sous un nom distinct (`<nom>-sauvegarde-<AAAA-MM-JJ>`, refusé s'il est pris à son tour). Rien n'est jamais écrasé ni fusionné (§6).
 - Il s'ouvre avec le mot de passe en vigueur à la date de la sauvegarde.
@@ -218,8 +214,8 @@ Précisions :
 | `pswd passwd <nom>` | Change le mot de passe maître (ancien requis), refait l'enveloppe 1. |
 | `pswd recover <nom>` | Clé de récupération + nouveau mot de passe, refait l'enveloppe 1. |
 | `pswd import <nom> <fichier.csv>` | Importe le format CSV ci-dessous (tout le fichier est validé avant d'ajouter quoi que ce soit), puis rappelle de supprimer le fichier. |
-| `pswd backup <destination> [--vault nom]` | Sauvegarde tous les coffres (ou un seul) dans un nouveau dossier daté (§7). |
-| `pswd restore <sauvegarde> [nom]` | Restaure un coffre d'une sauvegarde datée comme nouveau coffre local (§7). |
+| `pswd backup <dossier> [--vault nom]` | Sauvegarde tous les coffres (ou un seul) dans un nouveau fichier `.pswd` du dossier (§7). |
+| `pswd restore <fichier.pswd> [nom]` | Restaure un coffre d'une sauvegarde comme nouveau coffre local (§7). |
 | `pswd delete <nom>` | Supprime un coffre de cette machine, après avoir retapé son nom (§7). |
 
 Aucune commande n'écrase un coffre existant.
@@ -341,9 +337,8 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 **Fichiers et dossiers**
 - Bureau : les mêmes dossiers que la CLI (`Locations::system`) ; les deux programmes voient les mêmes coffres et peuvent modifier le même à la fois : chaque écriture fusionne d'abord la copie sur le disque (§3, Session). Un programme ne voit les modifications de l'autre qu'à sa prochaine écriture ou réouverture. **Limite acceptée** : sans verrou de fichier, deux écritures dans la même fraction de seconde peuvent encore se recouvrir.
 - Mobile : le dossier privé de l'application fourni par Tauri (`app_data_dir`), passé à `Locations::new` ; `FileStore` fonctionne tel quel.
-- Bureau : sauvegarde et restauration par dossier, comme la CLI (§7), choisi dans une boîte de dialogue. Le bureau sait aussi écrire et restaurer un fichier `.pswd` (« Sauvegarder dans un fichier », « Choisir un fichier .pswd »). Les fichiers choisis sont lus et écrits par Rust (module `files`), jamais par l'interface ; une écriture se termine par `sync_all`.
-- Mobile : une sauvegarde = un fichier `.pswd` (§7). « Sauvegarder » ouvre la fenêtre système d'enregistrement ; « Restaurer » ouvre le sélecteur de fichiers, liste les coffres du fichier comme ceux d'un dossier, puis applique les règles du §7. `pswd-app` restaure donc à partir des octets du fichier, pas d'un chemin.
-- Les fenêtres système du mobile renvoient une adresse (`content://` sur Android), pas un chemin : Rust ouvre les fichiers choisis par le plugin `fs` (`FsExt::open`), qui accepte les deux. L'interface n'a aucune permission de ce plugin (vérifié par un test). Sur mobile, la commande `device_kind` fait cacher les choix « dossier ». **À vérifier sur le Mac** : sur iOS, le plugin ouvre un accès « security-scoped » à chaque fichier, qu'il faudrait refermer.
+- Sauvegarde : un fichier `.pswd` (§7), sur le bureau comme sur mobile. « Sauvegarder » ouvre la fenêtre système d'enregistrement ; « Restaurer une sauvegarde » ouvre le sélecteur de fichiers, liste les coffres du fichier, puis applique les règles du §7. `pswd-app` restaure à partir des octets du fichier, pas d'un chemin. Les fichiers choisis sont lus et écrits par Rust (module `files`), jamais par l'interface ; une écriture se termine par `sync_all`.
+- Les fenêtres système du mobile renvoient une adresse (`content://` sur Android), pas un chemin : Rust ouvre les fichiers choisis par le plugin `fs` (`FsExt::open`), qui accepte les deux. L'interface n'a aucune permission de ce plugin (vérifié par un test). **À vérifier sur le Mac** : sur iOS, le plugin ouvre un accès « security-scoped » à chaque fichier, qu'il faudrait refermer.
 
 **Consultation** : la liste et le détail ne contiennent jamais de mot de passe. « Copier » est fait par Rust (`copy_password`) ; « Afficher » (`reveal_password`) envoie le mot de passe à l'interface, qui le masque de nouveau au bout de 30 s, ou dès qu'on change d'entrée. Recherche à chaque frappe (côté Rust, `pswd_app::search`), filtre par tag, `Ctrl+F` pour aller à la recherche. Toute lecture du coffre repousse son verrouillage ; si le coffre s'est verrouillé entre-temps, l'interface revient à la liste.
 

@@ -97,13 +97,13 @@ Brancher la clé (ici `E:`), puis :
 pswd backup E:\                  # tous les coffres ; --vault perso pour un seul
 ```
 
-Les coffres sont copiés, toujours chiffrés, dans un nouveau dossier daté : `E:\pswd-sauvegardes\2026-10-23_14-30-00\` (heure UTC). Les sauvegardes précédentes ne sont jamais modifiées ; supprimer les plus anciennes est à faire à la main.
+Les coffres sont copiés, toujours chiffrés, dans un nouveau fichier : `E:\pswd-sauvegarde_2026-10-23_14-30-00.pswd` (heure UTC). C'est le même format que l'application PSWD Master, sur ordinateur comme sur téléphone. Les sauvegardes précédentes ne sont jamais modifiées ; supprimer les plus anciennes est à faire à la main.
 
 Pour restaurer, sur cette machine ou une autre :
 
 ```sh
-pswd restore E:\pswd-sauvegardes\2026-10-23_14-30-00          # liste les coffres et demande lequel
-pswd restore E:\pswd-sauvegardes\2026-10-23_14-30-00 perso    # directement
+pswd restore E:\pswd-sauvegarde_2026-10-23_14-30-00.pswd          # liste les coffres et demande lequel
+pswd restore E:\pswd-sauvegarde_2026-10-23_14-30-00.pswd perso    # directement
 ```
 
 Le coffre est ajouté comme nouveau coffre. Si le nom est déjà pris, il devient `perso-sauvegarde-2026-10-23` : le coffre existant n'est jamais remplacé. Il s'ouvre avec le mot de passe maître en vigueur au moment de la sauvegarde.

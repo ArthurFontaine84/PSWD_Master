@@ -7,7 +7,7 @@ import { goBack } from "./lib/back";
 import {
   appHidden,
   appShown,
-  backupContents,
+  backupFileContents,
   createVault,
   deviceKind,
   currentVault,
@@ -18,12 +18,12 @@ import {
   listVaults,
   lockVault,
   onVaultLocked,
-  restoreVault,
+  restoreFromFile,
   saveSettings,
   unlockVault,
   type Settings,
 } from "./lib/api";
-import { pickFolder } from "./lib/files";
+import { pickBackupFile } from "./lib/files";
 
 vi.mock("./lib/api", () => ({
   listVaults: vi.fn(),
@@ -39,8 +39,8 @@ vi.mock("./lib/api", () => ({
   listTags: vi.fn(),
   getSettings: vi.fn(),
   saveSettings: vi.fn(),
-  backupContents: vi.fn(),
-  restoreVault: vi.fn(),
+  backupFileContents: vi.fn(),
+  restoreFromFile: vi.fn(),
   deleteVault: vi.fn(),
 }));
 vi.mock("@tauri-apps/api/app", () => ({
@@ -48,7 +48,6 @@ vi.mock("@tauri-apps/api/app", () => ({
   onBackButtonPress: vi.fn(),
 }));
 vi.mock("./lib/files", () => ({
-  pickFolder: vi.fn(),
   pickCsvFile: vi.fn(),
   pickBackupFile: vi.fn(),
   pickBackupDestination: vi.fn(),
@@ -313,17 +312,20 @@ describe("App", () => {
   });
 
   it("restores a vault and says so in the list", async () => {
-    vi.mocked(pickFolder).mockResolvedValue("E:/pswd-sauvegardes/2026-10-23_14-30-00");
-    vi.mocked(backupContents).mockResolvedValue(["perso"]);
-    vi.mocked(restoreVault).mockResolvedValue("perso-sauvegarde-2026-10-23");
+    vi.mocked(pickBackupFile).mockResolvedValue("E:/pswd-sauvegarde_2026-10-23_14-30-00.pswd");
+    vi.mocked(backupFileContents).mockResolvedValue(["perso"]);
+    vi.mocked(restoreFromFile).mockResolvedValue("perso-sauvegarde-2026-10-23");
     render(App);
     await fireEvent.click(await screen.findByRole("button", { name: "Restaurer une sauvegarde" }));
-    await fireEvent.click(await screen.findByRole("button", { name: "Choisir un dossier" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Choisir un fichier .pswd" }));
     await fireEvent.click(await screen.findByRole("button", { name: "perso" }));
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Coffre « perso » restauré sous le nom « perso-sauvegarde-2026-10-23 »",
     );
-    expect(restoreVault).toHaveBeenCalledWith("E:/pswd-sauvegardes/2026-10-23_14-30-00", "perso");
+    expect(restoreFromFile).toHaveBeenCalledWith(
+      "E:/pswd-sauvegarde_2026-10-23_14-30-00.pswd",
+      "perso",
+    );
   });
 
   it("leaves the restore screen when cancelled", async () => {

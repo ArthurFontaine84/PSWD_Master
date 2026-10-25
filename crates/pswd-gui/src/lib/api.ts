@@ -77,12 +77,6 @@ export interface Settings {
   theme: Theme;
 }
 
-export interface BackupDone {
-  /** Dossier daté créé par la sauvegarde. */
-  folder: string;
-  count: number;
-}
-
 export interface CreatedVault {
   vault: VaultInfo;
   /** À afficher une seule fois, puis à oublier. */
@@ -179,19 +173,6 @@ export async function deleteVault(name: string, confirmation: string): Promise<v
 /** Le backend lit le fichier : son contenu en clair ne passe pas par l'interface. */
 export function importEntries(path: string): Promise<number> {
   return invoke<number>("import_entries", { path });
-}
-
-export function backupVaults(destination: string): Promise<BackupDone> {
-  return invoke<BackupDone>("backup_vaults", { destination });
-}
-
-export function backupContents(folder: string): Promise<string[]> {
-  return invoke<string[]>("backup_contents", { folder });
-}
-
-/** Renvoie le nom sous lequel le coffre a été restauré. */
-export function restoreVault(folder: string, name: string): Promise<string> {
-  return invoke<string>("restore_vault", { folder, name });
 }
 
 /** Nom proposé pour une sauvegarde en un seul fichier, daté par le backend. */

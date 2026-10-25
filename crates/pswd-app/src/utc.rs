@@ -1,4 +1,4 @@
-//! Dates affichées et noms de dossiers datés, en UTC : aucun fuseau horaire à connaître.
+//! Dates affichées et noms des sauvegardes, en UTC : aucun fuseau horaire à connaître.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -25,9 +25,14 @@ pub fn format_timestamp(timestamp: Timestamp) -> String {
     )
 }
 
-/// Nom du dossier d'une sauvegarde, à la seconde : `2026-10-22_14-05-09`.
+/// Nom proposé pour un fichier de sauvegarde : `pswd-sauvegarde_2026-10-22_14-05-09.pswd`.
 #[must_use]
-pub fn backup_stamp(timestamp: Timestamp) -> String {
+pub fn backup_file_name(timestamp: Timestamp) -> String {
+    format!("pswd-sauvegarde_{}.pswd", backup_stamp(timestamp))
+}
+
+/// Date et heure d'une sauvegarde, à la seconde : `2026-10-22_14-05-09`.
+fn backup_stamp(timestamp: Timestamp) -> String {
     let time = UtcTime::new(timestamp);
     format!(
         "{:04}-{:02}-{:02}_{:02}-{:02}-{:02}",
@@ -113,14 +118,17 @@ mod tests {
     }
 
     #[test]
-    fn backup_stamps_are_precise_to_the_second() {
+    fn backup_file_names_are_precise_to_the_second() {
         let cases = [
-            (0, "1970-01-01_00-00-00"),
-            (1_761_229_809_999, "2025-10-23_14-30-09"),
-            (-1, "1969-12-31_23-59-59"),
+            (0, "pswd-sauvegarde_1970-01-01_00-00-00.pswd"),
+            (
+                1_761_229_809_999,
+                "pswd-sauvegarde_2025-10-23_14-30-09.pswd",
+            ),
+            (-1, "pswd-sauvegarde_1969-12-31_23-59-59.pswd"),
         ];
         for (millis, expected) in cases {
-            assert_eq!(backup_stamp(Timestamp::from_millis(millis)), expected);
+            assert_eq!(backup_file_name(Timestamp::from_millis(millis)), expected);
         }
     }
 

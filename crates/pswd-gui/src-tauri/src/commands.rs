@@ -3,8 +3,6 @@
 // Tauri impose de recevoir l'état (`State`) et les arguments par valeur.
 #![allow(clippy::needless_pass_by_value)]
 
-use std::path::Path;
-
 use pswd_core::Secret;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Runtime, State};
@@ -14,7 +12,7 @@ use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
 use crate::files;
 use crate::settings::Settings;
-use crate::state::{AppState, BackupDone, VaultInfo};
+use crate::state::{AppState, VaultInfo};
 
 /// Événement envoyé à l'interface quand le coffre se verrouille par inactivité.
 pub const VAULT_LOCKED: &str = "vault-locked";
@@ -187,28 +185,6 @@ pub fn import_entries<R: Runtime>(
     state.import_entries(&files::read(&app, &path)?)
 }
 
-#[tauri::command]
-pub fn backup_vaults(
-    state: State<'_, AppState>,
-    destination: String,
-) -> Result<BackupDone, UiError> {
-    state.backup(Path::new(&destination))
-}
-
-#[tauri::command]
-pub fn backup_contents(state: State<'_, AppState>, folder: String) -> Result<Vec<String>, UiError> {
-    state.backup_contents(Path::new(&folder))
-}
-
-#[tauri::command]
-pub fn restore_vault(
-    state: State<'_, AppState>,
-    folder: String,
-    name: String,
-) -> Result<String, UiError> {
-    state.restore(Path::new(&folder), &name)
-}
-
 /// Nom proposé dans la fenêtre d'enregistrement d'une sauvegarde `.pswd`.
 #[tauri::command]
 pub fn backup_file_name(state: State<'_, AppState>) -> String {
@@ -331,9 +307,6 @@ mod tests {
                     recover_vault,
                     delete_vault,
                     import_entries,
-                    backup_vaults,
-                    backup_contents,
-                    restore_vault,
                     backup_file_name,
                     backup_to_file,
                     backup_file_contents,
@@ -658,42 +631,24 @@ mod tests {
 
         let usb = app.dir.path().join("usb");
         fs::create_dir(&usb).unwrap();
-        let done = app
-            .call(
-                "backup_vaults",
-                json!({ "destination": usb.display().to_string() }),
-            )
-            .unwrap();
-        assert_eq!(done["count"], 1);
-        let folder = done["folder"].clone();
-        assert_eq!(
-            app.call("backup_contents", json!({ "folder": folder })),
-            Ok(json!(["perso"]))
-        );
-        assert_eq!(
-            app.call(
-                "restore_vault",
-                json!({ "folder": folder, "name": "perso" })
-            ),
-            Ok(json!("perso-sauvegarde-1970-01-01"))
-        );
-
         let name = app.call("backup_file_name", json!({})).unwrap();
         assert_eq!(name, "pswd-sauvegarde_1970-01-01_00-00-01.pswd");
         let file = usb.join(name.as_str().unwrap()).display().to_string();
         assert_eq!(
             app.call("backup_to_file", json!({ "path": file })),
-            Ok(json!(2))
+            Ok(json!(1))
         );
         assert_eq!(
             app.call("backup_file_contents", json!({ "path": file })),
-            Ok(json!(["perso", "perso-sauvegarde-1970-01-01"]))
+            Ok(json!(["perso"]))
+        );
+        let restore = json!({ "path": file, "name": "perso" });
+        assert_eq!(
+            app.call("restore_from_file", restore.clone()),
+            Ok(json!("perso-sauvegarde-1970-01-01"))
         );
         assert_eq!(
-            app.call(
-                "restore_from_file",
-                json!({ "path": file, "name": "perso" })
-            ),
+            app.call("restore_from_file", restore),
             Err(json!({ "code": "vaultExists", "detail": "perso-sauvegarde-1970-01-01" }))
         );
 

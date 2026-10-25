@@ -43,9 +43,9 @@ pub enum Command {
         /// Nom du coffre.
         name: String,
     },
-    /// Sauvegarde les coffres dans un nouveau dossier daté (clé USB, disque externe).
+    /// Sauvegarde les coffres dans un nouveau fichier .pswd (clé USB, disque externe).
     Backup {
-        /// Dossier de destination, par exemple la racine de la clé USB.
+        /// Dossier où écrire le fichier, par exemple la racine de la clé USB.
         destination: PathBuf,
         /// Seulement ce coffre (par défaut : tous).
         #[arg(long)]
@@ -53,7 +53,7 @@ pub enum Command {
     },
     /// Restaure un coffre d'une sauvegarde, comme nouveau coffre local.
     Restore {
-        /// Dossier daté de la sauvegarde.
+        /// Fichier .pswd de la sauvegarde.
         backup: PathBuf,
         /// Coffre à restaurer (par défaut : demandé).
         name: Option<String>,
@@ -116,9 +116,9 @@ mod tests {
             }
         );
         assert_eq!(
-            parse(&["restore", "E:/pswd-sauvegardes/2026-10-23_14-30-00"]).unwrap(),
+            parse(&["restore", "E:/pswd-sauvegarde_2026-10-23_14-30-00.pswd"]).unwrap(),
             Command::Restore {
-                backup: PathBuf::from("E:/pswd-sauvegardes/2026-10-23_14-30-00"),
+                backup: PathBuf::from("E:/pswd-sauvegarde_2026-10-23_14-30-00.pswd"),
                 name: None
             }
         );

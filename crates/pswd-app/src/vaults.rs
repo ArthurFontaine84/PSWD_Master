@@ -1,17 +1,14 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::LocalStore;
 use pswd_core::{
     BackupFile, Credentials, RecoveryKey, Secret, Session, SessionError, Timestamp, VaultFile,
 };
-use pswd_infra::{
-    Config, ConfigFile, FileStore, Locations, VaultConfig, backup_vault_file, backup_vault_names,
-    create_backup,
-};
+use pswd_infra::{Config, ConfigFile, FileStore, Locations, VaultConfig};
 
-use crate::utc::{backup_day, backup_stamp};
+use crate::utc::backup_day;
 use crate::{AppError, VaultSession};
 
 /// Les coffres de cet appareil, enregistrés dans la configuration.
@@ -118,35 +115,7 @@ impl Vaults {
         Ok(())
     }
 
-    /// Sauvegarde tous les coffres, ou seulement `only`, dans un nouveau dossier daté de
-    /// `destination`. Renvoie ce dossier et le nombre de coffres sauvegardés.
-    ///
-    /// # Errors
-    ///
-    /// S'il n'y a aucun coffre, si `only` est inconnu, ou si la copie échoue.
-    pub fn backup(
-        &self,
-        destination: &Path,
-        only: Option<&str>,
-        now: Timestamp,
-    ) -> Result<(PathBuf, usize), AppError> {
-        let config = self.config()?;
-        let vaults: Vec<(&str, &VaultConfig)> = match only {
-            Some(name) => vec![(name, config.vault(name)?)],
-            None => config
-                .vaults
-                .iter()
-                .map(|(name, vault)| (name.as_str(), vault))
-                .collect(),
-        };
-        if vaults.is_empty() {
-            return Err(AppError::NothingToBackUp);
-        }
-        let backup = create_backup(destination, &backup_stamp(now), &vaults)?;
-        Ok((backup, vaults.len()))
-    }
-
-    /// Restaure `file`, le coffre `name` d'une sauvegarde datée du `date`, comme nouveau coffre :
+    /// Restaure `file`, le coffre `name` d'une sauvegarde du `date`, comme nouveau coffre :
     /// sous son nom s'il est libre, sinon sous `<name>-sauvegarde-<date>`. Rien n'est jamais
     /// écrasé ni fusionné. Renvoie le nom retenu.
     ///
@@ -180,54 +149,32 @@ impl Vaults {
 }
 
 impl Vaults {
-    /// Coffres contenus dans un dossier de sauvegarde daté, triés par nom.
+    /// Sauvegarde tous les coffres, ou seulement `only`, dans un fichier `.pswd` (§7) ;
+    /// renvoie ses octets et le nombre de coffres.
     ///
     /// # Errors
     ///
-    /// [`AppError::EmptyBackup`] s'il n'en contient aucun, ou si ce n'est pas une sauvegarde.
-    pub fn backup_contents(&self, backup: &Path) -> Result<Vec<String>, AppError> {
-        let names = backup_vault_names(backup)?;
-        if names.is_empty() {
-            return Err(AppError::EmptyBackup);
-        }
-        Ok(names)
-    }
-
-    /// Restaure le coffre `name` d'un dossier de sauvegarde daté (§7) ; renvoie le nom retenu.
-    ///
-    /// # Errors
-    ///
-    /// [`AppError::NotInBackup`] si la sauvegarde ne contient pas ce coffre, sinon comme
-    /// [`Vaults::restore`].
-    pub fn restore_from_backup(&self, backup: &Path, name: &str) -> Result<String, AppError> {
-        if !self
-            .backup_contents(backup)?
-            .iter()
-            .any(|known| known == name)
-        {
-            return Err(AppError::NotInBackup(name.to_owned()));
-        }
-        let file = FileStore::new(backup_vault_file(backup, name))
-            .load()?
-            .ok_or(AppError::NotInBackup(name.to_owned()))?;
-        self.restore(name, &file, &backup_date(backup))
-    }
-}
-
-impl Vaults {
-    /// Sauvegarde tous les coffres dans un seul fichier `.pswd` (§7) ; renvoie ses octets et
-    /// le nombre de coffres.
-    ///
-    /// # Errors
-    ///
-    /// S'il n'y a aucun coffre, ou si le fichier d'un coffre est absent ou illisible.
-    pub fn backup_to_file(&self, now: Timestamp) -> Result<(Vec<u8>, usize), AppError> {
+    /// S'il n'y a aucun coffre, si `only` est inconnu, ou si le fichier d'un coffre est absent
+    /// ou illisible.
+    pub fn backup_to_file(
+        &self,
+        only: Option<&str>,
+        now: Timestamp,
+    ) -> Result<(Vec<u8>, usize), AppError> {
         let config = self.config()?;
-        if config.vaults.is_empty() {
+        let vaults: Vec<(&str, &VaultConfig)> = match only {
+            Some(name) => vec![(name, config.vault(name)?)],
+            None => config
+                .vaults
+                .iter()
+                .map(|(name, vault)| (name.as_str(), vault))
+                .collect(),
+        };
+        if vaults.is_empty() {
             return Err(AppError::NothingToBackUp);
         }
         let mut files = Vec::new();
-        for (name, vault) in &config.vaults {
+        for (name, vault) in vaults {
             let path = vault.vault_file();
             let file = FileStore::new(&path).load()?.ok_or_else(|| {
                 AppError::File(format!(
@@ -235,7 +182,7 @@ impl Vaults {
                     path.display()
                 ))
             })?;
-            files.push((name.as_str(), file));
+            files.push((name, file));
         }
         let mut backup = BackupFile::new(now);
         for (name, file) in &files {
@@ -273,15 +220,6 @@ impl Vaults {
     }
 }
 
-/// Date d'un dossier de sauvegarde `AAAA-MM-JJ_HH-MM-SS` : la partie avant `_`.
-fn backup_date(backup: &Path) -> String {
-    let folder = backup
-        .file_name()
-        .map(|name| name.to_string_lossy())
-        .unwrap_or_default();
-    folder.split('_').next().unwrap_or_default().to_owned()
-}
-
 /// Supprime le dossier du coffre si `create` échoue alors qu'il n'existait pas avant.
 fn removing_on_failure<R>(
     dir: &Path,
@@ -300,7 +238,9 @@ fn removing_on_failure<R>(
 mod tests {
     use pswd_core::ports::PortError;
     use pswd_core::{BackupFileError, EntryContent, EntryKind, FileError};
-    use pswd_infra::{ConfigError, backup_vault_file, backup_vault_names};
+    use std::path::PathBuf;
+
+    use pswd_infra::ConfigError;
     use tempfile::TempDir;
 
     use super::*;
@@ -497,69 +437,6 @@ mod tests {
         assert_eq!(names(&vaults), ["perso"]);
     }
 
-    /// Dossier qui tient lieu de clé USB.
-    fn usb_key(dir: &TempDir) -> PathBuf {
-        let usb = dir.path().join("usb");
-        fs::create_dir_all(&usb).unwrap();
-        usb
-    }
-
-    #[test]
-    fn backup_copies_every_vault_or_only_one() {
-        let dir = TempDir::new().unwrap();
-        let vaults = device(&dir, "a");
-        create(&vaults, "perso");
-        create(&vaults, "travail");
-        let usb = usb_key(&dir);
-        let (folder, count) = vaults.backup(&usb, None, at(1_000)).unwrap();
-        assert_eq!(
-            folder,
-            usb.join("pswd-sauvegardes").join("1970-01-01_00-00-01")
-        );
-        assert_eq!(count, 2);
-        assert_eq!(backup_vault_names(&folder).unwrap(), ["perso", "travail"]);
-        assert_eq!(
-            fs::read(backup_vault_file(&folder, "perso")).unwrap(),
-            fs::read(vault_file(&vaults, "perso")).unwrap()
-        );
-        let (folder, count) = vaults.backup(&usb, Some("travail"), at(2_000)).unwrap();
-        assert_eq!(count, 1);
-        assert_eq!(backup_vault_names(&folder).unwrap(), ["travail"]);
-    }
-
-    #[test]
-    fn backup_requires_a_known_vault() {
-        let dir = TempDir::new().unwrap();
-        let vaults = device(&dir, "a");
-        let usb = usb_key(&dir);
-        assert_eq!(
-            vaults.backup(&usb, None, at(0)).err(),
-            Some(AppError::NothingToBackUp)
-        );
-        assert_eq!(
-            vaults.backup(&usb, Some("perso"), at(0)).err(),
-            Some(AppError::Config(ConfigError::UnknownVault(
-                "perso".to_owned()
-            )))
-        );
-    }
-
-    #[test]
-    fn backup_to_a_missing_folder_is_refused() {
-        let dir = TempDir::new().unwrap();
-        let vaults = device(&dir, "a");
-        create(&vaults, "perso");
-        let error = vaults
-            .backup(&dir.path().join("débranchée"), None, at(0))
-            .unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .starts_with("dossier de destination introuvable"),
-            "{error}"
-        );
-    }
-
     /// Le fichier du coffre `perso` de l'appareil `a`, avec une entrée.
     fn saved_vault(dir: &TempDir) -> Vec<u8> {
         let vaults = device(dir, "a");
@@ -681,34 +558,12 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_folder_is_listed_then_restored() {
-        let dir = TempDir::new().unwrap();
-        let vaults = device(&dir, "a");
-        create(&vaults, "perso");
-        let (folder, _) = vaults.backup(&usb_key(&dir), None, at(0)).unwrap();
-        let other = device(&dir, "b");
-        assert_eq!(other.backup_contents(&folder), Ok(vec!["perso".to_owned()]));
-        assert_eq!(
-            other.restore_from_backup(&folder, "perso"),
-            Ok("perso".to_owned())
-        );
-        assert_eq!(
-            vaults.restore_from_backup(&folder, "perso"),
-            Ok("perso-sauvegarde-1970-01-01".to_owned())
-        );
-        assert_eq!(
-            other.restore_from_backup(&folder, "travail"),
-            Err(AppError::NotInBackup("travail".to_owned()))
-        );
-    }
-
-    #[test]
     fn a_backup_file_is_listed_then_restored() {
         let dir = TempDir::new().unwrap();
         let vaults = device(&dir, "a");
         create(&vaults, "travail");
         create(&vaults, "perso");
-        let (data, count) = vaults.backup_to_file(at(1_761_229_809_999)).unwrap();
+        let (data, count) = vaults.backup_to_file(None, at(1_761_229_809_999)).unwrap();
         assert_eq!(count, 2);
         let other = device(&dir, "b");
         assert_eq!(
@@ -732,11 +587,32 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_file_needs_vaults() {
+    fn a_backup_file_can_hold_a_single_vault() {
         let dir = TempDir::new().unwrap();
+        let vaults = device(&dir, "a");
+        create(&vaults, "perso");
+        create(&vaults, "travail");
+        let (data, count) = vaults.backup_to_file(Some("travail"), at(0)).unwrap();
+        assert_eq!(count, 1);
         assert_eq!(
-            device(&dir, "a").backup_to_file(at(0)),
+            vaults.backup_file_contents(&data),
+            Ok(vec!["travail".to_owned()])
+        );
+    }
+
+    #[test]
+    fn a_backup_file_needs_a_known_vault() {
+        let dir = TempDir::new().unwrap();
+        let vaults = device(&dir, "a");
+        assert_eq!(
+            vaults.backup_to_file(None, at(0)),
             Err(AppError::NothingToBackUp)
+        );
+        assert_eq!(
+            vaults.backup_to_file(Some("perso"), at(0)),
+            Err(AppError::Config(ConfigError::UnknownVault(
+                "perso".to_owned()
+            )))
         );
     }
 
@@ -748,7 +624,7 @@ mod tests {
         let file = vault_file(&vaults, "perso");
         fs::write(&file, "abîmé").unwrap();
         assert_eq!(
-            vaults.backup_to_file(at(0)),
+            vaults.backup_to_file(None, at(0)),
             Err(AppError::BackupFile(BackupFileError::InvalidVault(
                 "perso".to_owned(),
                 FileError::Malformed
@@ -756,7 +632,7 @@ mod tests {
         );
         fs::remove_file(&file).unwrap();
         assert_eq!(
-            vaults.backup_to_file(at(0)),
+            vaults.backup_to_file(None, at(0)),
             Err(AppError::File(format!(
                 "fichier du coffre perso introuvable : {}",
                 file.display()
@@ -777,28 +653,5 @@ mod tests {
         assert_eq!(vaults.backup_file_contents(b"PSWD").err(), foreign);
         assert_eq!(vaults.restore_from_file(b"PSWD", "perso").err(), foreign);
         assert_eq!(names(&vaults), Vec::<String>::new());
-    }
-
-    #[test]
-    fn an_empty_or_foreign_folder_is_not_a_backup() {
-        let dir = TempDir::new().unwrap();
-        let vaults = device(&dir, "a");
-        let folder = dir.path().join("vide");
-        fs::create_dir_all(folder.join("vaults")).unwrap();
-        assert_eq!(vaults.backup_contents(&folder), Err(AppError::EmptyBackup));
-        assert!(matches!(
-            vaults.backup_contents(dir.path()),
-            Err(AppError::Port(_))
-        ));
-    }
-
-    #[test]
-    fn backup_date_is_the_folder_prefix() {
-        assert_eq!(
-            backup_date(Path::new("E:/pswd-sauvegardes/2026-10-23_14-30-00")),
-            "2026-10-23"
-        );
-        assert_eq!(backup_date(Path::new("E:/copie")), "copie");
-        assert_eq!(backup_date(Path::new("/")), "");
     }
 }

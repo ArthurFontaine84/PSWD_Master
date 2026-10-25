@@ -126,16 +126,12 @@ export const fr = {
   deleteVaultExplanation: (name: string) =>
     `Le coffre « ${name} » et toutes ses entrées seront supprimés de cet appareil, sans retour possible. Une sauvegarde permet de le restaurer plus tard. Pour confirmer, retapez son nom.`,
   vaultDeleted: (name: string) => `Coffre « ${name} » supprimé.`,
-  backup: "Sauvegarder dans un dossier",
-  backupTitle: "Choisir le dossier de sauvegarde (clé USB, disque externe)",
-  backupToFile: "Sauvegarder dans un fichier",
+  backup: "Sauvegarder",
   backupFileTitle: "Enregistrer la sauvegarde de tous les coffres",
-  backedUp: (count: number, folder: string) =>
-    `${count <= 1 ? `${count} coffre sauvegardé` : `${count} coffres sauvegardés`} dans ${folder}.`,
+  backedUp: (count: number, path: string) =>
+    `${count <= 1 ? `${count} coffre sauvegardé` : `${count} coffres sauvegardés`} dans ${path}.`,
   restore: "Restaurer une sauvegarde",
-  restoreTitle: "Choisir un dossier de sauvegarde daté",
   restoreFileTitle: "Choisir un fichier de sauvegarde .pswd",
-  chooseBackupFolder: "Choisir un dossier",
   chooseBackupFile: "Choisir un fichier .pswd",
   restoreExplanation:
     "Le coffre est ajouté comme nouveau coffre : un coffre existant n'est jamais remplacé. Il s'ouvre avec le mot de passe maître en vigueur au moment de la sauvegarde.",
