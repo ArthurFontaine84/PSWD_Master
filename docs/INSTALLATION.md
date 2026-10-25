@@ -1,6 +1,6 @@
-# Installer pswd et créer son premier coffre
+# Installer PSWD Master et pswd, créer son premier coffre
 
-Ce guide part d'une machine sans Rust et aboutit à un coffre utilisable en local.
+Ce guide part d'une machine sans Rust et aboutit à un coffre utilisable en local, avec l'application graphique **PSWD Master** (§ 2), la ligne de commande **`pswd`** (§ 3 à 6), ou les deux : sur un ordinateur, elles voient les mêmes coffres.
 
 ## 1. Prérequis
 
@@ -16,7 +16,45 @@ Vérifier l'installation de Rust :
 cargo --version
 ```
 
-## 2. Compiler en release
+Pour l'application PSWD Master, il faut aussi [Node.js](https://nodejs.org) 22.12 ou plus récent, et sous Linux les bibliothèques de la vue web :
+
+```sh
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+## 2. Application PSWD Master
+
+### Construire l'installateur
+
+Depuis le dossier du projet :
+
+```sh
+cd crates/pswd-gui
+npm ci                   # dépendances de l'interface, une seule fois
+npm run tauri build      # quelques minutes la première fois
+```
+
+L'installateur est rangé dans `target/release/bundle/` (à la racine du projet) :
+
+| Système | Fichier | Installation |
+|---|---|---|
+| Windows | `nsis/PSWD Master_<version>_x64-setup.exe` | Double-clic. S'installe pour l'utilisateur courant, sans droits d'administrateur. La vue web (WebView2) est déjà présente sous Windows 10 et 11 ; sinon l'installateur la télécharge. |
+| Linux | `deb/PSWD Master_<version>_amd64.deb`, `appimage/PSWD Master_<version>_amd64.AppImage` | `sudo apt install ./<fichier>.deb`, ou rendre l'AppImage exécutable et la lancer. |
+| macOS | `dmg/PSWD Master_<version>_<arch>.dmg` | Ouvrir, puis glisser l'application dans « Applications ». |
+
+L'installateur n'est pas signé : Windows SmartScreen et macOS Gatekeeper peuvent afficher un avertissement à la première ouverture (« Informations complémentaires » → « Exécuter quand même » sous Windows ; clic droit → « Ouvrir » sous macOS).
+
+Pour mettre à jour : `git pull`, reconstruire, puis relancer le nouvel installateur ; les coffres ne sont pas touchés.
+
+### Premier coffre
+
+1. **Nouveau coffre** : un nom (lettres, chiffres, `-` et `_`) et un mot de passe maître d'au moins 12 caractères mélangeant au moins 3 types parmi minuscules, majuscules, chiffres et symboles.
+2. La **clé de récupération** s'affiche une seule fois : la recopier sur papier, cocher la case, puis **Continuer**. Elle permet de choisir un nouveau mot de passe en cas d'oubli (« Mot de passe oublié ? » à l'ouverture).
+3. Le coffre est ouvert : **Nouvelle entrée** pour ajouter un identifiant ou une note, la recherche et le filtre par tag pour retrouver une entrée, **Copier** pour copier son mot de passe (effacé du presse-papiers après 20 s).
+
+Le coffre se verrouille après 10 minutes sans action, ou avec **Verrouiller**. **Gérer le coffre** permet de changer le mot de passe maître, d'importer un fichier CSV (format : `docs/SPEC.md` § 8) ou de supprimer le coffre. Depuis la liste des coffres : **Sauvegarder** écrit tous les coffres dans un fichier `.pswd` (même format qu'au § 6), **Restaurer une sauvegarde** en rajoute un depuis ce fichier, **Réglages** choisit le thème.
+
+## 3. Installer la ligne de commande
 
 Depuis le dossier du projet :
 
@@ -38,7 +76,7 @@ pswd --version
 
 Pour mettre à jour après un `git pull`, relancer la même commande `cargo install`.
 
-## 3. Créer le coffre
+## 4. Créer le coffre
 
 ```sh
 pswd init perso
@@ -56,7 +94,7 @@ Recopier cette clé sur papier et la ranger en lieu sûr, à l'écart du mot de 
 
 > ⚠ Mot de passe maître **et** clé de récupération perdus = coffre perdu. Personne ne peut le déchiffrer.
 
-## 4. Utiliser le coffre
+## 5. Utiliser le coffre
 
 ```sh
 pswd open perso
@@ -89,7 +127,7 @@ pswd import perso fichier.csv    # importer (format : docs/SPEC.md § 8)
 pswd delete essai                # supprimer un coffre (nom à retaper)
 ```
 
-## 5. Sauvegarder sur une clé USB
+## 6. Sauvegarder sur une clé USB
 
 Brancher la clé (ici `E:`), puis :
 
@@ -108,23 +146,23 @@ pswd restore E:\pswd-sauvegarde_2026-10-23_14-30-00.pswd perso    # directement
 
 Le coffre est ajouté comme nouveau coffre. Si le nom est déjà pris, il devient `perso-sauvegarde-2026-10-23` : le coffre existant n'est jamais remplacé. Il s'ouvre avec le mot de passe maître en vigueur au moment de la sauvegarde.
 
-## 6. Où sont les fichiers
+## 7. Où sont les fichiers
 
 | Élément | Windows | Linux / macOS |
 |---|---|---|
 | Configuration | `%APPDATA%\pswd\config.toml` | `~/.config/pswd/config.toml` |
 | Coffres | `%APPDATA%\pswd\vaults\<nom>\` | `~/.local/share/pswd/vaults/<nom>/` |
 
-Chaque dossier de coffre contient `vault.enc`, le coffre chiffré. Dans `config.toml`, on peut régler `auto_lock_minutes` (0 = jamais) et `clipboard_clear_seconds`.
+Ces emplacements sont communs à `pswd` et à PSWD Master sur un ordinateur ; les deux peuvent modifier le même coffre en même temps. Chaque dossier de coffre contient `vault.enc`, le coffre chiffré. Dans `config.toml`, on peut régler `auto_lock_minutes` (0 = jamais) et `clipboard_clear_seconds`.
 
 **Venant d'une version précédente** : retirer les lignes `url = …` et `default_vault = …` de `config.toml` (sinon : `configuration invalide`). Les dossiers `repo.git` et les jetons `pswd` du trousseau ne servent plus et peuvent être supprimés.
 
-## 7. En cas de problème
+## 8. En cas de problème
 
 | Message | Cause et solution |
 |---|---|
 | `un coffre nommé … existe déjà` | Ce nom est pris sur cette machine : en choisir un autre. |
 | `mot de passe maître incorrect` | Réessayer, ou `pswd recover <nom>` avec la clé de récupération. |
-| ``configuration invalide : unknown field `url` `` (ou `default_vault`) | Configuration d'une version précédente : voir § 6. |
+| ``configuration invalide : unknown field `url` `` (ou `default_vault`) | Configuration d'une version précédente : voir § 7. |
 
-**Supprimer un coffre de cette machine** : `pswd delete <nom>`, puis retaper le nom pour confirmer. Faire d'abord une sauvegarde (§ 5) pour pouvoir le restaurer.
+**Supprimer un coffre de cette machine** : `pswd delete <nom>`, puis retaper le nom pour confirmer. Faire d'abord une sauvegarde (§ 6) pour pouvoir le restaurer.
