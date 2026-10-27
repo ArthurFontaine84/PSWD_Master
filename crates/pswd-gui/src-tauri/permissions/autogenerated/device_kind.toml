@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-device-kind"
+description = "Enables the device_kind command without any pre-configured scope."
+commands.allow = ["device_kind"]
+
+[[permission]]
+identifier = "deny-device-kind"
+description = "Denies the device_kind command without any pre-configured scope."
+commands.deny = ["device_kind"]

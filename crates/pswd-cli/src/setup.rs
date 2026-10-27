@@ -1,29 +1,18 @@
 //! Création (`init`) et suppression (`delete`) d'un coffre.
 
-use std::fs;
-use std::path::Path;
-
-use pswd_core::{Secret, Session};
-use pswd_infra::{ConfigFile, FileStore, VaultConfig};
+use pswd_app::check_master_password;
+use pswd_core::Secret;
 
 use crate::app::{App, CliError};
 use crate::terminal::Terminal;
 
 impl<T: Terminal, C> App<T, C> {
     pub(crate) fn init(&mut self, name: &str) -> Result<(), CliError> {
-        let mut config_file = ConfigFile::new(self.locations.config_file());
-        let mut config = config_file.load()?;
-        config.ensure_available(name)?;
+        self.vaults.check_new_name(name)?;
         let password = self.new_master_password()?;
-        let vault = VaultConfig {
-            path: self.locations.vault_dir(name),
-        };
-        let (_, recovery_key) = removing_on_failure(&vault.path, || {
-            let local = FileStore::new(vault.vault_file());
-            Ok(Session::create(local, &password, self.kdf, (self.clock)())?)
-        })?;
-        config.add_vault(name, vault)?;
-        config_file.save(&config)?;
+        let (_, recovery_key) = self
+            .vaults
+            .create(name, &password, self.kdf, (self.clock)())?;
 
         let recovery_key = recovery_key.encode();
         self.terminal.print(&format!("Coffre « {name} » créé."));
@@ -37,12 +26,9 @@ impl<T: Terminal, C> App<T, C> {
         Ok(())
     }
 
-    /// Le nom doit être retapé. Les fichiers sont supprimés avant la configuration : un échec
-    /// ne change rien.
+    /// Le nom doit être retapé.
     pub(crate) fn delete(&mut self, name: &str) -> Result<(), CliError> {
-        let mut config_file = ConfigFile::new(self.locations.config_file());
-        let mut config = config_file.load()?;
-        let vault = config.vault(name)?.clone();
+        self.vaults.config()?.vault(name)?;
         self.terminal.print(&format!(
             "⚠ Le coffre « {name} » et toutes ses entrées seront supprimés de cette machine, \
              sans retour possible. Une sauvegarde (pswd backup) permet de le restaurer plus tard."
@@ -54,12 +40,7 @@ impl<T: Terminal, C> App<T, C> {
             self.terminal.print("Suppression annulée.");
             return Ok(());
         }
-        FileStore::new(vault.vault_file()).remove()?;
-        // Le dossier n'est retiré que s'il est vide : un fichier inconnu n'est jamais effacé.
-        let _ = fs::remove_dir(&vault.path);
-        config.remove_vault(name)?;
-        config_file.save(&config)?;
-
+        self.vaults.delete(name)?;
         self.terminal.print(&format!("Coffre « {name} » supprimé."));
         Ok(())
     }
@@ -68,9 +49,7 @@ impl<T: Terminal, C> App<T, C> {
         let password = self
             .terminal
             .prompt_secret("Nouveau mot de passe maître : ")?;
-        if password.expose().is_empty() {
-            return Err(CliError::EmptyPassword);
-        }
+        check_master_password(&password)?;
         let confirmation = self.terminal.prompt_secret("Confirmation : ")?;
         if confirmation != password {
             return Err(CliError::PasswordMismatch);
@@ -79,23 +58,11 @@ impl<T: Terminal, C> App<T, C> {
     }
 }
 
-/// Supprime le dossier du coffre si `create` échoue alors qu'il n'existait pas avant : un
-/// essai raté ne laisse rien derrière lui.
-pub(crate) fn removing_on_failure<R>(
-    dir: &Path,
-    create: impl FnOnce() -> Result<R, CliError>,
-) -> Result<R, CliError> {
-    let existed = dir.exists();
-    let result = create();
-    if result.is_err() && !existed {
-        // Au mieux : l'erreur de création est plus utile que celle du nettoyage.
-        let _ = fs::remove_dir_all(dir);
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use pswd_app::AppError;
     use pswd_core::SessionError;
     use pswd_core::ports::PortError;
     use pswd_infra::ConfigError;
@@ -114,7 +81,7 @@ mod tests {
     #[test]
     fn init_creates_and_registers_the_vault() {
         let env = TestEnv::new();
-        let mut app = env.app("a", &["maître", "maître"]);
+        let mut app = env.app("a", &["Maître-2026!", "Maître-2026!"]);
         app.run(init("perso")).unwrap();
 
         let config = env.config("a");
@@ -123,7 +90,12 @@ mod tests {
             config.vault("perso").unwrap().path,
             env.vault_dir("a", "perso")
         );
-        assert!(env.local_vault("a", "maître").entries().next().is_none());
+        assert!(
+            env.local_vault("a", "Maître-2026!")
+                .entries()
+                .next()
+                .is_none()
+        );
 
         let output = app.terminal.output();
         assert!(output.starts_with("Coffre « perso » créé.\n"), "{output}");
@@ -141,25 +113,33 @@ mod tests {
         let mut app = env.app("a", &[]);
         assert_eq!(
             app.run(init("perso")),
-            Err(CliError::Config(ConfigError::VaultExists(
+            Err(CliError::App(AppError::Config(ConfigError::VaultExists(
                 "perso".to_owned()
-            )))
+            ))))
         );
         assert_eq!(
             app.run(init("../ailleurs")),
-            Err(CliError::Config(ConfigError::InvalidVaultName(
-                "../ailleurs".to_owned()
+            Err(CliError::App(AppError::Config(
+                ConfigError::InvalidVaultName("../ailleurs".to_owned())
             )))
         );
     }
 
     #[test]
-    fn master_password_must_be_confirmed_and_not_empty() {
+    fn master_password_must_be_strong_and_confirmed() {
         let env = TestEnv::new();
-        let mut app = env.app("a", &["maître", "maitre"]);
+        let mut app = env.app("a", &["Maître-2026!", "maitre"]);
         assert_eq!(app.run(init("perso")), Err(CliError::PasswordMismatch));
-        let mut app = env.app("a", &[""]);
-        assert_eq!(app.run(init("perso")), Err(CliError::EmptyPassword));
+        let mut app = env.app("a", &["maître"]);
+        assert_eq!(
+            app.run(init("perso")),
+            Err(CliError::App(AppError::PasswordTooShort))
+        );
+        let mut app = env.app("a", &["mot de passe maître"]);
+        assert_eq!(
+            app.run(init("perso")),
+            Err(CliError::App(AppError::PasswordTooSimple))
+        );
         assert!(env.config("a").vaults.is_empty());
         assert!(!env.vault_dir("a", "perso").exists());
     }
@@ -170,10 +150,12 @@ mod tests {
         let existing = env.vault_dir("a", "perso");
         fs::create_dir_all(&existing).unwrap();
         fs::write(existing.join("vault.enc"), b"ancien").unwrap();
-        let mut app = env.app("a", &["maître", "maître"]);
+        let mut app = env.app("a", &["Maître-2026!", "Maître-2026!"]);
         assert_eq!(
             app.run(init("perso")),
-            Err(CliError::Session(SessionError::LocalVaultExists))
+            Err(CliError::App(AppError::Session(
+                SessionError::LocalVaultExists
+            )))
         );
         assert_eq!(fs::read(existing.join("vault.enc")).unwrap(), b"ancien");
         assert!(env.config("a").vaults.is_empty());
@@ -185,12 +167,12 @@ mod tests {
         let data = env.dir.path().join("a").join("data");
         fs::create_dir_all(&data).unwrap();
         fs::write(data.join("vaults"), b"").unwrap();
-        let mut app = env.app("a", &["maître", "maître"]);
+        let mut app = env.app("a", &["Maître-2026!", "Maître-2026!"]);
         let error = app.run(init("perso")).unwrap_err();
         assert!(
             matches!(
                 error,
-                CliError::Session(SessionError::Local(PortError { .. }))
+                CliError::App(AppError::Session(SessionError::Local(PortError { .. })))
             ),
             "{error}"
         );
@@ -206,7 +188,7 @@ mod tests {
     /// Coffres `perso` et `travail` sur l'appareil `a`.
     fn env_with_two_vaults() -> TestEnv {
         let env = TestEnv::with_vault();
-        env.app("a", &["autre", "autre"])
+        env.app("a", &["Autre-mot-2026!", "Autre-mot-2026!"])
             .run(init("travail"))
             .unwrap();
         env
@@ -235,7 +217,7 @@ mod tests {
                 app.terminal.output().ends_with("Suppression annulée."),
                 "{answer:?}"
             );
-            env.local_vault("a", "maître");
+            env.local_vault("a", "Maître-2026!");
         }
     }
 
@@ -245,9 +227,9 @@ mod tests {
         let mut app = env.app("a", &[]);
         assert_eq!(
             app.run(delete("travail")),
-            Err(CliError::Config(ConfigError::UnknownVault(
+            Err(CliError::App(AppError::Config(ConfigError::UnknownVault(
                 "travail".to_owned()
-            )))
+            ))))
         );
     }
 
@@ -258,8 +240,10 @@ mod tests {
         let config = env.config("a");
         assert!(config.vaults.is_empty());
 
-        env.app("a", &["neuf", "neuf"]).run(init("perso")).unwrap();
-        env.local_vault("a", "neuf");
+        env.app("a", &["Neuf-mot-2026!", "Neuf-mot-2026!"])
+            .run(init("perso"))
+            .unwrap();
+        env.local_vault("a", "Neuf-mot-2026!");
     }
 
     #[test]

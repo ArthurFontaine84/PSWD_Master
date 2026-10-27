@@ -3,18 +3,13 @@
 use std::time::Duration;
 
 use clap::Parser;
+use pswd_app::{IdleLock, VaultSession, generate, search};
 use pswd_core::ports::SecureClipboard;
-use pswd_core::{Entry, EntryKind, PasswordOptions, Session, Vault, generate_password};
-use pswd_infra::FileStore;
-use rand::SeedableRng;
-use rand::rngs::{StdRng, SysRng};
+use pswd_core::{Entry, EntryKind, PasswordOptions, Vault};
 
 use crate::app::{App, CliError};
 use crate::commands::{Unlock, Unlocked};
-use crate::idle_lock::IdleLock;
 use crate::terminal::Terminal;
-
-pub(crate) type VaultSession = Session<FileStore>;
 
 /// Nombre de caractères d'identifiant affichés : assez pour désigner une entrée.
 const SHORT_ID_LEN: usize = 8;
@@ -196,7 +191,7 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
                     length,
                     symbols: !no_symbols,
                 };
-                let password = generate_password(options, &mut system_rng()?)?;
+                let password = generate(options)?;
                 self.terminal.print(password.expose());
             }
             ShellCommand::Add { generate } => self.add_entry(session, generate)?,
@@ -209,38 +204,15 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
         Ok(Flow::Continue)
     }
 
-    /// Entrées non supprimées qui contiennent `text` (sans tenir compte de la casse), triées
-    /// par titre.
     fn list(&mut self, vault: &Vault, text: &str, tag: Option<&str>) {
-        let text = text.to_lowercase();
-        let tag = tag.map(|tag| tag.trim().to_lowercase());
-        let mut entries: Vec<&Entry> = vault
-            .entries()
-            .filter(|entry| !entry.is_deleted())
-            .filter(|entry| matches_text(entry, &text))
-            .filter(|entry| {
-                tag.as_ref()
-                    .is_none_or(|tag| entry.content().tags.as_slice().contains(tag))
-            })
-            .collect();
+        let entries = search(vault, text, tag);
         if entries.is_empty() {
             self.terminal.print("Aucune entrée.");
-            return;
         }
-        entries.sort_by_key(|entry| entry.content().title.to_lowercase());
         for entry in entries {
             self.terminal.print(&summary(entry));
         }
     }
-}
-
-fn matches_text(entry: &Entry, text: &str) -> bool {
-    let content = entry.content();
-    std::iter::once(&content.title)
-        .chain(&content.username)
-        .chain(&content.urls)
-        .chain(content.tags.as_slice())
-        .any(|field| field.to_lowercase().contains(text))
 }
 
 /// Une entrée désignée par son titre (sans tenir compte de la casse), ou à défaut par le début
@@ -328,20 +300,9 @@ fn describe_entry(entry: &Entry, reveal: bool) -> String {
     lines.join("\n")
 }
 
-/// Générateur cryptographique initialisé par l'aléa du système.
-pub(crate) fn system_rng() -> Result<StdRng, CliError> {
-    StdRng::try_from_rng(&mut SysRng).map_err(random_unavailable)
-}
-
-/// L'aléa du système ne manque que sur une machine défaillante.
-// Exclue de la couverture : impossible à provoquer en test.
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn random_unavailable<E>(_: E) -> CliError {
-    CliError::RandomUnavailable
-}
-
 #[cfg(test)]
 mod tests {
+    use pswd_app::AppError;
     use pswd_core::{EntryContent, Secret, SessionError, Tags, Timestamp};
     use pswd_infra::ConfigError;
 
@@ -393,7 +354,7 @@ mod tests {
     /// Ouvre `perso` sur `a` avec le bon mot de passe, exécute `commands`, puis renvoie ce qui
     /// a été affiché après l'ouverture.
     fn session_output(env: &TestEnv, commands: &[&str]) -> String {
-        let mut answers = vec!["maître"];
+        let mut answers = vec!["Maître-2026!"];
         answers.extend_from_slice(commands);
         let mut app = env.app("a", &answers);
         app.run(open()).unwrap();
@@ -405,7 +366,7 @@ mod tests {
     #[test]
     fn open_unlocks_and_closes_at_end_of_input() {
         let env = env_with_entries();
-        let mut app = env.app("a", &["maître"]);
+        let mut app = env.app("a", &["Maître-2026!"]);
         app.run(open()).unwrap();
         assert_eq!(
             app.terminal.output(),
@@ -416,7 +377,7 @@ mod tests {
     #[test]
     fn input_failure_ends_the_shell_with_an_error() {
         let env = env_with_entries();
-        let mut app = env.app("a", &["maître", "list", BROKEN_INPUT, "list"]);
+        let mut app = env.app("a", &["Maître-2026!", "list", BROKEN_INPUT, "list"]);
         assert_eq!(
             app.run(open()),
             Err(CliError::Input("clavier débranché".to_owned()))
@@ -429,18 +390,18 @@ mod tests {
         let mut app = env.app("a", &["autre"]);
         assert_eq!(
             app.run(open()),
-            Err(CliError::Session(SessionError::File(
+            Err(CliError::App(AppError::Session(SessionError::File(
                 pswd_core::FileError::WrongPassword
-            )))
+            ))))
         );
         let mut app = env.app("a", &[]);
         assert_eq!(
             app.run(Command::Open {
                 name: "travail".to_owned()
             }),
-            Err(CliError::Config(ConfigError::UnknownVault(
+            Err(CliError::App(AppError::Config(ConfigError::UnknownVault(
                 "travail".to_owned()
-            )))
+            ))))
         );
     }
 
@@ -581,15 +542,15 @@ mod tests {
         let env = env_with_entries();
         let output = session_output(
             &env,
-            &["gen", "gen --length 40 --no-symbols", "gen --length 3"],
+            &["gen", "gen --length 20 --no-symbols", "gen --length 3"],
         );
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines[0].chars().count(), 24, "{output}");
-        assert_eq!(lines[1].len(), 40, "{output}");
+        assert_eq!(lines[1].len(), 20, "{output}");
         assert!(lines[1].chars().all(char::is_alphanumeric), "{output}");
         assert_eq!(
             lines[2],
-            "erreur : la longueur doit être comprise entre 8 et 128"
+            "erreur : la longueur doit être comprise entre 8 et 24"
         );
     }
 
@@ -618,7 +579,7 @@ mod tests {
     #[test]
     fn idle_vault_is_locked_while_waiting_for_input() {
         let env = env_with_entries();
-        let mut app = env.app("a", &["maître", "list", "<pause:300>", "list"]);
+        let mut app = env.app("a", &["Maître-2026!", "list", "<pause:300>", "list"]);
         app.auto_lock = Some(Duration::from_millis(50));
         app.run(open()).unwrap();
         let output = app.terminal.output();

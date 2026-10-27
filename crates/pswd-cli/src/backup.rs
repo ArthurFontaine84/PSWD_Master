@@ -1,17 +1,13 @@
-//! Sauvegarde sur disque externe (`backup`) et restauration comme nouveau coffre (`restore`).
+//! Sauvegarde dans un fichier `.pswd` sur disque externe (`backup`) et restauration comme
+//! nouveau coffre (`restore`).
 
 use std::path::Path;
 
-use pswd_core::ports::LocalStore;
-use pswd_core::{SessionError, VaultFile};
-use pswd_infra::{
-    ConfigFile, FileStore, VaultConfig, backup_vault_file, backup_vault_names, create_backup,
-};
+use pswd_app::backup_file_name;
+use pswd_infra::{read_backup, write_backup};
 
 use crate::app::{App, CliError};
-use crate::setup::removing_on_failure;
 use crate::terminal::Terminal;
-use crate::utc::backup_stamp;
 
 impl<T: Terminal, C> App<T, C> {
     /// Tous les coffres, ou seulement `name`.
@@ -20,23 +16,13 @@ impl<T: Terminal, C> App<T, C> {
         destination: &Path,
         name: Option<&str>,
     ) -> Result<(), CliError> {
-        let config = ConfigFile::new(self.locations.config_file()).load()?;
-        let vaults: Vec<(&str, &VaultConfig)> = match name {
-            Some(name) => vec![(name, config.vault(name)?)],
-            None => config
-                .vaults
-                .iter()
-                .map(|(name, vault)| (name.as_str(), vault))
-                .collect(),
-        };
-        if vaults.is_empty() {
-            return Err(CliError::NothingToBackUp);
-        }
-        let backup = create_backup(destination, &backup_stamp((self.clock)()), &vaults)?;
+        let now = (self.clock)();
+        let only = name.as_ref().map(std::slice::from_ref);
+        let (backup, count) = self.vaults.backup_to_file(only, now)?;
+        let path = write_backup(destination, &backup_file_name(now), &backup)?;
         self.terminal.print(&format!(
-            "{} coffre(s) sauvegardé(s) dans {}.",
-            vaults.len(),
-            backup.display()
+            "{count} coffre(s) sauvegardé(s) dans {}.",
+            path.display()
         ));
         Ok(())
     }
@@ -44,41 +30,13 @@ impl<T: Terminal, C> App<T, C> {
     /// Le coffre est restauré sous son nom s'il est libre, sinon sous un nom daté : rien n'est
     /// jamais écrasé ni fusionné.
     pub(crate) fn restore(&mut self, backup: &Path, name: Option<&str>) -> Result<(), CliError> {
-        let names = backup_vault_names(backup)?;
-        if names.is_empty() {
-            return Err(CliError::EmptyBackup);
-        }
+        let backup = read_backup(backup)?;
+        let names = self.vaults.backup_file_contents(&backup)?;
         let name = match name {
             Some(name) => name.to_owned(),
             None => self.choose_vault(&names)?,
         };
-        if !names.contains(&name) {
-            return Err(CliError::NotInBackup(name));
-        }
-        let source = FileStore::new(backup_vault_file(backup, &name));
-        let file = source.load()?.ok_or(CliError::NotInBackup(name.clone()))?;
-        VaultFile::check_format(&file).map_err(CliError::InvalidBackup)?;
-
-        let mut config_file = ConfigFile::new(self.locations.config_file());
-        let mut config = config_file.load()?;
-        let target = if config.ensure_available(&name).is_ok() {
-            name.clone()
-        } else {
-            format!("{name}-sauvegarde-{}", backup_date(backup))
-        };
-        config.ensure_available(&target)?;
-        let vault = VaultConfig {
-            path: self.locations.vault_dir(&target),
-        };
-        removing_on_failure(&vault.path, || {
-            let mut local = FileStore::new(vault.vault_file());
-            if local.load()?.is_some() {
-                return Err(CliError::Session(SessionError::LocalVaultExists));
-            }
-            Ok(local.save_atomic(&file)?)
-        })?;
-        config.add_vault(&target, vault)?;
-        config_file.save(&config)?;
+        let target = self.vaults.restore_from_file(&backup, &name)?;
 
         if target == name {
             self.terminal.print(&format!("Coffre « {name} » restauré."));
@@ -105,21 +63,15 @@ impl<T: Terminal, C> App<T, C> {
     }
 }
 
-/// Date d'un dossier de sauvegarde `AAAA-MM-JJ_HH-MM-SS` : la partie avant `_`.
-fn backup_date(backup: &Path) -> String {
-    let folder = backup
-        .file_name()
-        .map(|name| name.to_string_lossy())
-        .unwrap_or_default();
-    folder.split('_').next().unwrap_or_default().to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use pswd_core::{EntryContent, EntryKind, FileError, Timestamp};
+    use pswd_app::AppError;
+    use pswd_core::{
+        BackupFile, BackupFileError, EntryContent, EntryKind, SessionError, Timestamp,
+    };
     use pswd_infra::ConfigError;
 
     use crate::cli::Command;
@@ -127,8 +79,8 @@ mod tests {
 
     use super::*;
 
-    /// La sauvegarde que crée `backup` dans `usb` avec l'horloge des tests (1 s après 1970).
-    const STAMP: &str = "1970-01-01_00-00-01";
+    /// La sauvegarde que crée `backup` avec l'horloge des tests (1 s après 1970).
+    const FILE_NAME: &str = "pswd-sauvegarde_1970-01-01_00-00-01.pswd";
 
     fn usb_key(env: &TestEnv) -> PathBuf {
         let usb = env.dir.path().join("usb");
@@ -136,15 +88,24 @@ mod tests {
         usb
     }
 
+    fn backup_command(destination: &Path, vault: Option<&str>) -> Command {
+        Command::Backup {
+            destination: destination.to_owned(),
+            vault: vault.map(str::to_owned),
+        }
+    }
+
+    /// Sauvegarde les coffres de l'appareil `a` sur la clé ; renvoie le fichier écrit.
     fn backup(env: &TestEnv, vault: Option<&str>) -> PathBuf {
         let usb = usb_key(env);
-        let mut app = env.app("a", &[]);
-        app.run(Command::Backup {
-            destination: usb.clone(),
-            vault: vault.map(str::to_owned),
-        })
-        .unwrap();
-        usb.join("pswd-sauvegardes").join(STAMP)
+        env.app("a", &[]).run(backup_command(&usb, vault)).unwrap();
+        usb.join(FILE_NAME)
+    }
+
+    fn contents(file: &Path) -> Vec<String> {
+        let data = fs::read(file).unwrap();
+        let backup = BackupFile::parse(&data).unwrap();
+        backup.names().map(str::to_owned).collect()
     }
 
     fn restore(backup: &Path, name: Option<&str>) -> Command {
@@ -154,10 +115,10 @@ mod tests {
         }
     }
 
-    /// Coffres `perso` (mot de passe « maître ») et `travail` sur l'appareil `a`.
+    /// Coffres `perso` (mot de passe « Maître-2026! ») et `travail` sur l'appareil `a`.
     fn env_with_two_vaults() -> TestEnv {
         let env = TestEnv::with_vault();
-        let mut app = env.app("a", &["autre", "autre"]);
+        let mut app = env.app("a", &["Autre-mot-2026!", "Autre-mot-2026!"]);
         app.run(Command::Init {
             name: "travail".to_owned(),
         })
@@ -166,54 +127,47 @@ mod tests {
     }
 
     #[test]
-    fn backup_copies_every_vault() {
+    fn backup_writes_every_vault_into_a_new_file() {
         let env = env_with_two_vaults();
         let usb = usb_key(&env);
         let mut app = env.app("a", &[]);
-        app.run(Command::Backup {
-            destination: usb.clone(),
-            vault: None,
-        })
-        .unwrap();
-        let folder = usb.join("pswd-sauvegardes").join(STAMP);
+        app.run(backup_command(&usb, None)).unwrap();
+        let file = usb.join(FILE_NAME);
         assert_eq!(
             app.terminal.output(),
-            format!("2 coffre(s) sauvegardé(s) dans {}.", folder.display())
+            format!("2 coffre(s) sauvegardé(s) dans {}.", file.display())
         );
-        assert_eq!(backup_vault_names(&folder).unwrap(), ["perso", "travail"]);
+        assert_eq!(contents(&file), ["perso", "travail"]);
+        let data = fs::read(&file).unwrap();
         let local = env.config("a").vault("perso").unwrap().vault_file();
         assert_eq!(
-            fs::read(backup_vault_file(&folder, "perso")).unwrap(),
-            fs::read(local).unwrap()
+            BackupFile::parse(&data).unwrap().vault("perso"),
+            Some(fs::read(local).unwrap().as_slice())
         );
     }
 
     #[test]
     fn backup_can_be_limited_to_one_vault() {
         let env = env_with_two_vaults();
-        let folder = backup(&env, Some("travail"));
-        assert_eq!(backup_vault_names(&folder).unwrap(), ["travail"]);
+        assert_eq!(contents(&backup(&env, Some("travail"))), ["travail"]);
     }
 
     #[test]
     fn backup_requires_a_vault() {
         let env = TestEnv::new();
         let mut app = env.app("a", &[]);
-        let command = Command::Backup {
-            destination: usb_key(&env),
-            vault: None,
-        };
-        assert_eq!(app.run(command), Err(CliError::NothingToBackUp));
-        let command = Command::Backup {
-            destination: usb_key(&env),
-            vault: Some("perso".to_owned()),
-        };
+        let usb = usb_key(&env);
         assert_eq!(
-            app.run(command),
-            Err(CliError::Config(ConfigError::UnknownVault(
-                "perso".to_owned()
-            )))
+            app.run(backup_command(&usb, None)),
+            Err(CliError::App(AppError::NothingToBackUp))
         );
+        assert_eq!(
+            app.run(backup_command(&usb, Some("perso"))),
+            Err(CliError::App(AppError::Config(ConfigError::UnknownVault(
+                "perso".to_owned()
+            ))))
+        );
+        assert!(!usb.join(FILE_NAME).exists());
     }
 
     #[test]
@@ -221,10 +175,7 @@ mod tests {
         let env = TestEnv::with_vault();
         let mut app = env.app("a", &[]);
         let error = app
-            .run(Command::Backup {
-                destination: env.dir.path().join("débranchée"),
-                vault: None,
-            })
+            .run(backup_command(&env.dir.path().join("débranchée"), None))
             .unwrap_err();
         assert!(
             error
@@ -232,6 +183,19 @@ mod tests {
                 .starts_with("dossier de destination introuvable"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn backup_never_replaces_an_existing_file() {
+        let env = TestEnv::with_vault();
+        let file = backup(&env, None);
+        let before = fs::read(&file).unwrap();
+        let error = env
+            .app("a", &[])
+            .run(backup_command(file.parent().unwrap(), None))
+            .unwrap_err();
+        assert!(error.to_string().contains("existe déjà"), "{error}");
+        assert_eq!(fs::read(&file).unwrap(), before);
     }
 
     #[test]
@@ -243,22 +207,22 @@ mod tests {
                 Timestamp::from_millis(1),
             );
         });
-        let folder = backup(&env, None);
+        let file = backup(&env, None);
         let mut app = env.app("b", &[]);
-        app.run(restore(&folder, Some("perso"))).unwrap();
+        app.run(restore(&file, Some("perso"))).unwrap();
         assert!(
             app.terminal
                 .output()
                 .starts_with("Coffre « perso » restauré.\n"),
         );
-        let vault = env.local_vault("b", "maître");
+        let vault = env.local_vault("b", "Maître-2026!");
         assert_eq!(vault.entries().count(), 1);
     }
 
     #[test]
     fn restore_never_replaces_an_existing_vault() {
         let env = TestEnv::with_vault();
-        let folder = backup(&env, None);
+        let file = backup(&env, None);
         env.edit_vault("a", |vault| {
             vault.add(
                 EntryContent::new(EntryKind::Note, "après".to_owned()),
@@ -266,7 +230,7 @@ mod tests {
             );
         });
         let mut app = env.app("a", &[]);
-        app.run(restore(&folder, Some("perso"))).unwrap();
+        app.run(restore(&file, Some("perso"))).unwrap();
         assert!(
             app.terminal.output().starts_with(
                 "Coffre « perso » restauré sous le nom « perso-sauvegarde-1970-01-01 » : \
@@ -275,26 +239,29 @@ mod tests {
             "{}",
             app.terminal.output()
         );
-        assert_eq!(env.local_vault("a", "maître").entries().count(), 1);
+        assert_eq!(env.local_vault("a", "Maître-2026!").entries().count(), 1);
         let config = env.config("a");
         let restored = config.vault("perso-sauvegarde-1970-01-01").unwrap();
-        let file = fs::read(restored.vault_file()).unwrap();
-        assert_eq!(fs::read(backup_vault_file(&folder, "perso")).unwrap(), file);
+        let data = fs::read(&file).unwrap();
+        assert_eq!(
+            BackupFile::parse(&data).unwrap().vault("perso"),
+            Some(fs::read(restored.vault_file()).unwrap().as_slice())
+        );
 
         assert_eq!(
-            app.run(restore(&folder, Some("perso"))),
-            Err(CliError::Config(ConfigError::VaultExists(
+            app.run(restore(&file, Some("perso"))),
+            Err(CliError::App(AppError::Config(ConfigError::VaultExists(
                 "perso-sauvegarde-1970-01-01".to_owned()
-            )))
+            ))))
         );
     }
 
     #[test]
     fn restore_asks_which_vault_when_none_is_given() {
         let env = env_with_two_vaults();
-        let folder = backup(&env, None);
+        let file = backup(&env, None);
         let mut app = env.app("b", &[" travail "]);
-        app.run(restore(&folder, None)).unwrap();
+        app.run(restore(&file, None)).unwrap();
         let output = app.terminal.output();
         assert!(
             output.starts_with(
@@ -306,49 +273,47 @@ mod tests {
     }
 
     #[test]
-    fn unknown_or_missing_vaults_are_reported() {
+    fn unknown_vaults_and_unusable_files_are_reported() {
         let env = TestEnv::with_vault();
-        let folder = backup(&env, None);
+        let file = backup(&env, None);
         let mut app = env.app("b", &[]);
         assert_eq!(
-            app.run(restore(&folder, Some("travail"))),
-            Err(CliError::NotInBackup("travail".to_owned()))
+            app.run(restore(&file, Some("travail"))),
+            Err(CliError::App(AppError::NotInBackup("travail".to_owned())))
         );
-        fs::remove_dir_all(folder.join("vaults").join("perso")).unwrap();
-        assert_eq!(app.run(restore(&folder, None)), Err(CliError::EmptyBackup));
-        let error = app.run(restore(env.dir.path(), None)).unwrap_err();
-        assert!(
-            error.to_string().contains("n'est pas une sauvegarde pswd"),
-            "{error}"
-        );
-        assert!(env.config("b").vaults.is_empty());
-    }
-
-    #[test]
-    fn invalid_file_is_not_restored() {
-        let env = TestEnv::with_vault();
-        let folder = backup(&env, None);
-        fs::write(backup_vault_file(&folder, "perso"), b"pas un coffre").unwrap();
-        let mut app = env.app("b", &[]);
+        let other = env.dir.path().join("autre.pswd");
+        fs::write(&other, BackupFile::new(Timestamp::from_millis(0)).encode()).unwrap();
         assert_eq!(
-            app.run(restore(&folder, Some("perso"))),
-            Err(CliError::InvalidBackup(FileError::Malformed))
+            app.run(restore(&other, None)),
+            Err(CliError::App(AppError::EmptyBackup))
         );
+        fs::write(&other, b"pas une sauvegarde").unwrap();
+        assert_eq!(
+            app.run(restore(&other, None)),
+            Err(CliError::App(AppError::BackupFile(
+                BackupFileError::Malformed
+            )))
+        );
+        let error = app
+            .run(restore(&env.dir.path().join("absente.pswd"), None))
+            .unwrap_err();
+        assert!(error.to_string().contains("lecture de"), "{error}");
         assert!(env.config("b").vaults.is_empty());
-        assert!(!env.vault_dir("b", "perso").exists());
     }
 
     #[test]
     fn unregistered_vault_file_is_never_replaced() {
         let env = TestEnv::with_vault();
-        let folder = backup(&env, None);
+        let file = backup(&env, None);
         let existing = env.vault_dir("b", "perso");
         fs::create_dir_all(&existing).unwrap();
         fs::write(existing.join("vault.enc"), b"ancien").unwrap();
         let mut app = env.app("b", &[]);
         assert_eq!(
-            app.run(restore(&folder, Some("perso"))),
-            Err(CliError::Session(SessionError::LocalVaultExists))
+            app.run(restore(&file, Some("perso"))),
+            Err(CliError::App(AppError::Session(
+                SessionError::LocalVaultExists
+            )))
         );
         assert_eq!(fs::read(existing.join("vault.enc")).unwrap(), b"ancien");
         assert!(env.config("b").vaults.is_empty());
@@ -357,26 +322,16 @@ mod tests {
     #[test]
     fn local_write_failure_leaves_nothing_behind() {
         let env = TestEnv::with_vault();
-        let folder = backup(&env, None);
+        let file = backup(&env, None);
         let vaults = env.vault_dir("b", "perso");
         let vaults = vaults.parent().unwrap();
         fs::create_dir_all(vaults.parent().unwrap()).unwrap();
         fs::write(vaults, b"").unwrap();
         let mut app = env.app("b", &[]);
         assert!(matches!(
-            app.run(restore(&folder, Some("perso"))),
-            Err(CliError::Port(_))
+            app.run(restore(&file, Some("perso"))),
+            Err(CliError::App(AppError::Port(_)))
         ));
         assert!(env.config("b").vaults.is_empty());
-    }
-
-    #[test]
-    fn backup_date_is_the_folder_prefix() {
-        assert_eq!(
-            backup_date(Path::new("E:/pswd-sauvegardes/2026-10-23_14-30-00")),
-            "2026-10-23"
-        );
-        assert_eq!(backup_date(Path::new("E:/copie")), "copie");
-        assert_eq!(backup_date(Path::new("/")), "");
     }
 }

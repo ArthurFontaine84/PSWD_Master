@@ -1,8 +1,22 @@
-//! Dates affichées et noms de dossiers datés, en UTC : aucun fuseau horaire à connaître.
+//! Dates affichées et noms des sauvegardes, en UTC : aucun fuseau horaire à connaître.
+
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use pswd_core::Timestamp;
 
+/// Heure courante : `pswd-core` ne lit jamais l'horloge lui-même.
+#[must_use]
+pub fn now() -> Timestamp {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+        });
+    Timestamp::from_millis(millis)
+}
+
 /// Date et heure UTC, à la minute : `2026-10-22 14:05 UTC`.
+#[must_use]
 pub fn format_timestamp(timestamp: Timestamp) -> String {
     let time = UtcTime::new(timestamp);
     format!(
@@ -11,13 +25,26 @@ pub fn format_timestamp(timestamp: Timestamp) -> String {
     )
 }
 
-/// Nom du dossier d'une sauvegarde, à la seconde : `2026-10-22_14-05-09`.
-pub fn backup_stamp(timestamp: Timestamp) -> String {
+/// Nom proposé pour un fichier de sauvegarde : `pswd-sauvegarde_2026-10-22_14-05-09.pswd`.
+#[must_use]
+pub fn backup_file_name(timestamp: Timestamp) -> String {
+    format!("pswd-sauvegarde_{}.pswd", backup_stamp(timestamp))
+}
+
+/// Date et heure d'une sauvegarde, à la seconde : `2026-10-22_14-05-09`.
+fn backup_stamp(timestamp: Timestamp) -> String {
     let time = UtcTime::new(timestamp);
     format!(
         "{:04}-{:02}-{:02}_{:02}-{:02}-{:02}",
         time.year, time.month, time.day, time.hour, time.minute, time.second
     )
+}
+
+/// Jour d'une sauvegarde : `2026-10-22`.
+#[must_use]
+pub fn backup_day(timestamp: Timestamp) -> String {
+    let time = UtcTime::new(timestamp);
+    format!("{:04}-{:02}-{:02}", time.year, time.month, time.day)
 }
 
 struct UtcTime {
@@ -70,6 +97,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn now_gives_the_current_time() {
+        // 1ᵉʳ janvier 2026 en millisecondes.
+        assert!(now() > Timestamp::from_millis(1_767_225_600_000));
+    }
+
+    #[test]
     fn timestamps_are_formatted_in_utc() {
         let cases = [
             (0, "1970-01-01 00:00 UTC"),
@@ -85,14 +118,26 @@ mod tests {
     }
 
     #[test]
-    fn backup_stamps_are_precise_to_the_second() {
+    fn backup_file_names_are_precise_to_the_second() {
         let cases = [
-            (0, "1970-01-01_00-00-00"),
-            (1_761_229_809_999, "2025-10-23_14-30-09"),
-            (-1, "1969-12-31_23-59-59"),
+            (0, "pswd-sauvegarde_1970-01-01_00-00-00.pswd"),
+            (
+                1_761_229_809_999,
+                "pswd-sauvegarde_2025-10-23_14-30-09.pswd",
+            ),
+            (-1, "pswd-sauvegarde_1969-12-31_23-59-59.pswd"),
         ];
         for (millis, expected) in cases {
-            assert_eq!(backup_stamp(Timestamp::from_millis(millis)), expected);
+            assert_eq!(backup_file_name(Timestamp::from_millis(millis)), expected);
         }
+    }
+
+    #[test]
+    fn backup_day_is_the_date_alone() {
+        assert_eq!(
+            backup_day(Timestamp::from_millis(1_761_229_809_999)),
+            "2025-10-23"
+        );
+        assert_eq!(backup_day(Timestamp::from_millis(-1)), "1969-12-31");
     }
 }

@@ -5,17 +5,12 @@ use std::time::Duration;
 
 use etcetera::BaseStrategy;
 use pswd_core::ports::{LocalStore, PortError};
+use pswd_core::{MAX_VAULT_NAME_LEN, is_valid_vault_name};
 use serde::{Deserialize, Serialize};
 
 use crate::FileStore;
 
 const APP_DIR: &str = "pswd";
-const MAX_VAULT_NAME_LEN: usize = 64;
-/// Noms de fichiers interdits par Windows, quelle que soit la casse.
-const RESERVED_NAMES: [&str; 22] = [
-    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
-    "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
@@ -104,11 +99,24 @@ impl VaultConfig {
     }
 }
 
+/// Thème de l'interface graphique ; `Auto` suit le réglage du système.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    Auto,
+    Light,
+    Dark,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub auto_lock_minutes: u32,
     pub clipboard_clear_seconds: u32,
+    /// Mobile : verrouillage après ce délai en arrière-plan ; 0 = immédiat.
+    pub background_lock_seconds: u32,
+    pub theme: Theme,
     pub vaults: BTreeMap<String, VaultConfig>,
 }
 
@@ -117,6 +125,8 @@ impl Default for Config {
         Self {
             auto_lock_minutes: 10,
             clipboard_clear_seconds: 20,
+            background_lock_seconds: 60,
+            theme: Theme::Auto,
             vaults: BTreeMap::new(),
         }
     }
@@ -179,17 +189,11 @@ impl Config {
     pub fn clipboard_clear(&self) -> Duration {
         Duration::from_secs(u64::from(self.clipboard_clear_seconds))
     }
-}
 
-/// Le nom sert de nom de dossier : ni séparateur, ni `..`, ni
-/// nom réservé par Windows.
-fn is_valid_vault_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= MAX_VAULT_NAME_LEN
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        && !RESERVED_NAMES.contains(&name.to_ascii_lowercase().as_str())
+    #[must_use]
+    pub fn background_lock(&self) -> Duration {
+        Duration::from_secs(u64::from(self.background_lock_seconds))
+    }
 }
 
 /// Fichier `config.toml`, écrit de façon atomique.
@@ -291,6 +295,31 @@ mod tests {
         assert_eq!(config, Config::default());
         assert_eq!(config.auto_lock(), Duration::from_secs(600));
         assert_eq!(config.clipboard_clear(), Duration::from_secs(20));
+        assert_eq!(config.background_lock(), Duration::from_secs(60));
+        assert_eq!(config.theme, Theme::Auto);
+    }
+
+    #[test]
+    fn interface_settings_are_read_and_checked() {
+        let dir = TempDir::new().unwrap();
+        let file = config_file_in(&dir);
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "background_lock_seconds = 0
+theme = \"dark\"
+",
+        )
+        .unwrap();
+        let config = file.load().unwrap();
+        assert_eq!(config.background_lock_seconds, 0);
+        assert_eq!(config.theme, Theme::Dark);
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "theme = \"sombre\"
+",
+        )
+        .unwrap();
+        assert!(matches!(file.load(), Err(ConfigError::Invalid(_))));
     }
 
     #[test]

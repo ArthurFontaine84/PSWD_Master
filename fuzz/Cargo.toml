@@ -26,6 +26,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "backup_file"
+path = "fuzz_targets/backup_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "csv"
 path = "fuzz_targets/csv.rs"
 test = false

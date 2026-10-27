@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-hidden"
+description = "Enables the app_hidden command without any pre-configured scope."
+commands.allow = ["app_hidden"]
+
+[[permission]]
+identifier = "deny-app-hidden"
+description = "Denies the app_hidden command without any pre-configured scope."
+commands.deny = ["app_hidden"]

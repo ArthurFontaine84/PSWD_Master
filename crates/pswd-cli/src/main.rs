@@ -6,24 +6,20 @@ mod backup;
 mod cli;
 mod commands;
 mod editing;
-mod idle_lock;
 mod setup;
 mod shell;
 mod terminal;
 #[cfg(test)]
 mod testing;
-mod utc;
 
 use std::process::ExitCode;
-use std::time::Duration;
 
 use clap::Parser;
-use pswd_core::Secret;
+use pswd_app::Vaults;
 use pswd_core::crypto::KdfParams;
-use pswd_core::ports::{PortError, SecureClipboard};
-use pswd_infra::{Locations, SystemClipboard, TimedClipboard};
+use pswd_infra::{LazyClipboard, Locations};
 
-use crate::app::{App, CliError, system_clock};
+use crate::app::{App, CliError};
 use crate::cli::Cli;
 use crate::terminal::StdTerminal;
 
@@ -46,29 +42,11 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<(), CliError> {
     let mut app = App {
         terminal: StdTerminal,
-        clipboard: LazyClipboard(None),
-        locations: Locations::system()?,
+        clipboard: LazyClipboard::default(),
+        vaults: Vaults::new(Locations::system()?),
         kdf: KdfParams::DEFAULT,
-        clock: system_clock,
+        clock: pswd_app::now,
         auto_lock: None,
     };
     app.run(cli.command)
-}
-
-/// Presse-papiers ouvert à la première copie : une machine sans presse-papiers (serveur) peut
-/// utiliser toutes les autres commandes.
-struct LazyClipboard(Option<TimedClipboard<SystemClipboard>>);
-
-// Exclu de la couverture : même raison que `main`.
-#[cfg_attr(coverage_nightly, coverage(off))]
-impl SecureClipboard for LazyClipboard {
-    fn copy_secret(&mut self, value: &Secret, ttl: Duration) -> Result<(), PortError> {
-        if self.0.is_none() {
-            self.0 = Some(TimedClipboard::new(SystemClipboard::new()?));
-        }
-        match &mut self.0 {
-            Some(clipboard) => clipboard.copy_secret(value, ttl),
-            None => Ok(()),
-        }
-    }
 }

@@ -1,10 +1,14 @@
 use std::fmt;
 
-use csv::{ByteRecord, ReaderBuilder, Terminator, WriterBuilder};
+use csv::{ByteRecord, ReaderBuilder};
+#[cfg(any(test, fuzzing))]
+use csv::{Terminator, WriterBuilder};
+#[cfg(any(test, fuzzing))]
 use zeroize::Zeroizing;
 
+#[cfg(any(test, fuzzing))]
 use crate::buffer::write_exact;
-use crate::{Entry, EntryContent, EntryKind, Secret, Tags, Vault};
+use crate::{EntryContent, EntryKind, Secret, Tags};
 
 const HEADER: [&str; 7] = [
     "title", "kind", "username", "password", "urls", "notes", "tags",
@@ -34,7 +38,7 @@ impl fmt::Display for CsvError {
         match self {
             Self::InvalidHeader => write!(f, "en-tête CSV attendu : {}", HEADER.join(",")),
             Self::InvalidLine { line, problem } => write!(f, "ligne {line} : {problem}"),
-            Self::Internal => f.write_str("erreur interne d'écriture CSV"),
+            Self::Internal => f.write_str("erreur interne de lecture CSV"),
         }
     }
 }
@@ -51,35 +55,22 @@ impl fmt::Display for LineProblem {
 
 impl std::error::Error for CsvError {}
 
-/// Erreur d'E/S de la crate `csv` qui ne peut pas survenir : lecture et écriture se font en
-/// mémoire.
+/// Erreur d'E/S de la crate `csv` qui ne peut pas survenir : la lecture se fait en mémoire.
 // Exclue de la couverture : aucun test ne peut l'atteindre.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn internal_error<E>(_: E) -> CsvError {
     CsvError::Internal
 }
 
-/// Entrées non supprimées, en clair, triées par contenu.
-///
-/// # Errors
-///
-/// [`CsvError::Internal`] seulement en théorie : l'écriture se fait en mémoire.
-pub fn export_csv(vault: &Vault) -> Result<Zeroizing<Vec<u8>>, CsvError> {
-    let mut contents: Vec<&EntryContent> = vault
-        .entries()
-        .filter(|entry| !entry.is_deleted())
-        .map(Entry::content)
-        .collect();
-    contents.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
-    write_contents(&contents)
-}
-
-fn write_contents(contents: &[&EntryContent]) -> Result<Zeroizing<Vec<u8>>, CsvError> {
+/// Écrit des entrées au format d'import : l'application n'exporte jamais en clair, cette écriture
+/// ne sert qu'à vérifier que l'import relit fidèlement chaque champ (tests, fuzzing).
+#[cfg(any(test, fuzzing))]
+fn write_contents(contents: &[&EntryContent]) -> Result<Zeroizing<Vec<u8>>, csv::Error> {
     write_exact(|out| {
         let mut writer = WriterBuilder::new()
             .terminator(Terminator::CRLF)
             .from_writer(out);
-        writer.write_record(HEADER).map_err(internal_error)?;
+        writer.write_record(HEADER)?;
         for content in contents {
             let kind = match content.kind {
                 EntryKind::Login => "login",
@@ -90,19 +81,17 @@ fn write_contents(contents: &[&EntryContent]) -> Result<Zeroizing<Vec<u8>>, CsvE
             let urls = encode_list(&content.urls);
             let notes = content.notes.as_deref().unwrap_or_default();
             let tags = encode_list(content.tags.as_slice());
-            writer
-                .write_record([
-                    content.title.as_str(),
-                    kind,
-                    username,
-                    password,
-                    &urls,
-                    notes,
-                    &tags,
-                ])
-                .map_err(internal_error)?;
+            writer.write_record([
+                content.title.as_str(),
+                kind,
+                username,
+                password,
+                &urls,
+                notes,
+                &tags,
+            ])?;
         }
-        writer.flush().map_err(internal_error)
+        Ok(writer.flush()?)
     })
 }
 
@@ -197,6 +186,7 @@ fn non_empty(field: &str) -> Option<String> {
 }
 
 /// Éléments séparés par `;` ; `\;` et `\\` désignent un `;` et un `\` littéraux.
+#[cfg(any(test, fuzzing))]
 fn encode_list(items: &[String]) -> String {
     let mut out = String::new();
     for (index, item) in items.iter().enumerate() {
@@ -261,7 +251,6 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::Timestamp;
 
     const SPEC_EXAMPLE: &str = "title,kind,username,password,urls,notes,tags\r\n\
         GitHub,login,arthur,xxxx,https://github.com,,dev;perso\r\n\
@@ -299,18 +288,12 @@ mod tests {
     }
 
     #[test]
-    fn export_writes_live_entries_sorted_by_content() {
-        let mut vault = Vault::new();
-        vault.add(wifi(), Timestamp::from_millis(1));
-        vault.add(github(), Timestamp::from_millis(1));
-        let deleted = vault.add(github(), Timestamp::from_millis(1));
-        vault.delete(deleted, Timestamp::from_millis(2)).unwrap();
-        let csv = export_csv(&vault).unwrap();
+    fn test_writer_follows_the_import_format() {
+        let csv = write_contents(&[&github(), &wifi()]).unwrap();
         let expected = "title,kind,username,password,urls,notes,tags\r\n\
             GitHub,login,arthur,xxxx,https://github.com,,dev;perso\r\n\
             Code Wi-Fi,note,,,,Box: ABCD-1234,maison\r\n";
         assert_eq!(std::str::from_utf8(&csv).unwrap(), expected);
-        assert_eq!(csv.capacity(), csv.len());
     }
 
     #[test]
@@ -472,7 +455,7 @@ mod tests {
                 },
                 "ligne 4 : texte qui n'est pas en UTF-8",
             ),
-            (CsvError::Internal, "erreur interne d'écriture CSV"),
+            (CsvError::Internal, "erreur interne de lecture CSV"),
         ];
         for (error, message) in messages {
             assert_eq!(error.to_string(), message);

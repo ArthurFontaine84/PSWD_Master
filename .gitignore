@@ -1,3 +1,7 @@
 /target
 /mutants.out*
 *.profraw
+node_modules/
+/crates/pswd-gui/dist/
+/crates/pswd-gui/coverage/
+/crates/pswd-gui/src-tauri/gen/schemas/
