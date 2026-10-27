@@ -143,7 +143,7 @@ describe("OpenVault", () => {
   it("shows the detail of an entry and goes back to the list", async () => {
     show();
     await open("GitHub");
-    expect(screen.getByText("Identifiant", { selector: ".kind" })).toBeInTheDocument();
+    expect(screen.getByText("Mot de passe", { selector: ".kind" })).toBeInTheDocument();
     expect(screen.getByText("arthur", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("••••••••")).toBeInTheDocument();
     expect(screen.getByText("https://github.com")).toBeInTheDocument();
@@ -158,7 +158,7 @@ describe("OpenVault", () => {
   it("shows a note without the fields it does not have", async () => {
     show();
     await open("Wi-Fi");
-    expect(screen.getByText("Note", { selector: ".kind" })).toBeInTheDocument();
+    expect(screen.getByText("Note sécurisée", { selector: ".kind" })).toBeInTheDocument();
     expect(screen.queryByText("••••••••")).not.toBeInTheDocument();
     expect(screen.getByText(/1 version précédente/)).toBeInTheDocument();
   });

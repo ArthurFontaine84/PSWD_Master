@@ -31,7 +31,8 @@
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   color-scheme: light dark;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Police embarquée, conçue pour la lisibilité : l, I et 1, O et 0 ne se confondent pas. */
+  font-family: "Atkinson Hyperlegible Next Variable", system-ui, sans-serif;
   font-size: 16px;
   line-height: 1.5;
   -webkit-text-size-adjust: 100%;
@@ -353,6 +354,19 @@ small {
   border-left: 3px solid var(--accent);
   border-radius: var(--radius);
   background: var(--accent-soft);
+}
+
+/* Très grand écran : tout grandit avec la taille de base, pour occuper la place disponible. */
+@media (min-width: 100rem) and (min-height: 56rem) {
+  :root {
+    font-size: 18px;
+  }
+}
+
+@media (min-width: 140rem) and (min-height: 75rem) {
+  :root {
+    font-size: 20px;
+  }
 }
 
 /* Réglage d'accessibilité du système : pas d'animation. */

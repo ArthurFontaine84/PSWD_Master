@@ -1,10 +1,10 @@
 /** Écran large : la liste des entrées et leur détail côte à côte (même seuil que le CSS). */
 export const WIDE_QUERY = "(min-width: 48rem)";
 
-/** Hauteur occupée hors de la liste : en-tête du coffre, recherche, compteur, pagination (px). */
-const RESERVED_HEIGHT = 340;
-/** Hauteur d'une entrée avec identifiant et tags (px). */
-const ENTRY_HEIGHT = 92;
+/** Hauteur occupée hors de la liste : en-tête du coffre, recherche, compteur, pagination (rem). */
+const RESERVED_HEIGHT = 21.25;
+/** Hauteur d'une entrée avec identifiant et tags (rem). */
+const ENTRY_HEIGHT = 5.75;
 const MIN_PAGE_SIZE = 3;
 
 /** Suit la largeur de l'écran ; renvoie la fonction qui arrête le suivi. */
@@ -26,7 +26,13 @@ export function watchWide(
   };
 }
 
-/** Nombre d'entrées par page pour qu'une page tienne dans la fenêtre sans défiler. */
+/** Taille d'un `rem` en pixels (la taille calculée est toujours en px) : elle grandit sur les très
+ * grands écrans (styles.css). */
+export function remSize(root: HTMLElement = document.documentElement): number {
+  return Number.parseFloat(getComputedStyle(root).fontSize);
+}
+
+/** Nombre d'entrées par page pour qu'une page tienne dans la fenêtre (hauteur en rem) sans défiler. */
 export function pageSizeFor(windowHeight: number): number {
   return Math.max(MIN_PAGE_SIZE, Math.floor((windowHeight - RESERVED_HEIGHT) / ENTRY_HEIGHT));
 }

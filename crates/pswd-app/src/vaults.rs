@@ -149,21 +149,24 @@ impl Vaults {
 }
 
 impl Vaults {
-    /// Sauvegarde tous les coffres, ou seulement `only`, dans un fichier `.pswd` (§7) ;
+    /// Sauvegarde tous les coffres, ou seulement ceux de `only`, dans un fichier `.pswd` (§7) ;
     /// renvoie ses octets et le nombre de coffres.
     ///
     /// # Errors
     ///
-    /// S'il n'y a aucun coffre, si `only` est inconnu, ou si le fichier d'un coffre est absent
-    /// ou illisible.
+    /// S'il n'y a aucun coffre à sauvegarder, si un nom de `only` est inconnu, ou si le fichier
+    /// d'un coffre est absent ou illisible.
     pub fn backup_to_file(
         &self,
-        only: Option<&str>,
+        only: Option<&[&str]>,
         now: Timestamp,
     ) -> Result<(Vec<u8>, usize), AppError> {
         let config = self.config()?;
         let vaults: Vec<(&str, &VaultConfig)> = match only {
-            Some(name) => vec![(name, config.vault(name)?)],
+            Some(names) => names
+                .iter()
+                .map(|&name| Ok((name, config.vault(name)?)))
+                .collect::<Result<_, AppError>>()?,
             None => config
                 .vaults
                 .iter()
@@ -595,31 +598,39 @@ mod tests {
     }
 
     #[test]
-    fn a_backup_file_can_hold_a_single_vault() {
+    fn a_backup_file_can_hold_some_vaults_only() {
         let dir = TempDir::new().unwrap();
         let vaults = device(&dir, "a");
         create(&vaults, "perso");
         create(&vaults, "travail");
-        let (data, count) = vaults.backup_to_file(Some("travail"), at(0)).unwrap();
-        assert_eq!(count, 1);
+        create(&vaults, "famille");
+        let (data, count) = vaults
+            .backup_to_file(Some(&["travail", "famille"]), at(0))
+            .unwrap();
+        assert_eq!(count, 2);
         assert_eq!(
             vaults.backup_file_contents(&data),
-            Ok(vec!["travail".to_owned()])
+            Ok(vec!["famille".to_owned(), "travail".to_owned()])
         );
     }
 
     #[test]
-    fn a_backup_file_needs_a_known_vault() {
+    fn a_backup_file_needs_known_vaults() {
         let dir = TempDir::new().unwrap();
         let vaults = device(&dir, "a");
         assert_eq!(
             vaults.backup_to_file(None, at(0)),
             Err(AppError::NothingToBackUp)
         );
+        create(&vaults, "perso");
         assert_eq!(
-            vaults.backup_to_file(Some("perso"), at(0)),
+            vaults.backup_to_file(Some(&[]), at(0)),
+            Err(AppError::NothingToBackUp)
+        );
+        assert_eq!(
+            vaults.backup_to_file(Some(&["perso", "travail"]), at(0)),
             Err(AppError::Config(ConfigError::UnknownVault(
-                "perso".to_owned()
+                "travail".to_owned()
             )))
         );
     }

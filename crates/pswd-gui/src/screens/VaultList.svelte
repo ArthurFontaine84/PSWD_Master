@@ -1,72 +1,38 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
-  import { fly, slide } from "svelte/transition";
+  import { fly } from "svelte/transition";
   import Icon from "../components/Icon.svelte";
-  import { backupFileName, backupToFile, listVaults } from "../lib/api";
+  import { listVaults } from "../lib/api";
   import { errorMessage } from "../lib/errors";
-  import { pickBackupDestination } from "../lib/files";
   import { texts } from "../lib/i18n";
   import { motion } from "../lib/motion";
 
   interface Props {
     notice?: string;
     onOpen: (name: string) => void;
+    onBackup: () => void;
     onRestore: () => void;
   }
 
-  const { notice, onOpen, onRestore }: Props = $props();
+  const { notice, onOpen, onBackup, onRestore }: Props = $props();
   const vaults = listVaults();
   /** Sans coffre lisible, rien à sauvegarder : l'erreur s'affiche sous la liste. */
   const canBackUp = vaults.then(
     (names) => names.length > 0,
     () => false,
   );
-
-  /** Durée d'affichage du message de sauvegarde réussie (ms). */
-  const RESULT_DURATION = 5_000;
-
-  let backupResult = $state<string | null>(null);
-  let backupProblem = $state<string | null>(null);
-  let resultTimer: ReturnType<typeof setTimeout> | undefined;
-
-  async function backup() {
-    backupResult = null;
-    backupProblem = null;
-    try {
-      const path = await pickBackupDestination(texts.backupFileTitle, await backupFileName());
-      if (path === null) {
-        return;
-      }
-      backupResult = texts.backedUp(await backupToFile(path));
-      clearTimeout(resultTimer);
-      resultTimer = setTimeout(() => (backupResult = null), RESULT_DURATION);
-    } catch (error) {
-      backupProblem = errorMessage(error);
-    }
-  }
-
-  onDestroy(() => {
-    clearTimeout(resultTimer);
-  });
 </script>
 
 <section aria-labelledby="vaults-title">
   <div class="toolbar">
     {#await canBackUp then shown}
       {#if shown}
-        <button type="button" onclick={backup}><Icon name="download" />{texts.backup}</button>
+        <button type="button" onclick={onBackup}><Icon name="download" />{texts.backup}</button>
       {/if}
     {/await}
     <button type="button" onclick={onRestore}><Icon name="restore" />{texts.restore}</button>
   </div>
   {#if notice}
     <p role="status" class="notice">{notice}</p>
-  {/if}
-  {#if backupResult}
-    <p role="status" class="notice" transition:slide={{ duration: motion(250) }}>{backupResult}</p>
-  {/if}
-  {#if backupProblem}
-    <p role="alert">{backupProblem}</p>
   {/if}
   <h2 id="vaults-title">{texts.vaults}</h2>
   {#await vaults}
@@ -80,7 +46,7 @@
           <li in:fly={{ y: 12, duration: motion(300), delay: motion(Math.min(index, 8) * 40) }}>
             <button type="button" class="vault" onclick={() => onOpen(name)}>
               <span class="badge"><Icon name="lock" /></span>
-              <span class="name">{name}</span>
+              <span class="name" title={name}>{name}</span>
               <Icon name="chevron" />
             </button>
           </li>
@@ -115,6 +81,11 @@
     gap: var(--space-s);
   }
 
+  /* Sans cela, un nom long élargirait sa colonne au lieu d'être coupé. */
+  li {
+    min-width: 0;
+  }
+
   .vault {
     width: 100%;
     justify-content: flex-start;
@@ -135,6 +106,7 @@
   }
 
   .badge {
+    flex: none;
     display: inline-flex;
     padding: 0.5rem;
     border-radius: var(--radius);
@@ -144,15 +116,31 @@
 
   .name {
     flex: 1;
+    min-width: 0;
     text-align: left;
     color: var(--text);
-    overflow-wrap: anywhere;
+    /* Une seule ligne, coupée par « … » : toutes les cartes gardent la même taille. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Écran large : les coffres sur plusieurs colonnes. */
   @media (min-width: 48rem) {
     ul {
       grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+    }
+  }
+
+  /* Très grand écran : des cartes plus hautes et plus espacées. */
+  @media (min-width: 100rem) and (min-height: 56rem) {
+    ul {
+      gap: var(--space-m);
+    }
+
+    .vault {
+      padding: var(--space-l) var(--space-m);
+      font-size: 1.125rem;
     }
   }
 </style>

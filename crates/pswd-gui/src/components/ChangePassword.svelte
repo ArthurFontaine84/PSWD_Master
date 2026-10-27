@@ -4,6 +4,7 @@
   import { texts } from "../lib/i18n";
   import { showToast } from "../lib/toast.svelte";
   import { newPasswordProblem } from "../lib/validation";
+  import PasswordInput from "./PasswordInput.svelte";
 
   interface Props {
     onClose: () => void;
@@ -48,19 +49,9 @@
 
 <h3>{texts.changePassword}</h3>
 <form onsubmit={submit} novalidate>
-  <label>
-    {texts.currentPassword}
-    <input type="password" bind:value={current} autocomplete="current-password" />
-  </label>
-  <label>
-    {texts.newPassword}
-    <input type="password" bind:value={password} autocomplete="new-password" />
-    <small>{texts.passwordRule}</small>
-  </label>
-  <label>
-    {texts.confirmation}
-    <input type="password" bind:value={confirmation} autocomplete="new-password" />
-  </label>
+  <PasswordInput bind:value={current} label={texts.currentPassword} autocomplete="current-password" />
+  <PasswordInput bind:value={password} label={texts.newPassword} hint={texts.passwordRule} autocomplete="new-password" />
+  <PasswordInput bind:value={confirmation} label={texts.confirmation} autocomplete="new-password" />
   {#if problem}
     <p role="alert">{problem}</p>
   {/if}

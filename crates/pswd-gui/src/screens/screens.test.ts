@@ -34,9 +34,10 @@ describe("VaultList", () => {
   it("opens a vault", async () => {
     vi.mocked(listVaults).mockResolvedValue(["perso", "travail"]);
     const onOpen = vi.fn();
-    render(VaultList, { onOpen, onRestore: vi.fn() });
+    render(VaultList, { onOpen, onBackup: vi.fn(), onRestore: vi.fn() });
     expect(screen.getByText("Chargement…")).toBeInTheDocument();
-    await fireEvent.click(await screen.findByRole("button", { name: "travail" }));
+    expect(await screen.findByText("travail")).toHaveAttribute("title", "travail");
+    await fireEvent.click(screen.getByRole("button", { name: "travail" }));
     expect(onOpen).toHaveBeenCalledWith("travail");
   });
 
@@ -45,6 +46,7 @@ describe("VaultList", () => {
     render(VaultList, {
       notice: "Coffre verrouillé.",
       onOpen: vi.fn(),
+      onBackup: vi.fn(),
       onRestore: vi.fn(),
     });
     expect(screen.getByRole("status")).toHaveTextContent("Coffre verrouillé.");
@@ -53,7 +55,7 @@ describe("VaultList", () => {
 
   it("shows a translated error", async () => {
     vi.mocked(listVaults).mockRejectedValue({ code: "configInvalid", detail: "ligne 2" });
-    render(VaultList, { onOpen: vi.fn(), onRestore: vi.fn() });
+    render(VaultList, { onOpen: vi.fn(), onBackup: vi.fn(), onRestore: vi.fn() });
     expect(await screen.findByRole("alert")).toHaveTextContent("Configuration invalide : ligne 2");
     expect(screen.queryByRole("button", { name: "Sauvegarder" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Restaurer" })).toBeInTheDocument();
@@ -154,6 +156,20 @@ describe("Unlock", () => {
     });
     expect(unlockVault).toHaveBeenCalledWith("perso", "Maître-2026!");
     expect(field("Mot de passe maître").value).toBe("");
+  });
+
+  it("shows the typed password only on request", async () => {
+    render(Unlock, { name: "perso", onUnlocked: vi.fn(), onCancel: vi.fn() });
+    const password = field("Mot de passe maître");
+    const reveal = screen.getByRole("button", { name: "Afficher le mot de passe" });
+    expect(password).toHaveAttribute("type", "password");
+    expect(reveal).toHaveAttribute("aria-pressed", "false");
+    await fireEvent.click(reveal);
+    expect(password).toHaveAttribute("type", "text");
+    expect(reveal).toHaveAttribute("aria-pressed", "true");
+    await fireEvent.click(reveal);
+    expect(password).toHaveAttribute("type", "password");
+    expect(unlockVault).not.toHaveBeenCalled();
   });
 
   it("explains a wrong password and can be cancelled", async () => {

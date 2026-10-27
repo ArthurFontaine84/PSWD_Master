@@ -74,7 +74,7 @@ describe("api", () => {
     await deleteVault("perso", "perso");
     await importEntries("C:/import.csv");
     await backupFileName();
-    await backupToFile("E:/s.pswd");
+    await backupToFile("E:/s.pswd", ["perso"]);
     await backupFileContents("E:/s.pswd");
     await restoreFromFile("E:/s.pswd", "perso");
     await getSettings();
@@ -108,7 +108,7 @@ describe("api", () => {
       ["delete_vault", { name: "perso", confirmation: "perso" }],
       ["import_entries", { path: "C:/import.csv" }],
       ["backup_file_name"],
-      ["backup_to_file", { path: "E:/s.pswd" }],
+      ["backup_to_file", { path: "E:/s.pswd", names: ["perso"] }],
       ["backup_file_contents", { path: "E:/s.pswd" }],
       ["restore_from_file", { path: "E:/s.pswd", name: "perso" }],
       ["get_settings"],

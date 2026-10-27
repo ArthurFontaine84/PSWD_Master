@@ -191,14 +191,15 @@ pub fn backup_file_name(state: State<'_, AppState>) -> String {
     state.backup_file_name()
 }
 
-/// Tous les coffres dans le fichier `.pswd` choisi, écrit par Rust ; renvoie leur nombre.
+/// Les coffres choisis dans le fichier `.pswd` choisi, écrit par Rust ; renvoie leur nombre.
 #[tauri::command]
 pub fn backup_to_file<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, AppState>,
     path: String,
+    names: Vec<String>,
 ) -> Result<usize, UiError> {
-    let (data, count) = state.backup_file()?;
+    let (data, count) = state.backup_file(&names)?;
     files::write(&app, &path, &data)?;
     Ok(count)
 }
@@ -635,7 +636,10 @@ mod tests {
         assert_eq!(name, "pswd-sauvegarde_1970-01-01_00-00-01.pswd");
         let file = usb.join(name.as_str().unwrap()).display().to_string();
         assert_eq!(
-            app.call("backup_to_file", json!({ "path": file })),
+            app.call(
+                "backup_to_file",
+                json!({ "path": file, "names": ["perso"] })
+            ),
             Ok(json!(1))
         );
         assert_eq!(

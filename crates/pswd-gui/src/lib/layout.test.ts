@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { pageCount, pageOf, pageSizeFor, watchWide, WIDE_QUERY } from "./layout";
+import { pageCount, pageOf, pageSizeFor, remSize, watchWide, WIDE_QUERY } from "./layout";
 
 function mediaQuery(matches: boolean) {
   let listener: ((event: MediaQueryListEvent) => void) | undefined;
@@ -38,9 +38,17 @@ describe("watchWide", () => {
 
 describe("pagination", () => {
   it("fits a page in the window height", () => {
-    expect(pageSizeFor(1080)).toBe(8);
-    expect(pageSizeFor(800)).toBe(5);
-    expect(pageSizeFor(400)).toBe(3);
+    expect(pageSizeFor(1080 / 16)).toBe(8);
+    expect(pageSizeFor(800 / 16)).toBe(5);
+    expect(pageSizeFor(400 / 16)).toBe(3);
+  });
+
+  it("measures a rem in pixels", () => {
+    expect(remSize()).toBe(16);
+    const root = document.body.appendChild(document.createElement("div"));
+    root.style.fontSize = "20px";
+    expect(remSize(root)).toBe(20);
+    root.remove();
   });
 
   it("counts the pages, with at least one", () => {

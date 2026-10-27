@@ -8,6 +8,8 @@ import {
   appHidden,
   appShown,
   backupFileContents,
+  backupFileName,
+  backupToFile,
   createVault,
   deviceKind,
   currentVault,
@@ -23,7 +25,7 @@ import {
   unlockVault,
   type Settings,
 } from "./lib/api";
-import { pickBackupFile } from "./lib/files";
+import { pickBackupDestination, pickBackupFile } from "./lib/files";
 
 vi.mock("./lib/api", () => ({
   listVaults: vi.fn(),
@@ -39,6 +41,8 @@ vi.mock("./lib/api", () => ({
   listTags: vi.fn(),
   getSettings: vi.fn(),
   saveSettings: vi.fn(),
+  backupFileName: vi.fn(),
+  backupToFile: vi.fn(),
   backupFileContents: vi.fn(),
   restoreFromFile: vi.fn(),
   deleteVault: vi.fn(),
@@ -328,6 +332,26 @@ describe("App", () => {
       "E:/pswd-sauvegarde_2026-10-23_14-30-00.pswd",
       "perso",
     );
+  });
+
+  it("backs up the chosen vaults and says so in the list", async () => {
+    vi.mocked(backupFileName).mockResolvedValue("s.pswd");
+    vi.mocked(pickBackupDestination).mockResolvedValue("E:/s.pswd");
+    vi.mocked(backupToFile).mockResolvedValue(1);
+    render(App);
+    await fireEvent.click(await screen.findByRole("button", { name: "Sauvegarder" }));
+    await fireEvent.click(await screen.findByRole("checkbox", { name: "perso" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Sauvegarder le coffre sélectionné" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("1 coffre sauvegardé.");
+    expect(backupToFile).toHaveBeenCalledWith("E:/s.pswd", ["perso"]);
+    expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
+  });
+
+  it("leaves the backup screen when cancelled", async () => {
+    render(App);
+    await fireEvent.click(await screen.findByRole("button", { name: "Sauvegarder" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Annuler" }));
+    expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
   });
 
   it("leaves the restore screen when cancelled", async () => {

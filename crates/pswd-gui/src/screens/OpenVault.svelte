@@ -25,7 +25,7 @@
   import { errorMessage, isVaultLocked } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { verbatim } from "../lib/keyboard";
-  import { pageCount, pageOf, pageSizeFor, watchWide } from "../lib/layout";
+  import { pageCount, pageOf, pageSizeFor, remSize, watchWide } from "../lib/layout";
   import { motion } from "../lib/motion";
   import { showToast } from "../lib/toast.svelte";
 
@@ -58,7 +58,7 @@
   let wide = $state(false);
   let windowHeight = $state(0);
   let page = $state(0);
-  const pageSize = $derived(pageSizeFor(windowHeight));
+  const pageSize = $derived(pageSizeFor(windowHeight / remSize()));
   const pages = $derived(wide ? pageCount(entries.length, pageSize) : 1);
   /** Page ramenée dans les bornes quand la liste raccourcit. */
   const shownPage = $derived(Math.min(page, pages - 1));
@@ -328,7 +328,7 @@
 
   h2 {
     margin: 0;
-    font-size: 1.75rem;
+    font-size: 1.375rem;
     text-align: center;
     overflow-wrap: anywhere;
   }
@@ -422,6 +422,10 @@
 
   /* Écran large : la liste à gauche, le détail à droite. */
   @media (min-width: 48rem) {
+    h2 {
+      font-size: 1.75rem;
+    }
+
     .layout {
       display: grid;
       grid-template-columns: minmax(16rem, 1fr) 2fr;

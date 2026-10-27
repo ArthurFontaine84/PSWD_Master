@@ -18,6 +18,7 @@
   import { showToast } from "./lib/toast.svelte";
   import Toast from "./components/Toast.svelte";
   import Icon from "./components/Icon.svelte";
+  import Backup from "./screens/Backup.svelte";
   import CreateVault from "./screens/CreateVault.svelte";
   import OpenVault from "./screens/OpenVault.svelte";
   import RecoveryKey from "./screens/RecoveryKey.svelte";
@@ -32,6 +33,7 @@
     | { kind: "recovery"; vault: VaultInfo; recoveryKey: string }
     | { kind: "unlock"; name: string }
     | { kind: "open"; vault: VaultInfo }
+    | { kind: "backup" }
     | { kind: "restore" }
     | { kind: "settings" };
 
@@ -117,7 +119,7 @@
 <svelte:window onkeydown={onActivity} onpointerdown={onActivity} />
 <svelte:document onvisibilitychange={onVisibilityChange} />
 
-<main>
+<main class:roomy={screen.kind !== "open"}>
   <!-- Un coffre ouvert garde tout l'écran pour ses entrées. -->
   {#if screen.kind !== "open"}
     <header class="app-bar">
@@ -152,6 +154,7 @@
         <VaultList
           notice={screen.notice}
           onOpen={(name) => (screen = { kind: "unlock", name })}
+          onBackup={() => (screen = { kind: "backup" })}
           onRestore={() => (screen = { kind: "restore" })}
         />
       {:else if screen.kind === "create"}
@@ -166,6 +169,14 @@
         <Unlock
           name={screen.name}
           onUnlocked={(vault) => (screen = { kind: "open", vault })}
+          onCancel={() => (screen = { kind: "list" })}
+        />
+      {:else if screen.kind === "backup"}
+        <Backup
+          onBackedUp={(message) => {
+            showToast(message);
+            screen = { kind: "list" };
+          }}
           onCancel={() => (screen = { kind: "list" })}
         />
       {:else if screen.kind === "restore"}
@@ -197,10 +208,11 @@
 
 <style>
   /* Les marges laissent libres l'encoche et les barres du système (affichage bord à bord). */
+  /* Sur mobile, la barre d'état n'est pas toujours déclarée par `env()` : un minimum la laisse libre. */
   main {
     max-width: 64rem;
     margin: 0 auto;
-    padding: max(var(--space-m), env(safe-area-inset-top)) max(var(--space-m), env(safe-area-inset-right))
+    padding: max(3rem, calc(env(safe-area-inset-top) + var(--space-l))) max(var(--space-m), env(safe-area-inset-right))
       max(var(--space-m), env(safe-area-inset-bottom)) max(var(--space-m), env(safe-area-inset-left));
   }
 
@@ -217,7 +229,7 @@
     align-items: center;
     gap: 0.625rem;
     margin: 0;
-    font-size: 1.5rem;
+    font-size: 1.25rem;
     letter-spacing: -0.01em;
   }
 
@@ -238,6 +250,22 @@
   @media (min-width: 48rem) {
     main {
       padding-top: max(var(--space-l), env(safe-area-inset-top));
+    }
+
+    h1 {
+      font-size: 1.5rem;
+    }
+  }
+
+  /* Très grand écran : le contenu s'élargit et descend vers le centre. Un coffre ouvert garde toute
+     la hauteur pour ses entrées. */
+  @media (min-width: 100rem) and (min-height: 56rem) {
+    main {
+      max-width: 80rem;
+    }
+
+    main.roomy {
+      padding-top: 12vh;
     }
   }
 </style>

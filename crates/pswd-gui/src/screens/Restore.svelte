@@ -4,6 +4,7 @@
   import { displayedFileName } from "../lib/fileName";
   import { pickBackupFile } from "../lib/files";
   import { texts } from "../lib/i18n";
+  import VaultChoice from "../components/VaultChoice.svelte";
 
   interface Props {
     /** Restauration réussie : la confirmation à afficher. */
@@ -22,7 +23,6 @@
   let busy = $state(false);
 
   const sourceName = $derived(source === null ? null : displayedFileName(source));
-  const allSelected = $derived(names.length > 0 && selection.length === names.length);
 
   async function choose() {
     problem = null;
@@ -37,10 +37,6 @@
     } catch (error) {
       problem = errorMessage(error);
     }
-  }
-
-  function toggleAll() {
-    selection = allSelected ? [] : [...names];
   }
 
   /** Restaure les coffres cochés un par un ; sur une erreur, ceux déjà restaurés quittent la liste. */
@@ -72,18 +68,7 @@
     {#if sourceName}
       <p class="file">{sourceName}</p>
     {/if}
-    <div class="choices" role="group" aria-label={texts.vaultsToRestore}>
-      <label class="check all">
-        <input type="checkbox" checked={allSelected} onchange={toggleAll} />
-        {texts.selectAll}
-      </label>
-      {#each names as name (name)}
-        <label class="check">
-          <input type="checkbox" bind:group={selection} value={name} />
-          {name}
-        </label>
-      {/each}
-    </div>
+    <VaultChoice {names} label={texts.vaultsToRestore} bind:selection />
   {/if}
   {#if problem}
     <p role="alert">{problem}</p>
@@ -113,34 +98,6 @@
   .file {
     color: var(--text-muted);
     overflow-wrap: anywhere;
-  }
-
-  .choices {
-    display: grid;
-    margin-bottom: var(--space-m);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--input-bg);
-    overflow: hidden;
-  }
-
-  .choices label {
-    padding: 0.625rem var(--space-m);
-    cursor: pointer;
-    overflow-wrap: anywhere;
-  }
-
-  .choices label + label {
-    border-top: 1px solid var(--border);
-  }
-
-  .all {
-    font-weight: 600;
-    background: var(--accent-soft);
-  }
-
-  input[type="checkbox"] {
-    accent-color: var(--accent);
   }
 
   .confirm {

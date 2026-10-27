@@ -317,9 +317,10 @@ impl AppState {
         backup_file_name((self.clock)())
     }
 
-    /// Tous les coffres en un seul fichier `.pswd`, et leur nombre.
-    pub fn backup_file(&self) -> Result<(Vec<u8>, usize), UiError> {
-        Ok(self.vaults.backup_to_file(None, (self.clock)())?)
+    /// Les coffres choisis en un seul fichier `.pswd`, et leur nombre.
+    pub fn backup_file(&self, names: &[String]) -> Result<(Vec<u8>, usize), UiError> {
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        Ok(self.vaults.backup_to_file(Some(&names), (self.clock)())?)
     }
 
     pub fn backup_file_contents(&self, data: &[u8]) -> Result<Vec<String>, UiError> {
@@ -1206,16 +1207,15 @@ mod tests {
         let (state, _) = state_in(&dir, None);
         state.create("perso", &secret("Maître-2026!")).unwrap();
         state.create("travail", &secret("Maître-2026!")).unwrap();
+        state.create("famille", &secret("Maître-2026!")).unwrap();
         assert_eq!(
             state.backup_file_name(),
             "pswd-sauvegarde_1970-01-01_00-00-01.pswd"
         );
-        let (file, count) = state.backup_file().unwrap();
+        let chosen = ["perso".to_owned(), "travail".to_owned()];
+        let (file, count) = state.backup_file(&chosen).unwrap();
         assert_eq!(count, 2);
-        assert_eq!(
-            state.backup_file_contents(&file),
-            Ok(vec!["perso".to_owned(), "travail".to_owned()])
-        );
+        assert_eq!(state.backup_file_contents(&file), Ok(chosen.to_vec()));
         assert_eq!(
             state.restore_from_file(&file, "perso"),
             Ok("perso-sauvegarde-1970-01-01".to_owned())
@@ -1224,7 +1224,7 @@ mod tests {
             state.restore_from_file(&file, "autre").err(),
             Some(UiError::new("notInBackup", "autre"))
         );
-        assert_eq!(state.vaults.config().unwrap().vaults.len(), 3);
+        assert_eq!(state.vaults.config().unwrap().vaults.len(), 4);
     }
 
     #[test]
@@ -1232,7 +1232,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         let code = |error: UiError| serde_json::to_value(error).unwrap()["code"].clone();
-        assert_eq!(code(state.backup_file().unwrap_err()), "nothingToBackUp");
+        assert_eq!(code(state.backup_file(&[]).unwrap_err()), "nothingToBackUp");
+        assert_eq!(
+            code(state.backup_file(&["perso".to_owned()]).unwrap_err()),
+            "unknownVault"
+        );
         let foreign = b"pas une sauvegarde";
         assert_eq!(
             code(state.backup_file_contents(foreign).unwrap_err()),

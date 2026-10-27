@@ -12,6 +12,7 @@
   import { errorMessage, isVaultLocked } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { verbatim } from "../lib/keyboard";
+  import PasswordInput from "./PasswordInput.svelte";
 
   interface Props {
     initial: FormValues;
@@ -87,12 +88,7 @@
         {/each}
       </div>
       {#if values.passwordMode === "set"}
-        <input
-          type="password"
-          bind:value={values.password}
-          aria-label={texts.password}
-          autocomplete="new-password"
-        />
+        <PasswordInput bind:value={values.password} label={texts.password} hiddenLabel autocomplete="new-password" />
       {:else if values.passwordMode === "generate"}
         <div class="generator">
           <label>

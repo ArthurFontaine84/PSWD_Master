@@ -66,7 +66,7 @@ function show() {
 }
 
 function field(label: string): HTMLInputElement {
-  return screen.getByLabelText(label, { exact: false });
+  return screen.getByLabelText(label, { exact: false, selector: "input, textarea, select" });
 }
 
 async function type(label: string, value: string) {

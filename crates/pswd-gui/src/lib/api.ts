@@ -180,9 +180,9 @@ export function backupFileName(): Promise<string> {
   return invoke<string>("backup_file_name");
 }
 
-/** Écrit tous les coffres dans le fichier `.pswd` choisi ; renvoie leur nombre. */
-export function backupToFile(path: string): Promise<number> {
-  return invoke<number>("backup_to_file", { path });
+/** Écrit les coffres `names` dans le fichier `.pswd` choisi ; renvoie leur nombre. */
+export function backupToFile(path: string, names: string[]): Promise<number> {
+  return invoke<number>("backup_to_file", { path, names });
 }
 
 export function backupFileContents(path: string): Promise<string[]> {

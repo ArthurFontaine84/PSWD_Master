@@ -17,7 +17,8 @@ impl<T: Terminal, C> App<T, C> {
         name: Option<&str>,
     ) -> Result<(), CliError> {
         let now = (self.clock)();
-        let (backup, count) = self.vaults.backup_to_file(name, now)?;
+        let only = name.as_ref().map(std::slice::from_ref);
+        let (backup, count) = self.vaults.backup_to_file(only, now)?;
         let path = write_backup(destination, &backup_file_name(now), &backup)?;
         self.terminal.print(&format!(
             "{count} coffre(s) sauvegardé(s) dans {}.",

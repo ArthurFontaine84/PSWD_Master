@@ -19,6 +19,7 @@ import {
 import { pickBackupDestination, pickBackupFile, pickCsvFile } from "../lib/files";
 import Toast from "../components/Toast.svelte";
 import { goBack } from "../lib/back";
+import Backup from "./Backup.svelte";
 import OpenVault from "./OpenVault.svelte";
 import Restore from "./Restore.svelte";
 import Settings from "./Settings.svelte";
@@ -218,69 +219,102 @@ describe("deleting the vault", () => {
 });
 
 describe("backing up the vaults", () => {
-  it("hides the success message after 5 seconds", async () => {
-    vi.mocked(backupFileName).mockResolvedValue("s.pswd");
-    vi.mocked(pickBackupDestination).mockResolvedValue("D:/s.pswd");
-    vi.mocked(backupToFile).mockResolvedValue(1);
-    const { unmount } = render(VaultList, { onOpen: vi.fn(), onRestore: vi.fn() });
-    const backup = await screen.findByRole("button", { name: "Sauvegarder" });
-    vi.useFakeTimers();
-    await fireEvent.click(backup);
-    await vi.waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent("1 coffre sauvegardé.");
-    });
-    vi.advanceTimersByTime(4_000);
-    await Promise.resolve();
-    expect(screen.getByRole("status")).toBeInTheDocument();
-    vi.advanceTimersByTime(1_000);
-    await vi.waitFor(() => {
-      expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    });
-    await fireEvent.click(backup);
-    await vi.waitFor(() => {
-      expect(screen.getByRole("status")).toBeInTheDocument();
-    });
+  function render_(onBackedUp = vi.fn()) {
+    render(Backup, { onBackedUp, onCancel: vi.fn() });
+    return onBackedUp;
+  }
+
+  it("is opened from the list, only when there is a vault", async () => {
+    const onBackup = vi.fn();
+    const { unmount } = render(VaultList, { onOpen: vi.fn(), onBackup, onRestore: vi.fn() });
+    await fireEvent.click(await screen.findByRole("button", { name: "Sauvegarder" }));
+    expect(onBackup).toHaveBeenCalled();
     unmount();
-    expect(vi.getTimerCount()).toBe(0);
-    vi.useRealTimers();
-  });
-
-  it("writes them all to the chosen .pswd file", async () => {
-    vi.mocked(backupFileName).mockResolvedValue("pswd-sauvegarde_2026-10-24_11-20-58.pswd");
-    vi.mocked(pickBackupDestination).mockResolvedValueOnce(null).mockResolvedValue("D:/s.pswd");
-    vi.mocked(backupToFile)
-      .mockResolvedValueOnce(1)
-      .mockResolvedValueOnce(2)
-      .mockRejectedValueOnce({ code: "fileUnwritable", detail: "accès refusé" });
-    render(VaultList, { onOpen: vi.fn(), onRestore: vi.fn() });
-    const backup = await screen.findByRole("button", { name: "Sauvegarder" });
-    await fireEvent.click(backup);
-    await vi.waitFor(() => {
-      expect(pickBackupDestination).toHaveBeenCalledWith(
-        "Enregistrer la sauvegarde de tous les coffres",
-        "pswd-sauvegarde_2026-10-24_11-20-58.pswd",
-      );
-    });
-    expect(backupToFile).not.toHaveBeenCalled();
-    await fireEvent.click(backup);
-    expect(await screen.findByRole("status")).toHaveTextContent("1 coffre sauvegardé.");
-    await fireEvent.click(backup);
-    expect(await screen.findByText("2 coffres sauvegardés.")).toBeInTheDocument();
-    await fireEvent.click(backup);
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Écriture du fichier impossible : accès refusé",
-    );
-    expect(backupToFile).toHaveBeenCalledWith("D:/s.pswd");
-  });
-
-  it("is offered only when there is a vault", async () => {
     vi.mocked(listVaults).mockResolvedValue([]);
     const onRestore = vi.fn();
-    render(VaultList, { onOpen: vi.fn(), onRestore });
+    render(VaultList, { onOpen: vi.fn(), onBackup, onRestore });
     await screen.findByText("Aucun coffre sur cet appareil.");
     await fireEvent.click(screen.getByRole("button", { name: "Restaurer" }));
     expect(screen.queryByRole("button", { name: "Sauvegarder" })).not.toBeInTheDocument();
     expect(onRestore).toHaveBeenCalled();
+  });
+
+  it("lists the vaults of the device, none of them checked", async () => {
+    vi.mocked(listVaults).mockResolvedValue(["perso", "travail"]);
+    render_();
+    expect(screen.getByText("Chargement…")).toBeInTheDocument();
+    await screen.findByRole("group", { name: "Coffres à sauvegarder" });
+    expect(screen.getByRole("checkbox", { name: "perso" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "travail" })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Sauvegarder le coffre sélectionné" })).toBeDisabled();
+  });
+
+  it("writes the checked vaults only to the chosen .pswd file", async () => {
+    vi.mocked(listVaults).mockResolvedValue(["famille", "perso", "travail"]);
+    vi.mocked(backupFileName).mockResolvedValue("pswd-sauvegarde_2026-10-24_11-20-58.pswd");
+    vi.mocked(pickBackupDestination).mockResolvedValueOnce(null).mockResolvedValue("D:/s.pswd");
+    vi.mocked(backupToFile).mockResolvedValue(2);
+    const onBackedUp = render_();
+    await fireEvent.click(await screen.findByRole("checkbox", { name: "travail" }));
+    await fireEvent.click(screen.getByRole("checkbox", { name: "famille" }));
+    const confirm = screen.getByRole("button", { name: "Sauvegarder les 2 coffres sélectionnés" });
+    await fireEvent.click(confirm);
+    await vi.waitFor(() => {
+      expect(pickBackupDestination).toHaveBeenCalledWith(
+        "Enregistrer la sauvegarde des coffres",
+        "pswd-sauvegarde_2026-10-24_11-20-58.pswd",
+      );
+    });
+    await vi.waitFor(() => {
+      expect(confirm).toBeEnabled();
+    });
+    expect(backupToFile).not.toHaveBeenCalled();
+    await fireEvent.click(confirm);
+    await vi.waitFor(() => {
+      expect(onBackedUp).toHaveBeenCalledWith("2 coffres sauvegardés.");
+    });
+    expect(backupToFile).toHaveBeenCalledWith("D:/s.pswd", ["famille", "travail"]);
+  });
+
+  it("selects everything at once", async () => {
+    vi.mocked(listVaults).mockResolvedValue(["perso", "travail"]);
+    vi.mocked(pickBackupDestination).mockResolvedValue("D:/s.pswd");
+    vi.mocked(backupToFile).mockResolvedValue(2);
+    render_();
+    await fireEvent.click(await screen.findByRole("checkbox", { name: "Tout sélectionner" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Sauvegarder les 2 coffres sélectionnés" }));
+    await vi.waitFor(() => {
+      expect(backupToFile).toHaveBeenCalledWith("D:/s.pswd", ["perso", "travail"]);
+    });
+  });
+
+  it("shows the writing errors and lets the user try again", async () => {
+    vi.mocked(pickBackupDestination).mockResolvedValue("D:/s.pswd");
+    vi.mocked(backupToFile)
+      .mockRejectedValueOnce({ code: "fileUnwritable", detail: "accès refusé" })
+      .mockResolvedValue(1);
+    const onBackedUp = render_();
+    await fireEvent.click(await screen.findByRole("checkbox", { name: "perso" }));
+    const confirm = screen.getByRole("button", { name: "Sauvegarder le coffre sélectionné" });
+    await fireEvent.click(confirm);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Écriture du fichier impossible : accès refusé",
+    );
+    expect(onBackedUp).not.toHaveBeenCalled();
+    await fireEvent.click(confirm);
+    await vi.waitFor(() => {
+      expect(onBackedUp).toHaveBeenCalledWith("1 coffre sauvegardé.");
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("says when the vaults cannot be listed", async () => {
+    vi.mocked(listVaults).mockRejectedValue({ code: "configInvalid", detail: "ligne 2" });
+    const onCancel = vi.fn();
+    render(Backup, { onBackedUp: vi.fn(), onCancel });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Configuration invalide : ligne 2");
+    await fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
+    expect(onCancel).toHaveBeenCalled();
   });
 });
 
@@ -484,10 +518,8 @@ describe("forgotten master password", () => {
     const onUnlocked = vi.fn();
     render(Unlock, { name: "perso", onUnlocked, onCancel: vi.fn() });
     await fireEvent.click(screen.getByRole("button", { name: "Mot de passe oublié ?" }));
-    expect(screen.getAllByRole("button").map((button) => button.textContent?.trim())).toEqual([
-      "Annuler",
-      "Enregistrer",
-    ]);
+    const buttons = screen.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent);
+    expect(buttons).toEqual(["Afficher le mot de passe", "Afficher le mot de passe", "Annuler", "Enregistrer"]);
     const fill = async (key: string) => {
       await type("Clé de récupération", key);
       await type("Nouveau mot de passe maître", "Nouveau-2026!");

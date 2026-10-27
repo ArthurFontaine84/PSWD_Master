@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PasswordInput from "../components/PasswordInput.svelte";
   import { recoverVault, unlockVault, type VaultInfo } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
@@ -70,21 +71,15 @@
         {texts.recoveryKey}
         <input bind:value={recoveryKey} {...verbatim} />
       </label>
-      <label>
-        {texts.newPassword}
-        <input type="password" bind:value={password} autocomplete="new-password" />
-        <small>{texts.passwordRule}</small>
-      </label>
-      <label>
-        {texts.confirmation}
-        <input type="password" bind:value={confirmation} autocomplete="new-password" />
-      </label>
+      <PasswordInput
+        bind:value={password}
+        label={texts.newPassword}
+        hint={texts.passwordRule}
+        autocomplete="new-password"
+      />
+      <PasswordInput bind:value={confirmation} label={texts.confirmation} autocomplete="new-password" />
     {:else}
-      <label>
-        {texts.masterPassword}
-        <!-- svelte-ignore a11y_autofocus -->
-        <input type="password" bind:value={password} autocomplete="current-password" autofocus />
-      </label>
+      <PasswordInput bind:value={password} label={texts.masterPassword} autocomplete="current-password" autofocus />
     {/if}
     {#if problem}
       <p role="alert">{problem}</p>
