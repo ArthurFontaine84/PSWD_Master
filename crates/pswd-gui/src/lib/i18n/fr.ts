@@ -61,7 +61,6 @@ export const fr = {
   unlockTitle: (name: string) => `Déverrouiller « ${name} »`,
   unlock: "Déverrouiller",
   unlocking: "Déverrouillage…",
-  vaultTitle: (name: string) => `Coffre « ${name} »`,
   entryCount: (count: number) => (count <= 1 ? `${count} entrée` : `${count} entrées`),
   lock: "Verrouiller",
   search: "Rechercher",
@@ -69,6 +68,10 @@ export const fr = {
   allTags: "Tous les tags",
   tagFilter: "Filtrer par tag",
   noEntry: "Aucune entrée.",
+  pagination: "Pages des entrées",
+  previousPage: "Page précédente",
+  nextPage: "Page suivante",
+  pageOf: (page: number, count: number) => `Page ${page} / ${count}`,
   chooseEntry: "Choisissez une entrée dans la liste.",
   back: "Retour",
   kinds: { login: "Identifiant", note: "Note" },
@@ -81,7 +84,7 @@ export const fr = {
   show: "Afficher",
   hide: "Masquer",
   copy: "Copier",
-  copied: (seconds: number) => `Copié ; effacé du presse-papiers dans ${seconds} s.`,
+  copied: (seconds: number) => `Copié, effacé dans ${seconds} s.`,
   versions: (count: number) =>
     count === 0 ? "Aucune version précédente" : count === 1 ? "1 version précédente" : `${count} versions précédentes`,
   updated: (millis: number) =>
@@ -92,6 +95,7 @@ export const fr = {
   delete: "Supprimer",
   confirmDelete: (title: string) => `Supprimer « ${title} » ? Elle restera visible dans les sauvegardes antérieures.`,
   save: "Enregistrer",
+  entrySaved: "Enregistrement réussi",
   saving: "Enregistrement…",
   kind: "Type",
   title: "Titre",
@@ -106,7 +110,6 @@ export const fr = {
   urlsHint: "Une adresse par ligne.",
   tagsHint: "Séparés par des espaces.",
   history: "Historique",
-  hideHistory: "Masquer l'historique",
   passwordChanged: "mot de passe différent",
   manage: "Gérer le coffre",
   changePassword: "Changer le mot de passe maître",
@@ -116,7 +119,7 @@ export const fr = {
   forgotPassword: "Mot de passe oublié ?",
   recoverTitle: (name: string) => `Récupérer « ${name} »`,
   recoveryKey: "Clé de récupération",
-  recover: "Choisir le nouveau mot de passe",
+  recover: "Enregistrer",
   importCsv: "Importer un CSV",
   importExplanation:
     "Le fichier est lu sans passer par l'interface. Tout le fichier est vérifié avant d'ajouter quoi que ce soit.",
@@ -124,23 +127,34 @@ export const fr = {
   imported: (count: number) =>
     `${count <= 1 ? `${count} entrée importée` : `${count} entrées importées`}. Supprimez maintenant le fichier CSV : il contient vos mots de passe en clair.`,
   deleteVault: "Supprimer ce coffre",
-  deleteForever: "Supprimer définitivement",
+  deleteForever: "Supprimer",
   deleteVaultExplanation: (name: string) =>
     `Le coffre « ${name} » et toutes ses entrées seront supprimés de cet appareil, sans retour possible. Une sauvegarde permet de le restaurer plus tard. Pour confirmer, retapez son nom.`,
   vaultDeleted: (name: string) => `Coffre « ${name} » supprimé.`,
   backup: "Sauvegarder",
   backupFileTitle: "Enregistrer la sauvegarde de tous les coffres",
-  backedUp: (count: number, path: string) =>
-    `${count <= 1 ? `${count} coffre sauvegardé` : `${count} coffres sauvegardés`} dans ${path}.`,
-  restore: "Restaurer une sauvegarde",
+  backedUp: (count: number) => (count <= 1 ? `${count} coffre sauvegardé.` : `${count} coffres sauvegardés.`),
+  restore: "Restaurer",
+  restoreTitle: "Restaurer une sauvegarde",
   restoreFileTitle: "Choisir un fichier de sauvegarde .pswd",
-  chooseBackupFile: "Choisir un fichier .pswd",
+  chooseBackupFile: "fichier .pswd",
   restoreExplanation:
     "Le coffre est ajouté comme nouveau coffre : un coffre existant n'est jamais remplacé. Il s'ouvre avec le mot de passe maître en vigueur au moment de la sauvegarde.",
   restored: (name: string, target: string) =>
     name === target
       ? `Coffre « ${name} » restauré.`
       : `Coffre « ${name} » restauré sous le nom « ${target} » : ce nom était déjà pris.`,
+  restoredMany: (restored: { name: string; target: string }[]) => {
+    const renamed = restored
+      .filter(({ name, target }) => name !== target)
+      .map(({ name, target }) => `« ${name} » → « ${target} »`);
+    return `${restored.length} coffres restaurés${renamed.length > 0 ? ` (renommés : ${renamed.join(", ")})` : ""}.`;
+  },
+  vaultsToRestore: "Coffres à restaurer",
+  selectAll: "Tout sélectionner",
+  restoreSelection: (count: number) =>
+    count <= 1 ? "Restaurer le coffre sélectionné" : `Restaurer les ${count} coffres sélectionnés`,
+  restoring: "Restauration…",
   settings: "Réglages",
   theme: "Thème",
   themes: { auto: "Comme le système", light: "Clair", dark: "Sombre" },

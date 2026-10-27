@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   copyPassword,
   entryDetail,
+  entryHistory,
   listEntries,
   listTags,
   lockVault,
@@ -10,12 +11,14 @@ import {
   type EntryDetail,
   type EntrySummary,
 } from "../lib/api";
+import Toast from "../components/Toast.svelte";
 import OpenVault from "./OpenVault.svelte";
 
 vi.mock("../lib/api", () => ({
   listEntries: vi.fn(),
   listTags: vi.fn(),
   entryDetail: vi.fn(),
+  entryHistory: vi.fn(),
   revealPassword: vi.fn(),
   copyPassword: vi.fn(),
   lockVault: vi.fn(),
@@ -56,11 +59,13 @@ const wifiDetail: EntryDetail = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  render(Toast);
   vi.mocked(listEntries).mockResolvedValue([github, wifi]);
   vi.mocked(listTags).mockResolvedValue([
     { tag: "dev", count: 1 },
     { tag: "perso", count: 1 },
   ]);
+  vi.mocked(entryHistory).mockResolvedValue([]);
   vi.mocked(entryDetail).mockImplementation((id) =>
     Promise.resolve(id === "1" ? githubDetail : wifiDetail),
   );
@@ -90,7 +95,7 @@ async function open(title: string) {
 describe("OpenVault", () => {
   it("lists the entries without any password", async () => {
     show();
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Coffre « perso »");
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("perso");
     expect(await screen.findByText("2 entrées")).toBeInTheDocument();
     expect(screen.getByText("#dev #perso")).toBeInTheDocument();
     expect(screen.getByText("Choisissez une entrée dans la liste.")).toBeInTheDocument();
@@ -191,11 +196,24 @@ describe("OpenVault", () => {
     vi.mocked(copyPassword).mockResolvedValue(20);
     show();
     await open("GitHub");
+    vi.useFakeTimers();
     await fireEvent.click(screen.getByRole("button", { name: "Copier" }));
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "Copié ; effacé du presse-papiers dans 20 s.",
-    );
+    await vi.waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Copié, effacé dans 20 s.");
+    });
     expect(copyPassword).toHaveBeenCalledWith("1");
+    vi.advanceTimersByTime(2_000);
+    await fireEvent.click(screen.getByRole("button", { name: "Copier" }));
+    await vi.waitFor(() => {
+      expect(copyPassword).toHaveBeenCalledTimes(2);
+    });
+    vi.advanceTimersByTime(2_000);
+    await Promise.resolve();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    vi.advanceTimersByTime(1_000);
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
   });
 
   it("reports the errors of the detail", async () => {
@@ -245,5 +263,75 @@ describe("OpenVault", () => {
     await vi.waitFor(() => {
       expect(onLocked).toHaveBeenCalled();
     });
+  });
+});
+
+describe("pagination on a wide screen", () => {
+  function wideScreen(height: number) {
+    const query = { matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+    vi.stubGlobal("matchMedia", vi.fn(() => query));
+    vi.stubGlobal("innerHeight", height);
+    return query;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const many: EntrySummary[] = Array.from({ length: 7 }, (_, index) => ({
+    ...wifi,
+    id: String(index + 10),
+    title: `Note ${String(index + 1)}`,
+  }));
+
+  it("shows one page at a time and starts again from the first page on a new search", async () => {
+    const query = wideScreen(400);
+    vi.mocked(listEntries).mockResolvedValue(many);
+    const { unmount } = render(OpenVault, {
+      vault: { name: "perso", entries: 7 },
+      onLocked: vi.fn(),
+      onExpired: vi.fn(),
+      onDeleted: vi.fn(),
+    });
+    expect(await screen.findByText("Page 1 / 3")).toBeInTheDocument();
+    expect(screen.getByText("7 entrées")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Note 3/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Note 4/ })).not.toBeInTheDocument();
+    const previous = screen.getByRole("button", { name: "Page précédente" });
+    const next = screen.getByRole("button", { name: "Page suivante" });
+    expect(previous).toBeDisabled();
+    await fireEvent.click(next);
+    await fireEvent.click(next);
+    expect(screen.getByText("Page 3 / 3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Note 7/ })).toBeInTheDocument();
+    expect(next).toBeDisabled();
+    await fireEvent.click(previous);
+    expect(screen.getByText("Page 2 / 3")).toBeInTheDocument();
+    await fireEvent.input(screen.getByRole("searchbox"), { target: { value: "Note" } });
+    expect(await screen.findByText("Page 1 / 3")).toBeInTheDocument();
+    vi.mocked(listEntries).mockResolvedValue(many.slice(0, 2));
+    await fireEvent.input(screen.getByRole("searchbox"), { target: { value: "Note 1" } });
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("navigation", { name: "Pages des entrées" })).not.toBeInTheDocument();
+    });
+    unmount();
+    expect(query.removeEventListener).toHaveBeenCalled();
+  });
+
+  it("keeps a valid page when the list gets shorter", async () => {
+    wideScreen(400);
+    vi.mocked(listEntries).mockResolvedValue(many);
+    render(OpenVault, {
+      vault: { name: "perso", entries: 7 },
+      onLocked: vi.fn(),
+      onExpired: vi.fn(),
+      onDeleted: vi.fn(),
+    });
+    const next = await screen.findByRole("button", { name: "Page suivante" });
+    await fireEvent.click(next);
+    await fireEvent.click(next);
+    vi.mocked(listEntries).mockResolvedValue(many.slice(0, 4));
+    await fireEvent.change(screen.getByRole("combobox", { name: "Filtrer par tag" }), { target: { value: "dev" } });
+    expect(await screen.findByText("Page 1 / 2")).toBeInTheDocument();
   });
 });

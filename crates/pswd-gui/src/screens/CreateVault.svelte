@@ -39,7 +39,7 @@
   }
 </script>
 
-<section aria-labelledby="create-title">
+<section class="panel" aria-labelledby="create-title">
   <h2 id="create-title">{texts.newVault}</h2>
   <form onsubmit={submit} novalidate>
     <label>

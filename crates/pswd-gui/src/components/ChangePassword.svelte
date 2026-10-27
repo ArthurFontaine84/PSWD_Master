@@ -2,6 +2,7 @@
   import { changePassword } from "../lib/api";
   import { errorMessage, isVaultLocked } from "../lib/errors";
   import { texts } from "../lib/i18n";
+  import { showToast } from "../lib/toast.svelte";
   import { newPasswordProblem } from "../lib/validation";
 
   interface Props {
@@ -15,12 +16,10 @@
   let password = $state("");
   let confirmation = $state("");
   let problem = $state<string | null>(null);
-  let done = $state(false);
   let busy = $state(false);
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    done = false;
     problem = newPasswordProblem(password, confirmation);
     if (problem !== null) {
       return;
@@ -33,7 +32,8 @@
     busy = true;
     try {
       await changePassword(typed.current, typed.password);
-      done = true;
+      showToast(texts.masterPasswordChanged);
+      onClose();
     } catch (error) {
       if (isVaultLocked(error)) {
         onExpired();
@@ -63,9 +63,6 @@
   </label>
   {#if problem}
     <p role="alert">{problem}</p>
-  {/if}
-  {#if done}
-    <p role="status">{texts.masterPasswordChanged}</p>
   {/if}
   <div class="actions">
     <button type="button" onclick={onClose}>{texts.cancel}</button>

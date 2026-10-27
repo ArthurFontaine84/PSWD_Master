@@ -55,14 +55,14 @@
     await send(() => recoverVault(name, typed.recoveryKey, typed.password));
   }
 
-  function toggle() {
-    recovering = !recovering;
+  function startRecovery() {
+    recovering = true;
     problem = null;
     clear();
   }
 </script>
 
-<section aria-labelledby="unlock-title">
+<section class="panel" aria-labelledby="unlock-title">
   <h2 id="unlock-title">{recovering ? texts.recoverTitle(name) : texts.unlockTitle(name)}</h2>
   <form onsubmit={submit} novalidate>
     {#if recovering}
@@ -89,10 +89,10 @@
     {#if problem}
       <p role="alert">{problem}</p>
     {/if}
+    {#if !recovering}
+      <button type="button" class="link" onclick={startRecovery}>{texts.forgotPassword}</button>
+    {/if}
     <div class="actions">
-      <button type="button" class="link" onclick={toggle}>
-        {recovering ? texts.masterPassword : texts.forgotPassword}
-      </button>
       <button type="button" onclick={onCancel}>{texts.cancel}</button>
       <button type="submit" class="primary" disabled={busy}>
         {busy ? texts.unlocking : recovering ? texts.recover : texts.unlock}
@@ -103,10 +103,19 @@
 
 <style>
   .link {
-    margin-right: auto;
+    justify-self: start;
+    padding: 0;
     border: none;
     background: none;
+    box-shadow: none;
     color: var(--accent);
-    text-decoration: underline;
+    font-weight: 500;
+  }
+
+  @media (hover: hover) {
+    .link:hover:not(:disabled) {
+      background: none;
+      text-decoration: underline;
+    }
   }
 </style>

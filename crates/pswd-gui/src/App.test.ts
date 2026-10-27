@@ -182,7 +182,7 @@ describe("App", () => {
     expect(await screen.findByText("AAAA-BBBB")).toBeInTheDocument();
     await fireEvent.click(screen.getByRole("checkbox"));
     await fireEvent.click(screen.getByRole("button", { name: "Continuer" }));
-    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Coffre « neuf »");
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("neuf");
     expect(screen.queryByText("AAAA-BBBB")).not.toBeInTheDocument();
   });
 
@@ -199,6 +199,7 @@ describe("App", () => {
     vi.mocked(lockVault).mockResolvedValue();
     render(App);
     await unlockPerso();
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Verrouiller" }));
     expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
@@ -316,9 +317,10 @@ describe("App", () => {
     vi.mocked(backupFileContents).mockResolvedValue(["perso"]);
     vi.mocked(restoreFromFile).mockResolvedValue("perso-sauvegarde-2026-10-23");
     render(App);
-    await fireEvent.click(await screen.findByRole("button", { name: "Restaurer une sauvegarde" }));
-    await fireEvent.click(await screen.findByRole("button", { name: "Choisir un fichier .pswd" }));
-    await fireEvent.click(await screen.findByRole("button", { name: "perso" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Restaurer" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "fichier .pswd" }));
+    await fireEvent.click(await screen.findByRole("checkbox", { name: "perso" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Restaurer le coffre sélectionné" }));
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Coffre « perso » restauré sous le nom « perso-sauvegarde-2026-10-23 »",
     );
@@ -330,7 +332,7 @@ describe("App", () => {
 
   it("leaves the restore screen when cancelled", async () => {
     render(App);
-    await fireEvent.click(await screen.findByRole("button", { name: "Restaurer une sauvegarde" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Restaurer" }));
     await fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
     expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
   });
@@ -340,10 +342,10 @@ describe("App", () => {
     render(App);
     await unlockPerso();
     await fireEvent.click(screen.getByRole("button", { name: "Gérer le coffre" }));
-    await fireEvent.click(screen.getByRole("button", { name: "Supprimer ce coffre" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Supprimer ce coffre" }));
     await fireEvent.input(field("Nom du coffre"), { target: { value: "perso" } });
     vi.mocked(listVaults).mockResolvedValue([]);
-    await fireEvent.click(screen.getByRole("button", { name: "Supprimer définitivement" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Supprimer" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Coffre « perso » supprimé.");
     expect(deleteVault).toHaveBeenCalledWith("perso", "perso");
   });

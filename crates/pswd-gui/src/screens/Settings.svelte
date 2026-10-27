@@ -3,6 +3,7 @@
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { applyTheme } from "../lib/theme";
+  import { showToast } from "../lib/toast.svelte";
 
   interface Props {
     onClose: () => void;
@@ -16,7 +17,6 @@
   // `config.toml`.
   let settings = $state<Settings | null>(null);
   let problem = $state<string | null>(null);
-  let saved = $state(false);
 
   getSettings().then(
     (loaded) => (settings = loaded),
@@ -28,19 +28,18 @@
     if (settings === null) {
       return;
     }
-    saved = false;
     try {
       settings = await saveSettings($state.snapshot(settings));
       applyTheme(settings.theme);
       problem = null;
-      saved = true;
+      showToast(texts.settingsSaved);
     } catch (error) {
       problem = errorMessage(error);
     }
   }
 </script>
 
-<section aria-labelledby="settings-title">
+<section class="panel" aria-labelledby="settings-title">
   <h2 id="settings-title">{texts.settings}</h2>
   {#if settings}
     <form onsubmit={submit}>
@@ -54,9 +53,6 @@
       </label>
       {#if problem}
         <p role="alert">{problem}</p>
-      {/if}
-      {#if saved}
-        <p role="status">{texts.settingsSaved}</p>
       {/if}
       <div class="actions">
         <button type="button" onclick={onClose}>{texts.back}</button>

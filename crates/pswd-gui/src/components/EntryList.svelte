@@ -47,16 +47,25 @@
     display: grid;
     width: 100%;
     text-align: left;
+    justify-content: stretch;
+    justify-items: start;
     gap: 0.125rem;
+    padding: 0.75rem var(--space-m);
     border: none;
     border-bottom: 1px solid var(--border);
     border-radius: 0;
     background: none;
+    box-shadow: none;
+    font-weight: normal;
   }
 
-  .entry:focus-visible,
-  .entry[aria-current="true"] {
+  .entry:focus-visible {
     background: var(--surface);
+  }
+
+  .entry[aria-current="true"] {
+    background: var(--accent-soft);
+    box-shadow: inset 3px 0 0 var(--accent);
   }
 
   /* Sur un écran tactile, le survol resterait affiché après le toucher. */

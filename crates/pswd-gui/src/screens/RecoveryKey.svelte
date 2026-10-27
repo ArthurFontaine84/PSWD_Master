@@ -10,7 +10,7 @@
   let noted = $state(false);
 </script>
 
-<section aria-labelledby="recovery-title">
+<section class="panel" aria-labelledby="recovery-title">
   <h2 id="recovery-title">{texts.recoveryTitle}</h2>
   <p>{texts.recoveryExplanation}</p>
   <p class="key"><code>{recoveryKey}</code></p>
@@ -26,10 +26,12 @@
 <style>
   .key {
     padding: var(--space-m);
-    background: var(--surface);
+    background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     word-break: break-all;
     font-size: 1.1rem;
+    font-family: ui-monospace, monospace;
+    text-align: center;
   }
 </style>

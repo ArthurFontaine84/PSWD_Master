@@ -31,16 +31,13 @@ function expectVerbatim(element: HTMLElement) {
 }
 
 describe("VaultList", () => {
-  it("opens a vault or starts a new one", async () => {
+  it("opens a vault", async () => {
     vi.mocked(listVaults).mockResolvedValue(["perso", "travail"]);
     const onOpen = vi.fn();
-    const onCreate = vi.fn();
-    render(VaultList, { onOpen, onCreate, onRestore: vi.fn(), onSettings: vi.fn() });
+    render(VaultList, { onOpen, onRestore: vi.fn() });
     expect(screen.getByText("Chargement…")).toBeInTheDocument();
     await fireEvent.click(await screen.findByRole("button", { name: "travail" }));
     expect(onOpen).toHaveBeenCalledWith("travail");
-    await fireEvent.click(screen.getByRole("button", { name: "Nouveau coffre" }));
-    expect(onCreate).toHaveBeenCalled();
   });
 
   it("shows the notice, the empty list and the errors", async () => {
@@ -48,9 +45,7 @@ describe("VaultList", () => {
     render(VaultList, {
       notice: "Coffre verrouillé.",
       onOpen: vi.fn(),
-      onCreate: vi.fn(),
       onRestore: vi.fn(),
-      onSettings: vi.fn(),
     });
     expect(screen.getByRole("status")).toHaveTextContent("Coffre verrouillé.");
     expect(await screen.findByText("Aucun coffre sur cet appareil.")).toBeInTheDocument();
@@ -58,8 +53,10 @@ describe("VaultList", () => {
 
   it("shows a translated error", async () => {
     vi.mocked(listVaults).mockRejectedValue({ code: "configInvalid", detail: "ligne 2" });
-    render(VaultList, { onOpen: vi.fn(), onCreate: vi.fn(), onRestore: vi.fn(), onSettings: vi.fn() });
+    render(VaultList, { onOpen: vi.fn(), onRestore: vi.fn() });
     expect(await screen.findByRole("alert")).toHaveTextContent("Configuration invalide : ligne 2");
+    expect(screen.queryByRole("button", { name: "Sauvegarder" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restaurer" })).toBeInTheDocument();
   });
 });
 

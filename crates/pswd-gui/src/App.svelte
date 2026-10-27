@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { fly } from "svelte/transition";
   import {
     appHidden,
     appShown,
@@ -12,7 +13,11 @@
   import { throttle } from "./lib/activity";
   import { listenBackButton, onBack } from "./lib/back";
   import { texts } from "./lib/i18n";
+  import { motion } from "./lib/motion";
   import { applyTheme } from "./lib/theme";
+  import { showToast } from "./lib/toast.svelte";
+  import Toast from "./components/Toast.svelte";
+  import Icon from "./components/Icon.svelte";
   import CreateVault from "./screens/CreateVault.svelte";
   import OpenVault from "./screens/OpenVault.svelte";
   import RecoveryKey from "./screens/RecoveryKey.svelte";
@@ -113,45 +118,81 @@
 <svelte:document onvisibilitychange={onVisibilityChange} />
 
 <main>
-  <h1>{texts.appTitle}</h1>
-  {#if screen.kind === "list"}
-    <VaultList
-      notice={screen.notice}
-      onOpen={(name) => (screen = { kind: "unlock", name })}
-      onCreate={() => (screen = { kind: "create" })}
-      onRestore={() => (screen = { kind: "restore" })}
-      onSettings={() => (screen = { kind: "settings" })}
-    />
-  {:else if screen.kind === "create"}
-    <CreateVault
-      onCreated={({ vault, recoveryKey }) => (screen = { kind: "recovery", vault, recoveryKey })}
-      onCancel={() => (screen = { kind: "list" })}
-    />
-  {:else if screen.kind === "recovery"}
-    {@const vault = screen.vault}
-    <RecoveryKey recoveryKey={screen.recoveryKey} onDone={() => (screen = { kind: "open", vault })} />
-  {:else if screen.kind === "unlock"}
-    <Unlock
-      name={screen.name}
-      onUnlocked={(vault) => (screen = { kind: "open", vault })}
-      onCancel={() => (screen = { kind: "list" })}
-    />
-  {:else if screen.kind === "restore"}
-    <Restore
-      onRestored={(notice) => (screen = { kind: "list", notice })}
-      onCancel={() => (screen = { kind: "list" })}
-    />
-  {:else if screen.kind === "settings"}
-    <Settings onClose={() => (screen = { kind: "list" })} />
-  {:else}
-    {@const name = screen.vault.name}
-    <OpenVault
-      vault={screen.vault}
-      onLocked={() => (screen = { kind: "list" })}
-      onExpired={showLocked}
-      onDeleted={() => (screen = { kind: "list", notice: texts.vaultDeleted(name) })}
-    />
+  <!-- Un coffre ouvert garde tout l'écran pour ses entrées. -->
+  {#if screen.kind !== "open"}
+    <header class="app-bar">
+      <h1><span class="logo"><Icon name="shield" /></span>{texts.appTitle}</h1>
+      {#if screen.kind === "list"}
+        <div class="tools">
+          <button
+            type="button"
+            class="icon-button"
+            aria-label={texts.newVault}
+            title={texts.newVault}
+            onclick={() => (screen = { kind: "create" })}
+          >
+            <Icon name="plus" />
+          </button>
+          <button
+            type="button"
+            class="icon-button"
+            aria-label={texts.settings}
+            title={texts.settings}
+            onclick={() => (screen = { kind: "settings" })}
+          >
+            <Icon name="settings" />
+          </button>
+        </div>
+      {/if}
+    </header>
   {/if}
+  {#key screen.kind}
+    <div in:fly={{ y: 16, duration: motion(300) }}>
+      {#if screen.kind === "list"}
+        <VaultList
+          notice={screen.notice}
+          onOpen={(name) => (screen = { kind: "unlock", name })}
+          onRestore={() => (screen = { kind: "restore" })}
+        />
+      {:else if screen.kind === "create"}
+        <CreateVault
+          onCreated={({ vault, recoveryKey }) => (screen = { kind: "recovery", vault, recoveryKey })}
+          onCancel={() => (screen = { kind: "list" })}
+        />
+      {:else if screen.kind === "recovery"}
+        {@const vault = screen.vault}
+        <RecoveryKey recoveryKey={screen.recoveryKey} onDone={() => (screen = { kind: "open", vault })} />
+      {:else if screen.kind === "unlock"}
+        <Unlock
+          name={screen.name}
+          onUnlocked={(vault) => (screen = { kind: "open", vault })}
+          onCancel={() => (screen = { kind: "list" })}
+        />
+      {:else if screen.kind === "restore"}
+        <Restore
+          onRestored={(message) => {
+            showToast(message);
+            screen = { kind: "list" };
+          }}
+          onCancel={() => (screen = { kind: "list" })}
+        />
+      {:else if screen.kind === "settings"}
+        <Settings onClose={() => (screen = { kind: "list" })} />
+      {:else}
+        {@const name = screen.vault.name}
+        <OpenVault
+          vault={screen.vault}
+          onLocked={() => (screen = { kind: "list" })}
+          onExpired={showLocked}
+          onDeleted={() => {
+            showToast(texts.vaultDeleted(name));
+            screen = { kind: "list" };
+          }}
+        />
+      {/if}
+    </div>
+  {/key}
+  <Toast />
 </main>
 
 <style>
@@ -161,6 +202,37 @@
     margin: 0 auto;
     padding: max(var(--space-m), env(safe-area-inset-top)) max(var(--space-m), env(safe-area-inset-right))
       max(var(--space-m), env(safe-area-inset-bottom)) max(var(--space-m), env(safe-area-inset-left));
+  }
+
+  .app-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-m);
+    margin-bottom: var(--space-m);
+  }
+
+  h1 {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    margin: 0;
+    font-size: 1.5rem;
+    letter-spacing: -0.01em;
+  }
+
+  .logo {
+    display: inline-flex;
+    padding: 0.375rem;
+    border-radius: var(--radius);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: var(--on-accent);
+    box-shadow: 0 4px 14px var(--glow-1);
+  }
+
+  .tools {
+    display: flex;
+    gap: var(--space-s);
   }
 
   @media (min-width: 48rem) {

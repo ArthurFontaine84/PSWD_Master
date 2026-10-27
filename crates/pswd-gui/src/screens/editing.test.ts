@@ -11,6 +11,7 @@ import {
   type EntryDetail,
   type EntrySummary,
 } from "../lib/api";
+import Toast from "../components/Toast.svelte";
 import { goBack } from "../lib/back";
 import OpenVault from "./OpenVault.svelte";
 
@@ -46,9 +47,11 @@ const githubDetail: EntryDetail = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  render(Toast);
   vi.mocked(listEntries).mockResolvedValue([github]);
   vi.mocked(listTags).mockResolvedValue([]);
   vi.mocked(entryDetail).mockResolvedValue(githubDetail);
+  vi.mocked(entryHistory).mockResolvedValue([]);
 });
 
 function show() {
@@ -124,6 +127,7 @@ describe("adding an entry", () => {
     });
     expect(listEntries).toHaveBeenCalledTimes(2);
     expect(listTags).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("status")).toHaveTextContent("Enregistrement réussi");
   });
 
   it("keeps identifiers, addresses, tags and the search as typed on a phone keyboard", async () => {
@@ -299,29 +303,38 @@ describe("history", () => {
       { updatedAt: Date.UTC(2026, 9, 1), title: "Git", username: null, passwordChanged: false },
     ]);
     await openGithub();
-    await fireEvent.click(screen.getByRole("button", { name: "Historique" }));
+    expect(screen.getByRole("heading", { level: 4 })).toHaveTextContent("Historique");
     const versions = within(await screen.findByRole("list", { name: "Historique" })).getAllByRole(
       "listitem",
     );
     expect(versions).toHaveLength(2);
-    expect(versions[0]).toHaveTextContent("GitHub — arthur (mot de passe différent)");
+    expect(versions[0]).toHaveTextContent("GitHub — arthur");
+    expect(within(versions[0] as HTMLElement).getByText("mot de passe différent")).toBeInTheDocument();
     expect(versions[1]).toHaveTextContent("Git");
     expect(versions[1]).not.toHaveTextContent("mot de passe différent");
     expect(entryHistory).toHaveBeenCalledWith("1");
-    await fireEvent.click(screen.getByRole("button", { name: "Masquer l'historique" }));
-    expect(screen.queryByRole("list", { name: "Historique" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Historique" })).not.toBeInTheDocument();
   });
 
-  it("is offered only when there are previous versions", async () => {
+  it("is shown only when there are previous versions", async () => {
     vi.mocked(entryDetail).mockResolvedValue({ ...githubDetail, versions: 0 });
     await openGithub();
-    expect(screen.queryByRole("button", { name: "Historique" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Historique" })).not.toBeInTheDocument();
+    expect(entryHistory).not.toHaveBeenCalled();
+  });
+
+  it("hides an empty history", async () => {
+    vi.mocked(entryHistory).mockResolvedValue([]);
+    await openGithub();
+    await vi.waitFor(() => {
+      expect(entryHistory).toHaveBeenCalled();
+    });
+    expect(screen.queryByRole("list", { name: "Historique" })).not.toBeInTheDocument();
   });
 
   it("reports a failure", async () => {
     vi.mocked(entryHistory).mockRejectedValue({ code: "entryNotFound", detail: "1" });
     await openGithub();
-    await fireEvent.click(screen.getByRole("button", { name: "Historique" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Cette entrée n'existe plus.");
   });
 });
