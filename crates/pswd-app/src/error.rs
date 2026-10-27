@@ -105,7 +105,7 @@ mod tests {
             ),
             (
                 AppError::from(GeneratorError::InvalidLength),
-                "la longueur doit être comprise entre 8 et 128",
+                "la longueur doit être comprise entre 8 et 24",
             ),
             (
                 AppError::PasswordTooShort,

@@ -148,12 +148,12 @@ mod tests {
         assert_eq!(clear.unwrap().password, None);
         let empty = login(&json!({ "mode": "set", "value": "" })).into_content(Some(current()));
         assert_eq!(empty.unwrap().password, None);
-        let generated = login(&json!({ "mode": "generate", "length": 40, "symbols": false }))
+        let generated = login(&json!({ "mode": "generate", "length": 20, "symbols": false }))
             .into_content(Some(current()))
             .unwrap()
             .password
             .unwrap();
-        assert_eq!(generated.expose().len(), 40);
+        assert_eq!(generated.expose().len(), 20);
         assert!(generated.expose().chars().all(char::is_alphanumeric));
         assert_eq!(
             login(&json!({ "mode": "generate", "length": 3, "symbols": true }))

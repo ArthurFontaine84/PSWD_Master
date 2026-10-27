@@ -991,7 +991,7 @@ mod tests {
         state
             .update_entry(
                 &github,
-                wifi_input(&json!({ "mode": "generate", "length": 30, "symbols": true })),
+                wifi_input(&json!({ "mode": "generate", "length": 20, "symbols": true })),
             )
             .unwrap();
         assert_eq!(
@@ -1001,7 +1001,7 @@ mod tests {
                 .expose()
                 .chars()
                 .count(),
-            30
+            20
         );
         let history = serde_json::to_value(state.history(&github).unwrap()).unwrap();
         assert_eq!(history[0]["passwordChanged"], true);

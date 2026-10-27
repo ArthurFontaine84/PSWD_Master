@@ -22,7 +22,7 @@ export interface FormValues {
 }
 
 export const MIN_LENGTH = 8;
-export const MAX_LENGTH = 128;
+export const MAX_LENGTH = 24;
 const DEFAULT_LENGTH = 24;
 
 /** Formulaire d'une nouvelle entrée. */

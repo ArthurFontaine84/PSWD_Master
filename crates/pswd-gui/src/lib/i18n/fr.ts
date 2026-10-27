@@ -19,7 +19,7 @@ const errors = {
   noPassword: (detail: string) => `L'entrée « ${detail} » n'a pas de mot de passe.`,
   clipboard: (detail: string) => `Copie impossible : ${detail}`,
   emptyTitle: () => "Le titre ne peut pas être vide.",
-  invalidLength: () => "La longueur doit être comprise entre 8 et 128.",
+  invalidLength: () => "La longueur doit être comprise entre 8 et 24.",
   saveFailed: (detail: string) => `Enregistrement impossible : ${detail}`,
   wrongRecoveryKey: () => "Clé de récupération incorrecte.",
   invalidRecoveryKey: () => "Clé de récupération mal saisie : 52 caractères, par groupes de 4.",
@@ -156,7 +156,7 @@ export const fr = {
       "Le mot de passe maître doit mélanger au moins 3 types de caractères parmi : minuscules, majuscules, chiffres, symboles.",
     passwordMismatch: "Les deux saisies ne correspondent pas.",
     titleRequired: "Le titre est obligatoire.",
-    lengthInvalid: "La longueur doit être un nombre entier entre 8 et 128.",
+    lengthInvalid: "La longueur doit être un nombre entier entre 8 et 24.",
   },
   errors,
 };

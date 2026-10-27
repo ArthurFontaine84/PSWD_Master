@@ -39,7 +39,7 @@ pub struct PasswordOptions {
 }
 
 impl PasswordOptions {
-    const LENGTH: RangeInclusive<usize> = 8..=128;
+    const LENGTH: RangeInclusive<usize> = 8..=24;
 }
 
 impl Default for PasswordOptions {
@@ -122,10 +122,10 @@ mod tests {
 
     #[test]
     fn length_bounds_are_enforced() {
-        for length in [8, 128] {
+        for length in [8, 24] {
             assert_eq!(generate(length, true, 1).unwrap().expose().len(), length);
         }
-        for length in [0, 7, 129] {
+        for length in [0, 7, 25] {
             assert_eq!(
                 generate(length, true, 1).err(),
                 Some(GeneratorError::InvalidLength),
@@ -159,14 +159,14 @@ mod tests {
     fn error_message_gives_the_bounds() {
         assert_eq!(
             GeneratorError::InvalidLength.to_string(),
-            "la longueur doit être comprise entre 8 et 128"
+            "la longueur doit être comprise entre 8 et 24"
         );
     }
 
     proptest! {
         #[test]
         fn password_respects_the_options(
-            length in 8..=128_usize,
+            length in 8..=24_usize,
             symbols in any::<bool>(),
             seed in any::<u64>(),
         ) {

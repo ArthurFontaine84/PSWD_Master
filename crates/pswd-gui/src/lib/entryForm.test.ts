@@ -50,9 +50,12 @@ describe("entry form", () => {
     expect(formProblem({ ...emptyForm(), title: "  " })).toBe("Le titre est obligatoire.");
     const generating = { ...emptyForm(), title: "GitHub", passwordMode: "generate" as const };
     expect(formProblem(generating)).toBeNull();
-    for (const length of [7, 129, 12.5, Number.NaN]) {
+    for (const length of [8, 24]) {
+      expect(formProblem({ ...generating, length })).toBeNull();
+    }
+    for (const length of [7, 25, 12.5, Number.NaN]) {
       expect(formProblem({ ...generating, length })).toBe(
-        "La longueur doit être un nombre entier entre 8 et 128.",
+        "La longueur doit être un nombre entier entre 8 et 24.",
       );
     }
     expect(formProblem({ ...generating, kind: "note", length: 3 })).toBeNull();
@@ -78,9 +81,9 @@ describe("entry form", () => {
       notes: "compte pro",
       tags: ["dev", "perso", "maison"],
     });
-    expect(toInput({ ...values, passwordMode: "generate", length: 30, symbols: false }).password).toEqual({
+    expect(toInput({ ...values, passwordMode: "generate", length: 20, symbols: false }).password).toEqual({
       mode: "generate",
-      length: 30,
+      length: 20,
       symbols: false,
     });
     expect(toInput({ ...values, passwordMode: "keep" }).password).toEqual({ mode: "keep" });

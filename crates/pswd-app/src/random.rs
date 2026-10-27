@@ -30,11 +30,11 @@ mod tests {
     #[test]
     fn generated_passwords_follow_the_options_and_differ() {
         let options = PasswordOptions {
-            length: 40,
+            length: 20,
             symbols: false,
         };
         let first = generate(options).unwrap();
-        assert_eq!(first.expose().len(), 40);
+        assert_eq!(first.expose().len(), 20);
         assert!(first.expose().chars().all(char::is_alphanumeric));
         assert_ne!(generate(options).unwrap(), first);
     }

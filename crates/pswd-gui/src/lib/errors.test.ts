@@ -35,7 +35,7 @@ describe("errorMessage", () => {
       ["noPassword", "Wi-Fi", "L'entrée « Wi-Fi » n'a pas de mot de passe."],
       ["clipboard", "occupé", "Copie impossible : occupé"],
       ["emptyTitle", null, "Le titre ne peut pas être vide."],
-      ["invalidLength", null, "La longueur doit être comprise entre 8 et 128."],
+      ["invalidLength", null, "La longueur doit être comprise entre 8 et 24."],
       ["saveFailed", "disque plein", "Enregistrement impossible : disque plein"],
       ["wrongRecoveryKey", null, "Clé de récupération incorrecte."],
       [

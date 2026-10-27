@@ -542,15 +542,15 @@ mod tests {
         let env = env_with_entries();
         let output = session_output(
             &env,
-            &["gen", "gen --length 40 --no-symbols", "gen --length 3"],
+            &["gen", "gen --length 20 --no-symbols", "gen --length 3"],
         );
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines[0].chars().count(), 24, "{output}");
-        assert_eq!(lines[1].len(), 40, "{output}");
+        assert_eq!(lines[1].len(), 20, "{output}");
         assert!(lines[1].chars().all(char::is_alphanumeric), "{output}");
         assert_eq!(
             lines[2],
-            "erreur : la longueur doit être comprise entre 8 et 128"
+            "erreur : la longueur doit être comprise entre 8 et 24"
         );
     }
 

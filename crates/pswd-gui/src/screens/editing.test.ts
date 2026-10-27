@@ -141,7 +141,7 @@ describe("adding an entry", () => {
     await type("Titre", "Banque");
     await fireEvent.click(screen.getByRole("radio", { name: "Générer" }));
     expect(screen.queryByLabelText("Mot de passe")).not.toBeInTheDocument();
-    await type("Longueur", "30");
+    await type("Longueur", "20");
     await fireEvent.click(screen.getByRole("checkbox", { name: "Avec des symboles" }));
     await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
     await vi.waitFor(() => {
@@ -149,7 +149,7 @@ describe("adding an entry", () => {
     });
     expect(vi.mocked(addEntry).mock.calls[0]?.[0].password).toEqual({
       mode: "generate",
-      length: 30,
+      length: 20,
       symbols: false,
     });
   });
@@ -181,7 +181,7 @@ describe("adding an entry", () => {
     await type("Longueur", "4");
     await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "La longueur doit être un nombre entier entre 8 et 128.",
+      "La longueur doit être un nombre entier entre 8 et 24.",
     );
     expect(addEntry).not.toHaveBeenCalled();
   });
