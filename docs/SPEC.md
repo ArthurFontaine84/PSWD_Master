@@ -30,7 +30,15 @@ Le coffre est chiffré de bout en bout : le serveur ne voit jamais de données e
 
 Reste à faire sur le Mac : build iOS, plugin Swift du presse-papiers, écran neutre, accès « security-scoped » (§12).
 
-**Étape 3 — serveur maison** (§11) : `pswd-server`, comptes, coffres privés et communs, synchro entre appareils.
+**Étape 3 — serveur maison** (§11) : `pswd-server`, comptes, coffres privés et communs, synchro entre appareils. Sous-étapes par fonctionnalité, du serveur jusqu'à l'écran, chacune validée et commitée :
+1. Serveur minimal : crate `pswd-server`, base SQLite créée au démarrage, lecture et publication conditionnelle d'un coffre, 15 versions conservées ; HTTP simple, sans comptes, réservé aux tests.
+2. TLS et client : certificat, `rustls`, adaptateur `RemoteStore` HTTP dans `pswd-infra` avec vérification de l'empreinte, testé contre un `pswd-server` local.
+3. Comptes et appareils : jetons, clés de connexion, administrateur initial, `reset-admin`, révocation, membres de chaque coffre.
+4. Synchro dans la CLI : `connect`, `disconnect`, `sync`, états des coffres, téléchargement initial.
+5. Synchro dans PSWD Master : connexion, état de synchro, bouton « Synchroniser » ; build Android.
+6. Coffres communs : inviter, accepter ou refuser, quitter (serveur et PSWD Master).
+7. Administration : panneau de PSWD Master (membres, appareils, rôles, suppression, rattachement, versions, adresse publique, sauvegarde du serveur).
+8. Installation réelle : paquet `.deb`, `backup` / `restore` du serveur, VM puis PC réel, documentation, mutants.
 
 La v1 synchronisait chaque coffre avec un dépôt Git privé (GitHub). Cette synchro a été retirée au profit du serveur maison ; son code reste dans l'historique du dépôt (jusqu'au commit `233f829`).
 
@@ -54,7 +62,7 @@ Workspace Cargo, architecture hexagonale :
 | `pswd-cli` | Binaire `pswd` : questions et affichage dans le terminal, shell interactif, verrouillage automatique | `#![forbid(unsafe_code)]` |
 | `pswd-gui` | Application Tauri 2 **PSWD Master** : backend Rust (commandes, session, verrouillage) et interface Svelte 5 + TypeScript (§12) | `#![forbid(unsafe_code)]` |
 
-Futur : `pswd-server` et l'adaptateur `RemoteStore` HTTP (étape 3).
+Étape 3 : `pswd-server` (exécutable du serveur, `#![forbid(unsafe_code)]`, §11) et l'adaptateur `RemoteStore` HTTP dans `pswd-infra`. Dépendances prévues : serveur `axum` + `tokio`, `rustls` (moteur `ring`, ni OpenSSL ni `aws-lc-rs`), `rcgen` (certificat), `rusqlite` avec SQLite intégré (`bundled`) ; client `ureq` (synchrone comme le port) avec `rustls` et un vérificateur d'empreinte maison. Si `ureq` n'accepte pas ce vérificateur (à vérifier en premier, sous-étape 2), `reqwest` en mode bloquant.
 
 **Ports (définis dans `pswd-core`)**
 - `LocalStore` : `load() -> Option<bytes>` (`None` : pas de coffre local), `save_atomic(bytes)` (fichier temporaire + renommage).
@@ -203,7 +211,7 @@ Précisions :
 - Si l'écriture locale d'une modification échoue, le coffre en mémoire revient à son état précédent.
 - Un fichier distant inutilisable (altéré, autre coffre, version inconnue) n'est **jamais écrasé** : état « refusé », le coffre local reste utilisable.
 - États de synchro : à jour, hors ligne (avec le message de l'adaptateur), conflit persistant après 3 tentatives, distant refusé.
-- Les moments de synchro (ouverture, modification, verrouillage) sont fixés avec le serveur (§11).
+- Seul un coffre déverrouillé se synchronise (la fusion exige sa clé). Moments : au déverrouillage, après chaque modification, au verrouillage (manuel, automatique, passage en arrière-plan sur mobile) et à la demande (bouton « Synchroniser », commande `sync` de la CLI). Pas de synchro périodique. La modification est d'abord enregistrée localement ; la synchro se fait ensuite en arrière-plan, sans jamais figer l'interface.
 
 ## 8. CLI
 
@@ -282,30 +290,62 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 | `partage-par-membre` | Plusieurs enveloppes possibles par coffre (une par membre, à clé publique) : ajouter ou retirer un membre sans partager de mot de passe. Les coffres communs de l'étape 3 utilisent un mot de passe partagé. |
 | `dossier-reseau` | Synchro par un partage réseau (NAS) sans `pswd-server`. Un dossier ne sait pas refuser une écriture concurrente : il faudrait un fichier par appareil, fusionnés à la lecture. |
 | `multi-serveurs` | Un appareil connecté à plusieurs serveurs : chaque coffre est rattaché à un serveur. |
+| `cert-rotation` | Changer le certificat du serveur (clé privée volée) : les appareils devraient retenir la nouvelle empreinte sans se reconnecter un par un. |
 
 ## 11. Serveur maison (étape 3)
 
-**Principe** : `pswd-server` est un exécutable Rust unique, sans dépendance, lancé sur une machine de l'utilisateur. Cible : un PC sous Linux (x86_64), en service `systemd` ; essayé d'abord dans une machine virtuelle de la même distribution que ce PC (VirtualBox ou VMware, réseau en pont) avant le vrai déploiement. C'est une passerelle : il stocke des fichiers `vault.enc` opaques et ne détient aucune clé. Toute la gestion se fait depuis l'application.
+**Principe** : `pswd-server` est un exécutable Rust unique, sans dépendance à installer, lancé sur une machine de l'utilisateur. Cible : un PC sous **Ubuntu Server 26.04 LTS** (x86_64), en service `systemd` ; essayé d'abord dans une machine virtuelle Ubuntu Server 26.04 (VirtualBox ou VMware, réseau en pont) avant le vrai déploiement. C'est une passerelle : il stocke des fichiers `vault.enc` opaques et ne détient aucune clé. Toute la gestion se fait depuis PSWD Master.
 
-**Transport** : HTTPS. Le serveur génère son propre certificat ; l'application l'**épingle** (n'accepte que lui). Écriture conditionnelle : une publication est refusée si le coffre a changé depuis la version lue, ce qui conserve le contrat `RemoteStore`. Le serveur identifie les coffres par son propre identifiant, jamais par leur nom.
+**Installation** : un paquet `.deb` (`cargo-deb`), installé par `sudo apt install ./pswd-server_<version>_amd64.deb`, sans aucune étape manuelle. Il installe `/usr/bin/pswd-server`, crée l'utilisateur système `pswd-server` (sans connexion ; le serveur ne tourne jamais en `root`) et le dossier `/var/lib/pswd-server/` (base et certificat, accessibles à ce seul utilisateur), installe et démarre le service, puis affiche l'adresse et la clé administrateur. Configuration : `/etc/pswd-server/config.toml` (port, 8443 par défaut). Une mise à jour (nouveau `.deb`) et `apt remove` conservent les données ; seul `apt purge` les efface.
 
-**Accès** : l'application retient une adresse locale et une adresse publique, essayées dans cet ordre (délai max 5 s). L'accès depuis l'extérieur (redirection de port, VPN) est documenté ; il n'y a pas de relais.
+**Stockage** : une base SQLite (`/var/lib/pswd-server/pswd.db`, moteur intégré à l'exécutable par `rusqlite` `bundled`), créée au premier démarrage. Tout y est, contenu des coffres compris (colonne `BLOB`) : une publication (vérification de la version, nouvelle version, retrait de la plus ancienne au-delà de 15) est une seule transaction, qu'une coupure de courant ne peut pas laisser à moitié faite.
+
+**Sauvegarde du serveur**
+- `sudo pswd-server backup <dossier>` : copie cohérente de la base et du certificat (sans arrêter le serveur) dans un nouveau fichier `pswd-server-sauvegarde_<AAAA-MM-JJ_HH-MM-SS>.db` ; le dossier doit exister, rien n'est écrasé.
+- Le panneau d'administration de PSWD Master propose « Sauvegarder le serveur » : le serveur produit la même copie et l'application l'enregistre par la fenêtre système. Réservé aux administrateurs (la copie contient les coffres chiffrés de tous les comptes).
+- `sudo pswd-server restore <fichier>` : seulement sur un serveur neuf, sans base existante. Le certificat restauré garde la même empreinte : les appareils se reconnectent sans rien refaire.
+- Pas de sauvegarde automatique : une copie sur le même disque ne protège pas de sa panne.
+
+**Transport** : HTTPS. Le serveur génère son propre certificat à l'installation (`rcgen`), sans expiration pratique (fin de validité au 31/12/9999). L'application l'**épingle** : elle ne vérifie que son empreinte SHA-256, ni les dates ni le nom, ce qui permet les deux adresses. Un certificat différent est refusé (« Le serveur n'est pas celui attendu »), sans jamais proposer de lui faire confiance. Pas de changement de certificat pour l'instant (§10 `cert-rotation`) : une clé privée volée permettrait de se faire passer pour le serveur et de récupérer des jetons, jamais de lire un coffre.
+
+**API** : REST sous le préfixe `/v1/`. Le contenu d'un coffre circule en octets bruts (`application/octet-stream`), tout le reste en JSON. Jeton dans l'en-tête `Authorization: Bearer <jeton>`. Version d'un coffre = compteur entier tenu par le serveur, augmenté à chaque publication.
+
+| `RemoteStore` | Requête | Réponses |
+|---|---|---|
+| `fetch()` | `GET /v1/vaults/{id}` | `200` + octets + `ETag: "<version>"` ; `404` inconnu ; `410` retiré |
+| `push(…, Some(v))` | `PUT /v1/vaults/{id}` + `If-Match: "<v>"` | `204` ; `412` le coffre a bougé (`Conflict`) |
+| `push(…, None)` | `PUT /v1/vaults/{id}` + `If-None-Match: *` | `204` ; `412` le coffre existe déjà |
+
+Le serveur identifie les coffres par son propre identifiant, jamais par leur nom.
+
+**Protections**
+- Taille maximale : 64 Mio pour un coffre, quelques Ko pour une requête JSON ; délai maximal de 30 s par requête.
+- Au-delà de 10 jetons ou clés invalides par minute depuis une adresse IP, celle-ci est bloquée quelques minutes.
+- Un coffre reçu est vérifié (structure, version, en-tête, par `pswd-core`, sans clé) ; un envoi mal formé est refusé.
+- Journal (`journalctl -u pswd-server`) : démarrages, erreurs, accès refusés ; jamais de jeton, de clé ni de contenu.
+- Une requête non autorisée reçoit `401` sans détail : le serveur ne révèle pas l'existence d'un coffre à qui n'y a pas droit.
+
+**Accès** : l'application retient une adresse locale et une adresse publique, essayées dans cet ordre (délai max 5 s). L'adresse publique est renseignée par un administrateur dans le panneau ; chaque appareil la reçoit du serveur. L'accès depuis l'extérieur (redirection de port, VPN) est documenté ; il n'y a pas de relais.
 
 **Administration**
-- Au premier démarrage, le serveur affiche une fois son adresse et une **clé administrateur**. Le premier appareil qui la présente devient administrateur ; personne d'autre ne le peut.
-- Secours : sur la machine, `pswd-server reset-admin` affiche une nouvelle clé administrateur.
-- Le panneau d'administration de l'application permet d'ajouter un membre, de supprimer un compte, de révoquer un appareil, de promouvoir un membre administrateur ou de lui retirer ce rôle, de supprimer un coffre, de rattacher quelqu'un à un coffre sans membre et de restaurer une version. Le dernier administrateur ne peut pas perdre son rôle ni être supprimé.
+- À l'installation, le serveur affiche une fois son adresse et une **clé administrateur** (clé de connexion, ci-dessous). Le premier appareil qui la présente devient administrateur ; personne d'autre ne le peut.
+- Secours : sur la machine, `pswd-server reset-admin` affiche une nouvelle clé administrateur (aussi si la première a expiré).
+- Le panneau d'administration de PSWD Master permet d'ajouter un membre, de supprimer un compte, de révoquer un appareil, de promouvoir un membre administrateur ou de lui retirer ce rôle, de supprimer un coffre, de rattacher quelqu'un à un coffre sans membre, de restaurer une version, de renseigner l'adresse publique et de sauvegarder le serveur. Le dernier administrateur ne peut pas perdre son rôle ni être supprimé.
 
 **Comptes et appareils**
-- Ajouter un membre produit l'adresse du serveur et une clé à usage unique, à recopier dans l'application (ordinateur ou mobile). Cette clé contient aussi une partie de l'empreinte du certificat : l'application vérifie le serveur dès la première connexion, sans comparaison manuelle.
-- Chaque appareil reçoit son propre jeton, révocable individuellement. Le compte n'a pas de mot de passe serveur : rien ne se confond avec le mot de passe maître.
-- Un appareil est connecté à un seul serveur. Il peut s'en déconnecter (son jeton est révoqué) puis se connecter à nouveau.
+- Ajouter un membre produit l'adresse du serveur et une **clé de connexion**, à recopier dans l'application (ordinateur ou mobile). Même format que la clé de récupération (§5 : Base32 Crockford, 52 caractères en 13 groupes, mêmes tolérances), portant 32 octets : 16 octets de secret aléatoire, puis les 16 premiers octets de l'empreinte du certificat. L'application vérifie que le certificat présenté commence par ces octets, puis retient l'empreinte complète : le serveur est vérifié dès la première connexion, sans comparaison manuelle.
+- Une clé de connexion est à usage unique, valable 7 jours, annulable depuis le panneau. Le même format sert pour la clé administrateur, l'ajout d'un membre et l'ajout d'un appareil à un compte existant (clé générée depuis un appareil déjà connecté du compte).
+- Chaque appareil reçoit son propre jeton, révocable individuellement. Le serveur ne garde que l'empreinte (SHA-256) des jetons et des clés de connexion : une copie de la base ne donne aucun accès. Le compte n'a pas de mot de passe serveur : rien ne se confond avec le mot de passe maître.
+- Sur l'appareil, l'adresse locale, l'adresse publique, l'empreinte du certificat et le jeton sont rangés dans un fichier, `<data_dir>/pswd/server.toml` (droits `0600` sous Linux ; dossier privé de l'application sur mobile). Pas de trousseau du système : il ne protègerait pas mieux (le `vault.enc` chiffré, que le jeton permet de télécharger, est dans le même dossier), il manque souvent sous Linux sans bureau et exigerait du code natif sur mobile. Un jeton volé se révoque depuis le panneau.
+- Un appareil est connecté à un seul serveur. Il peut s'en déconnecter (son jeton est révoqué) puis se connecter à nouveau. En se connectant, il télécharge la copie chiffrée de tous les coffres dont le compte est membre ; chacun se synchronise ensuite à son ouverture (§7).
+- **CLI** : se connecter, se déconnecter, synchroniser, générer une clé pour ajouter un appareil à son compte. Coffres communs (inviter, accepter, quitter) et administration se font seulement dans PSWD Master ; un coffre commun déjà accepté se synchronise normalement dans la CLI.
 
 **Coffres**
 - Un coffre est **privé** ou **commun**. Un coffre commun est protégé par un mot de passe maître partagé, transmis hors du serveur.
 - Tout membre d'un coffre commun peut inviter un utilisateur du même serveur, qui accepte ou refuse, et peut quitter le coffre. Tous les membres sont égaux ; seul un administrateur retire quelqu'un. Après un départ, changer le mot de passe (`passwd`) est conseillé : l'ancien membre le connaît.
 - Être membre donne le droit de télécharger et de publier le fichier ; le lire exige le mot de passe du coffre.
 - Le serveur ne supprime jamais un coffre de lui-même, même sans membre. Depuis l'application, supprimer un coffre privé propose « local seulement » ou « local et serveur » ; un coffre commun se quitte. Supprimer un coffre sur le serveur ne touche pas aux copies locales des appareils.
+- Une suppression sur le serveur (nom du coffre à retaper) efface aussitôt son contenu et ses versions ; seule reste une trace (identifiant, « retiré ») pour que les appareils passent le coffre à l'état « retiré ». Pas de corbeille : les copies locales et les sauvegardes suffisent à rattraper une erreur.
 - Le serveur conserve les **15 dernières versions** de chaque coffre. Une restauration crée un nouveau coffre avec les mêmes membres (§6).
 
 **État d'un coffre sur un appareil**
