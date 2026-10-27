@@ -88,9 +88,9 @@ L'APK signé est `src-tauri/gen/android/app/build/outputs/apk/universal/release/
 
 1. **Nouveau coffre** : un nom (lettres, chiffres, `-` et `_`) et un mot de passe maître d'au moins 12 caractères mélangeant au moins 3 types parmi minuscules, majuscules, chiffres et symboles.
 2. La **clé de récupération** s'affiche une seule fois : la recopier sur papier, cocher la case, puis **Continuer**. Elle permet de choisir un nouveau mot de passe en cas d'oubli (« Mot de passe oublié ? » à l'ouverture).
-3. Le coffre est ouvert : **Nouvelle entrée** pour ajouter un identifiant ou une note, la recherche et le filtre par tag pour retrouver une entrée, **Copier** pour copier son mot de passe (effacé du presse-papiers après 20 s).
+3. Le coffre est ouvert : **Nouvelle entrée** pour ajouter un mot de passe ou une note sécurisée, la recherche et le filtre par tag pour retrouver une entrée, **Copier** pour copier son mot de passe (effacé du presse-papiers après 20 s).
 
-Le coffre se verrouille après 10 minutes sans action, ou avec **Verrouiller**. **Gérer le coffre** permet de changer le mot de passe maître, d'importer un fichier CSV (format : `docs/SPEC.md` § 8) ou de supprimer le coffre. Depuis la liste des coffres : **Sauvegarder** écrit tous les coffres dans un fichier `.pswd` (même format qu'au § 6), **Restaurer une sauvegarde** en rajoute un depuis ce fichier, **Réglages** choisit le thème.
+Le coffre se verrouille après 10 minutes sans action, ou avec **Verrouiller**. **Gérer le coffre** permet de changer le mot de passe maître, d'importer un fichier CSV (format : `docs/SPEC.md` § 8) ou de supprimer le coffre. Depuis la liste des coffres : **Sauvegarder** écrit les coffres cochés dans un fichier `.pswd` (même format qu'au § 6), **Restaurer** rajoute ceux qu'on coche dans un tel fichier, **Réglages** choisit le thème.
 
 ## 3. Installer la ligne de commande
 
@@ -191,7 +191,7 @@ Le coffre est ajouté comme nouveau coffre. Si le nom est déjà pris, il devien
 | Configuration | `%APPDATA%\pswd\config.toml` | `~/.config/pswd/config.toml` |
 | Coffres | `%APPDATA%\pswd\vaults\<nom>\` | `~/.local/share/pswd/vaults/<nom>/` |
 
-Ces emplacements sont communs à `pswd` et à PSWD Master sur un ordinateur ; les deux peuvent modifier le même coffre en même temps. Chaque dossier de coffre contient `vault.enc`, le coffre chiffré. Dans `config.toml`, on peut régler `auto_lock_minutes` (0 = jamais) et `clipboard_clear_seconds`.
+Ces emplacements sont communs à `pswd` et à PSWD Master sur un ordinateur ; les deux peuvent modifier le même coffre en même temps. Chaque dossier de coffre contient `vault.enc`, le coffre chiffré. Dans `config.toml`, on peut régler `auto_lock_minutes` (0 = jamais) et `clipboard_clear_seconds` ; `theme` est réglé par PSWD Master.
 
 **Venant d'une version précédente** : retirer les lignes `url = …` et `default_vault = …` de `config.toml` (sinon : `configuration invalide`). Les dossiers `repo.git` et les jetons `pswd` du trousseau ne servent plus et peuvent être supprimés.
 

@@ -9,7 +9,8 @@ export default ts.config(
   ts.configs.strict,
   svelte.configs.recommended,
   {
-    languageOptions: { globals: { ...globals.browser, ...globals.node } },
+    // `__APP_VERSION__` : remplacé par Vite à la construction (`vite.config.ts`).
+    languageOptions: { globals: { ...globals.browser, ...globals.node, __APP_VERSION__: "readonly" } },
   },
   {
     files: ["**/*.svelte", "**/*.svelte.ts"],

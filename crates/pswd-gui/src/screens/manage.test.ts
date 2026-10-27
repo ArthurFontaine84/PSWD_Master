@@ -246,7 +246,7 @@ describe("backing up the vaults", () => {
     await screen.findByRole("group", { name: "Coffres à sauvegarder" });
     expect(screen.getByRole("checkbox", { name: "perso" })).not.toBeChecked();
     expect(screen.getByRole("checkbox", { name: "travail" })).not.toBeChecked();
-    expect(screen.getByRole("button", { name: "Sauvegarder le coffre sélectionné" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sauvegarder le coffre" })).toBeDisabled();
   });
 
   it("writes the checked vaults only to the chosen .pswd file", async () => {
@@ -257,7 +257,7 @@ describe("backing up the vaults", () => {
     const onBackedUp = render_();
     await fireEvent.click(await screen.findByRole("checkbox", { name: "travail" }));
     await fireEvent.click(screen.getByRole("checkbox", { name: "famille" }));
-    const confirm = screen.getByRole("button", { name: "Sauvegarder les 2 coffres sélectionnés" });
+    const confirm = screen.getByRole("button", { name: "Sauvegarder les 2 coffres" });
     await fireEvent.click(confirm);
     await vi.waitFor(() => {
       expect(pickBackupDestination).toHaveBeenCalledWith(
@@ -282,7 +282,7 @@ describe("backing up the vaults", () => {
     vi.mocked(backupToFile).mockResolvedValue(2);
     render_();
     await fireEvent.click(await screen.findByRole("checkbox", { name: "Tout sélectionner" }));
-    await fireEvent.click(screen.getByRole("button", { name: "Sauvegarder les 2 coffres sélectionnés" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Sauvegarder les 2 coffres" }));
     await vi.waitFor(() => {
       expect(backupToFile).toHaveBeenCalledWith("D:/s.pswd", ["perso", "travail"]);
     });
@@ -295,7 +295,7 @@ describe("backing up the vaults", () => {
       .mockResolvedValue(1);
     const onBackedUp = render_();
     await fireEvent.click(await screen.findByRole("checkbox", { name: "perso" }));
-    const confirm = screen.getByRole("button", { name: "Sauvegarder le coffre sélectionné" });
+    const confirm = screen.getByRole("button", { name: "Sauvegarder le coffre" });
     await fireEvent.click(confirm);
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Écriture du fichier impossible : accès refusé",

@@ -1,13 +1,18 @@
 /// <reference types="vitest/config" />
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { svelteTesting } from "@testing-library/svelte/vite";
+import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 
 // Adresse fournie par Tauri pour le développement sur un appareil mobile.
 const host = process.env.TAURI_DEV_HOST;
 
+// La version de l'application, celle des installateurs, fixée à la construction.
+const { version } = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf-8")) as { version: string };
+
 export default defineConfig({
   plugins: [svelte(), svelteTesting()],
+  define: { __APP_VERSION__: JSON.stringify(version) },
   clearScreen: false,
   server: {
     port: 1420,

@@ -42,6 +42,7 @@ const errors = {
 
 export const fr = {
   appTitle: "PSWD Master",
+  appVersion: (version: string) => `v${version}`,
   vaults: "Coffres de mot de passe",
   noVault: "Aucun coffre sur cet appareil.",
   loading: "Chargement…",
@@ -138,7 +139,7 @@ export const fr = {
     "Les coffres cochés sont réunis, toujours chiffrés, dans un seul fichier .pswd. Chacun se rouvrira avec son mot de passe maître actuel.",
   vaultsToBackUp: "Coffres à sauvegarder",
   backupSelection: (count: number) =>
-    count <= 1 ? "Sauvegarder le coffre sélectionné" : `Sauvegarder les ${count} coffres sélectionnés`,
+    count <= 1 ? "Sauvegarder le coffre" : `Sauvegarder les ${count} coffres`,
   backingUp: "Sauvegarde…",
   backupFileTitle: "Enregistrer la sauvegarde des coffres",
   backedUp: (count: number) => (count <= 1 ? `${count} coffre sauvegardé.` : `${count} coffres sauvegardés.`),

@@ -123,7 +123,11 @@
   <!-- Un coffre ouvert garde tout l'écran pour ses entrées. -->
   {#if screen.kind !== "open"}
     <header class="app-bar">
-      <h1><span class="logo"><Icon name="shield" /></span>{texts.appTitle}</h1>
+      <h1>
+        <span class="logo"><Icon name="shield" /></span>
+        {texts.appTitle}
+        <span class="version">{texts.appVersion(__APP_VERSION__)}</span>
+      </h1>
       {#if screen.kind === "list"}
         <div class="tools">
           <button
@@ -240,6 +244,15 @@
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: var(--on-accent);
     box-shadow: 0 4px 14px var(--glow-1);
+  }
+
+  .version {
+    align-self: flex-end;
+    margin-bottom: 0.2em;
+    font-size: 0.75rem;
+    font-weight: 400;
+    letter-spacing: 0;
+    color: var(--text-muted);
   }
 
   .tools {

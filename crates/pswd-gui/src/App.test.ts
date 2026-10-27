@@ -177,7 +177,7 @@ describe("App", () => {
       recoveryKey: "AAAA-BBBB",
     });
     render(App);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("PSWD Master");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/^PSWD Master\s*v\d+\.\d+\.\d+$/);
     await fireEvent.click(await screen.findByRole("button", { name: "Nouveau coffre" }));
     await fireEvent.input(field("Nom du coffre"), { target: { value: "neuf" } });
     await fireEvent.input(field("Mot de passe maître"), { target: { value: "Maître-2026!" } });
@@ -341,7 +341,7 @@ describe("App", () => {
     render(App);
     await fireEvent.click(await screen.findByRole("button", { name: "Sauvegarder" }));
     await fireEvent.click(await screen.findByRole("checkbox", { name: "perso" }));
-    await fireEvent.click(screen.getByRole("button", { name: "Sauvegarder le coffre sélectionné" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Sauvegarder le coffre" }));
     expect(await screen.findByRole("status")).toHaveTextContent("1 coffre sauvegardé.");
     expect(backupToFile).toHaveBeenCalledWith("E:/s.pswd", ["perso"]);
     expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();

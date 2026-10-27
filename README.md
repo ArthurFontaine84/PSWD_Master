@@ -2,7 +2,7 @@
 
 Gestionnaire de mots de passe personnel, local-first :
 
-- **PSWD Master**, l'application graphique pour Windows, Linux et macOS (Android et iOS en cours) ;
+- **PSWD Master**, l'application graphique pour Windows, Linux et macOS et Android (iOS à venir) ;
 - **`pswd`**, la même chose en ligne de commande.
 
 Les coffres sont chiffrés localement (Argon2id + XChaCha20-Poly1305) et restent sur vos appareils : aucun service tiers n'intervient. Sur un ordinateur, l'application et la ligne de commande voient les mêmes coffres.
@@ -13,7 +13,7 @@ Installation, premier coffre et sauvegardes : [`docs/INSTALLATION.md`](docs/INST
 
 ## PSWD Master
 
-Créer un coffre, le déverrouiller, puis ajouter, chercher, copier et modifier ses entrées. Le menu « Gérer le coffre » change le mot de passe maître, importe un CSV ou supprime le coffre ; la liste des coffres propose la sauvegarde et la restauration (fichier `.pswd`) et le thème.
+Créer un coffre, le déverrouiller, puis ajouter, chercher, copier et modifier ses entrées. Le menu « Gérer le coffre » change le mot de passe maître, importe un CSV ou supprime le coffre ; la liste des coffres propose la sauvegarde et la restauration (fichier `.pswd`, coffres au choix) ; les réglages choisissent le thème.
 
 ## Ligne de commande
 
