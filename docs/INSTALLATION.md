@@ -46,6 +46,44 @@ L'installateur n'est pas signé : Windows SmartScreen et macOS Gatekeeper peuven
 
 Pour mettre à jour : `git pull`, reconstruire, puis relancer le nouvel installateur ; les coffres ne sont pas touchés.
 
+### Construire l'APK Android
+
+Se fait depuis un ordinateur (Windows, Linux ou macOS). Prérequis, en plus de ceux du § 1 :
+
+- [Android Studio](https://developer.android.com/studio), puis dans *SDK Manager* : un SDK Android, *NDK (Side by side)*, *Android SDK Build-Tools* et *Android SDK Command-line Tools* ;
+- les variables d'environnement `JAVA_HOME` (le JDK fourni, `…\Android Studio\jbr`), `ANDROID_HOME` (le SDK, `%LOCALAPPDATA%\Android\Sdk` sous Windows) et `NDK_HOME` (`$ANDROID_HOME/ndk/<version>`) ;
+- les cibles Rust :
+
+```sh
+rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+```
+
+Construire, depuis `crates/pswd-gui` :
+
+```sh
+npm ci                                                 # une seule fois
+npm run tauri android build -- --apk --target aarch64  # téléphones 64 bits (presque tous)
+```
+
+L'APK est signé pendant le build si le fichier `src-tauri/gen/android/keystore.properties` existe (ignoré par git). Sans lui, l'APK sort non signé (`app-universal-release-unsigned.apk`) et Android refuse de l'installer. Pour le créer, **une seule fois** : générer une clé hors du projet (`keytool` est dans `$JAVA_HOME/bin`) …
+
+```sh
+keytool -genkeypair -keystore ~/pswd-master.jks -storetype PKCS12 -keyalg RSA -keysize 4096 -validity 10000 -alias pswd-master
+```
+
+… puis écrire `keystore.properties` (chemin avec des `/`, même sous Windows) :
+
+```properties
+storeFile=C:/Users/<nom>/pswd-master.jks
+storePassword=<mot de passe de la clé>
+keyAlias=pswd-master
+keyPassword=<mot de passe de la clé>
+```
+
+L'APK signé est `src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`. L'installer : téléphone branché en USB avec le débogage USB activé, `adb install -r <fichier>.apk` (`adb` est dans `$ANDROID_HOME/platform-tools/`) ; ou copier le fichier sur le téléphone et l'ouvrir, en autorisant l'installation d'applications inconnues.
+
+> ⚠ Les mises à jour doivent être signées avec **la même clé** : sinon Android refuse de remplacer l'application (c'est le cas en passant d'un build `--debug` à un build release), et la désinstaller efface ses coffres. Sauvegarder `pswd-master.jks` et `keystore.properties` hors de l'ordinateur, et faire une sauvegarde `.pswd` des coffres avant toute désinstallation.
+
 ### Premier coffre
 
 1. **Nouveau coffre** : un nom (lettres, chiffres, `-` et `_`) et un mot de passe maître d'au moins 12 caractères mélangeant au moins 3 types parmi minuscules, majuscules, chiffres et symboles.
