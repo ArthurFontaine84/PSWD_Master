@@ -62,7 +62,7 @@ Workspace Cargo, architecture hexagonale :
 | `pswd-cli` | Binaire `pswd` : questions et affichage dans le terminal, shell interactif, verrouillage automatique | `#![forbid(unsafe_code)]` |
 | `pswd-gui` | Application Tauri 2 **PSWD Master** : backend Rust (commandes, session, verrouillage) et interface Svelte 5 + TypeScript (§12) | `#![forbid(unsafe_code)]` |
 
-Étape 3 : `pswd-server` (exécutable du serveur, `#![forbid(unsafe_code)]`, §11) et l'adaptateur `RemoteStore` HTTP dans `pswd-infra`. Dépendances prévues : serveur `axum` + `tokio`, `rustls` (moteur `ring`, ni OpenSSL ni `aws-lc-rs`), `rcgen` (certificat), `rusqlite` avec SQLite intégré (`bundled`) ; client `ureq` (synchrone comme le port) avec `rustls` et un vérificateur d'empreinte maison. Si `ureq` n'accepte pas ce vérificateur (à vérifier en premier, sous-étape 2), `reqwest` en mode bloquant.
+Étape 3 : `pswd-server` (exécutable du serveur, `#![forbid(unsafe_code)]`, §11) et l'adaptateur `RemoteStore` HTTP dans `pswd-infra`. Dépendances : serveur `axum` + `tokio`, `axum-server` (HTTPS), `rustls` (moteur `ring`, ni OpenSSL ni `aws-lc-rs`), `rcgen` (certificat), `rusqlite` avec SQLite intégré (`bundled`) ; client `reqwest` en mode bloquant (synchrone comme le port), avec une configuration `rustls` fournie toute prête et un vérificateur d'empreinte maison. `ureq` a été écarté : sa configuration TLS n'accepte pas de vérificateur personnalisé. Pour les tests : `tower`, `http-body-util`, `futures-util`. Licences ajoutées : ISC (`ring`, `rustls-webpki`, `untrusted`), et CDLA-Permissive-2.0 pour la seule crate `webpki-root-certs`.
 
 **Ports (définis dans `pswd-core`)**
 - `LocalStore` : `load() -> Option<bytes>` (`None` : pas de coffre local), `save_atomic(bytes)` (fichier temporaire + renommage).
@@ -306,21 +306,36 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 - `sudo pswd-server restore <fichier>` : seulement sur un serveur neuf, sans base existante. Le certificat restauré garde la même empreinte : les appareils se reconnectent sans rien refaire.
 - Pas de sauvegarde automatique : une copie sur le même disque ne protège pas de sa panne.
 
-**Transport** : HTTPS. Le serveur génère son propre certificat à l'installation (`rcgen`), sans expiration pratique (fin de validité au 31/12/9999). L'application l'**épingle** : elle ne vérifie que son empreinte SHA-256, ni les dates ni le nom, ce qui permet les deux adresses. Un certificat différent est refusé (« Le serveur n'est pas celui attendu »), sans jamais proposer de lui faire confiance. Pas de changement de certificat pour l'instant (§10 `cert-rotation`) : une clé privée volée permettrait de se faire passer pour le serveur et de récupérer des jetons, jamais de lire un coffre.
+**Transport** : HTTPS, **TLS 1.3 seulement** (serveur et client). Le serveur génère son propre certificat au premier démarrage (`rcgen`, ECDSA P-256), sans expiration pratique (fin de validité au 31/12/9999), et le range avec sa clé privée dans `pswd.db` : une sauvegarde de la base emporte le certificat. Sur SIGTERM (arrêt par `systemd`) ou Ctrl+C, il laisse 10 s aux requêtes en cours avant de s'arrêter. L'application l'**épingle** : elle ne vérifie que son empreinte SHA-256 (`certificate_fingerprint` de `pswd-core`), ni les dates ni le nom, ce qui permet les deux adresses. Client (`ServerClient` de `pswd-infra`) : attente de connexion de 5 s par adresse, 2 min au plus par requête ; une adresse injoignable ou au mauvais certificat fait passer à la suivante. Si aucune ne répond, « serveur injoignable », ou « le serveur n'est pas celui attendu » si l'une d'elles présentait un autre certificat. Un certificat différent est refusé (« Le serveur n'est pas celui attendu »), sans jamais proposer de lui faire confiance. Pas de changement de certificat pour l'instant (§10 `cert-rotation`) : une clé privée volée permettrait de se faire passer pour le serveur et de récupérer des jetons, jamais de lire un coffre.
 
 **API** : REST sous le préfixe `/v1/`. Le contenu d'un coffre circule en octets bruts (`application/octet-stream`), tout le reste en JSON. Jeton dans l'en-tête `Authorization: Bearer <jeton>`. Version d'un coffre = compteur entier tenu par le serveur, augmenté à chaque publication.
 
 | `RemoteStore` | Requête | Réponses |
 |---|---|---|
-| `fetch()` | `GET /v1/vaults/{id}` | `200` + octets + `ETag: "<version>"` ; `404` inconnu ; `410` retiré |
-| `push(…, Some(v))` | `PUT /v1/vaults/{id}` + `If-Match: "<v>"` | `204` ; `412` le coffre a bougé (`Conflict`) |
-| `push(…, None)` | `PUT /v1/vaults/{id}` + `If-None-Match: *` | `204` ; `412` le coffre existe déjà |
+| — | `POST /v1/vaults` | `201` + `{"id": "<uuid>"}` : emplacement réservé, encore vide |
+| `fetch()` | `GET /v1/vaults/{id}` | `200` + octets + `ETag: "<version>"` ; `204` jamais publié (`None`) ; `404` inconnu ; `410` retiré |
+| `push(…, Some(v))` | `PUT /v1/vaults/{id}` + `If-Match: "<v>"` | `204` + nouvel `ETag` ; `412` le coffre a bougé (`Conflict`) |
+| `push(…, None)` | `PUT /v1/vaults/{id}` + `If-None-Match: *` | `204` + `ETag: "1"` ; `412` déjà publié |
 
-Le serveur identifie les coffres par son propre identifiant, jamais par leur nom.
+Une publication sans condition reçoit `428` ; un `If-Match` illisible ne correspond à aucune version (`412`) ; un fichier qui n'est pas un `vault.enc` valide reçoit `400`, un envoi de plus de 64 Mio `413`. Publier un nouveau coffre se fait en deux temps : l'application réserve l'identifiant (`POST`) et le note avant de publier (`PUT`), pour qu'une coupure entre les deux ne crée jamais de doublon. Le créateur d'un coffre en devient membre ; un coffre dont le compte n'est pas membre répond `404`, comme un coffre inconnu.
+
+Autres routes (JSON, 16 Kio au plus par requête) :
+
+| Requête | Accès | Effet |
+|---|---|---|
+| `POST /v1/connect` `{key, device_name, account_name?}` | libre | `201 {token, account_id, device_id, is_admin}` ; `401` clé invalide, expirée ou déjà utilisée ; `400` nom invalide ou absent (une clé administrateur crée un compte nommé par `account_name`) |
+| `GET /v1/vaults` | appareil | `200 [{id, version}]` : coffres du compte, `version` = `ETag` ou `null` |
+| `POST /v1/members` `{name}` | administrateur | `201 {key}` : clé d'un nouveau membre ; `403` pour un non-administrateur |
+| `POST /v1/devices/keys` | appareil | `201 {key}` : clé d'un appareil de plus pour le même compte |
+| `DELETE /v1/devices/self` | appareil | `204` : déconnexion, le jeton est révoqué |
+
+Noms de compte et d'appareil : 1 à 64 caractères, ni espace en bordure, ni caractère de contrôle. Jeton : 32 octets aléatoires en hexadécimal, montré une seule fois.
+
+Le serveur identifie les coffres par son propre identifiant (UUID v4), jamais par leur nom.
 
 **Protections**
 - Taille maximale : 64 Mio pour un coffre, quelques Ko pour une requête JSON ; délai maximal de 30 s par requête.
-- Au-delà de 10 jetons ou clés invalides par minute depuis une adresse IP, celle-ci est bloquée quelques minutes.
+- Au-delà de 10 jetons ou clés invalides par minute depuis une adresse IP, celle-ci est bloquée 5 minutes (`429`). Une requête sans jeton n'est pas comptée.
 - Un coffre reçu est vérifié (structure, version, en-tête, par `pswd-core`, sans clé) ; un envoi mal formé est refusé.
 - Journal (`journalctl -u pswd-server`) : démarrages, erreurs, accès refusés ; jamais de jeton, de clé ni de contenu.
 - Une requête non autorisée reçoit `401` sans détail : le serveur ne révèle pas l'existence d'un coffre à qui n'y a pas droit.
@@ -329,7 +344,7 @@ Le serveur identifie les coffres par son propre identifiant, jamais par leur nom
 
 **Administration**
 - À l'installation, le serveur affiche une fois son adresse et une **clé administrateur** (clé de connexion, ci-dessous). Le premier appareil qui la présente devient administrateur ; personne d'autre ne le peut.
-- Secours : sur la machine, `pswd-server reset-admin` affiche une nouvelle clé administrateur (aussi si la première a expiré).
+- Secours : sur la machine, `pswd-server reset-admin` affiche une nouvelle clé administrateur (aussi si la première a expiré) et annule les précédentes. Présentée, elle crée un **nouveau** compte administrateur ; l'ancien compte reste, à supprimer depuis le panneau. Le serveur se lance par `pswd-server serve` ; les deux sous-commandes prennent `--data-dir` (par défaut `/var/lib/pswd-server`).
 - Le panneau d'administration de PSWD Master permet d'ajouter un membre, de supprimer un compte, de révoquer un appareil, de promouvoir un membre administrateur ou de lui retirer ce rôle, de supprimer un coffre, de rattacher quelqu'un à un coffre sans membre, de restaurer une version, de renseigner l'adresse publique et de sauvegarder le serveur. Le dernier administrateur ne peut pas perdre son rôle ni être supprimé.
 
 **Comptes et appareils**

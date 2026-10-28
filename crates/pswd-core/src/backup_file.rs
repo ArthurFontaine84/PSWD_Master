@@ -10,7 +10,8 @@ const MAGIC: [u8; 8] = *b"PSWDSAVE";
 const FORMAT_VERSION: u8 = 1;
 /// Bornes contre un fichier piégé ; largement au-dessus d'un usage réel.
 const MAX_BACKUP_VAULTS: usize = 1_000;
-const MAX_BACKUP_VAULT_LEN: usize = 64 * 1024 * 1024;
+/// Taille maximale d'un fichier `vault.enc`, dans une sauvegarde comme sur le serveur.
+pub const MAX_VAULT_FILE_LEN: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackupFileError {
@@ -35,7 +36,7 @@ impl fmt::Display for BackupFileError {
             Self::TooLarge => write!(
                 f,
                 "sauvegarde trop grande ({MAX_BACKUP_VAULTS} coffres de {} Mio au plus)",
-                MAX_BACKUP_VAULT_LEN / (1024 * 1024)
+                MAX_VAULT_FILE_LEN / (1024 * 1024)
             ),
             Self::InvalidVault(name, error) => write!(f, "coffre {name} : {error}"),
         }
@@ -73,7 +74,7 @@ impl<'a> BackupFile<'a> {
         if self.vaults.contains_key(name) {
             return Err(BackupFileError::DuplicateName(name.to_owned()));
         }
-        if self.vaults.len() >= MAX_BACKUP_VAULTS || file.len() > MAX_BACKUP_VAULT_LEN {
+        if self.vaults.len() >= MAX_BACKUP_VAULTS || file.len() > MAX_VAULT_FILE_LEN {
             return Err(BackupFileError::TooLarge);
         }
         VaultFile::check_format(file)
@@ -120,7 +121,7 @@ impl<'a> BackupFile<'a> {
             let name = std::str::from_utf8(reader.take(usize::from(name_len))?)
                 .map_err(|_| BackupFileError::InvalidName)?;
             let file_len = usize::try_from(reader.u32()?).unwrap_or(usize::MAX);
-            if file_len > MAX_BACKUP_VAULT_LEN {
+            if file_len > MAX_VAULT_FILE_LEN {
                 return Err(BackupFileError::TooLarge);
             }
             // Noms dans l'ordre : chaque sauvegarde n'a qu'une écriture possible.
@@ -308,7 +309,7 @@ mod tests {
         );
 
         let mut largest = file.clone();
-        largest.resize(MAX_BACKUP_VAULT_LEN, 0);
+        largest.resize(MAX_VAULT_FILE_LEN, 0);
         let mut backup = BackupFile::new(at(0));
         backup.add("max", &largest).unwrap();
         let mut too_large = largest.clone();
@@ -384,7 +385,7 @@ mod tests {
     #[test]
     fn size_at_the_limit_is_not_too_large() {
         let mut file = single("ab");
-        let len = u32::try_from(MAX_BACKUP_VAULT_LEN).unwrap();
+        let len = u32::try_from(MAX_VAULT_FILE_LEN).unwrap();
         file[FILE_LEN_AT..FILE_LEN_AT + 4].copy_from_slice(&len.to_le_bytes());
         assert_eq!(BackupFile::parse(&file), Err(BackupFileError::Malformed));
     }

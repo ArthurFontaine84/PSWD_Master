@@ -6,6 +6,7 @@ mod backup;
 mod clipboard;
 mod config;
 mod file_store;
+mod remote;
 
 pub use backup::{read_backup, write_backup};
 pub use clipboard::{ClipboardAccess, TimedClipboard};
@@ -13,3 +14,4 @@ pub use clipboard::{ClipboardAccess, TimedClipboard};
 pub use clipboard::{LazyClipboard, SystemClipboard};
 pub use config::{Config, ConfigError, ConfigFile, Locations, Theme, VaultConfig};
 pub use file_store::FileStore;
+pub use remote::{Connection, RemoteVault, RemoteVaultInfo, ServerClient};

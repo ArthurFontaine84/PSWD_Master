@@ -3,12 +3,21 @@ mod kdf;
 
 use std::fmt;
 
+use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 pub use aead::{NONCE_LEN, Sealed, TAG_LEN, open, seal, unwrap_key, wrap_key};
 pub use kdf::{KdfParams, SALT_LEN, Salt, password_wrapping_key, recovery_wrapping_key};
 
 pub const KEY_LEN: usize = 32;
+
+pub const FINGERPRINT_LEN: usize = 32;
+
+/// Empreinte SHA-256 d'un certificat (forme DER) : l'application reconnaît le serveur par elle.
+#[must_use]
+pub fn certificate_fingerprint(der: &[u8]) -> [u8; FINGERPRINT_LEN] {
+    Sha256::digest(der).into()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CryptoError {
@@ -68,7 +77,7 @@ fn internal_error<E>(_: E) -> CryptoError {
     CryptoError::Internal
 }
 
-fn fill_random(buffer: &mut [u8]) -> Result<(), CryptoError> {
+pub(crate) fn fill_random(buffer: &mut [u8]) -> Result<(), CryptoError> {
     getrandom::fill(buffer).map_err(|_| CryptoError::RandomUnavailable)
 }
 
@@ -91,6 +100,14 @@ mod tests {
         let second = Key::generate().unwrap();
         assert_ne!(first.as_bytes(), second.as_bytes());
         assert_ne!(first.as_bytes(), &[0; KEY_LEN]);
+    }
+
+    #[test]
+    fn fingerprint_is_the_sha256_of_the_certificate() {
+        assert_eq!(
+            hex(&certificate_fingerprint(b"abc")),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]

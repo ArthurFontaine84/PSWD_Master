@@ -3,10 +3,12 @@
 
 mod backup_file;
 mod buffer;
+mod connection_key;
 pub mod crypto;
 mod csv_format;
 mod entry;
 mod generator;
+mod key_text;
 mod merge;
 pub mod ports;
 mod recovery_key;
@@ -18,7 +20,10 @@ mod vault;
 mod vault_file;
 mod vault_name;
 
-pub use backup_file::{BackupFile, BackupFileError};
+pub use backup_file::{BackupFile, BackupFileError, MAX_VAULT_FILE_LEN};
+pub use connection_key::{
+    CONNECTION_SECRET_LEN, ConnectionKey, ConnectionKeyError, FINGERPRINT_PREFIX_LEN,
+};
 pub use csv_format::{CsvError, LineProblem, import_csv};
 pub use entry::{Entry, EntryContent, EntryKind, EntrySnapshot};
 pub use generator::{GeneratorError, PasswordOptions, generate_password};

@@ -1,0 +1,172 @@
+//! Écriture lisible des clés de 32 octets recopiées à la main (récupération, connexion) :
+//! Base32 Crockford, `XXXX-XXXX-…` (13 groupes de 4 caractères).
+
+use zeroize::Zeroizing;
+
+use crate::Secret;
+use crate::crypto::KEY_LEN;
+
+/// Base32 Crockford : sans I, L, O ni U, pour éviter les confusions à la recopie.
+const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+pub(crate) const SYMBOLS: usize = (KEY_LEN * 8).div_ceil(5);
+const GROUP_LEN: usize = 4;
+const SEPARATOR: char = '-';
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyTextError {
+    InvalidCharacter,
+    WrongLength,
+    InvalidLastCharacter,
+}
+
+/// Texte à montrer à l'utilisateur.
+pub(crate) fn encode(bytes: &[u8; KEY_LEN]) -> Secret {
+    let mut text = String::with_capacity(SYMBOLS + (SYMBOLS - 1) / GROUP_LEN);
+    let mut buffer: u16 = 0;
+    let mut bits = 0;
+    let mut written = 0;
+    let mut push = |value: u16| {
+        if written > 0 && written % GROUP_LEN == 0 {
+            text.push(SEPARATOR);
+        }
+        text.push(char::from(ALPHABET[usize::from(value & 0x1F)]));
+        written += 1;
+    };
+    for &byte in bytes {
+        buffer = (buffer << 8) + u16::from(byte);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            push(buffer >> bits);
+        }
+        buffer &= (1 << bits) - 1;
+    }
+    // Les bits restants sont complétés par des zéros.
+    push(buffer << (5 - bits));
+    Secret::new(text)
+}
+
+/// Lit une clé saisie par l'utilisateur : tirets et espaces ignorés, majuscules ou minuscules,
+/// `O` lu `0`, `I` et `L` lus `1`.
+pub(crate) fn decode(text: &str) -> Result<Zeroizing<[u8; KEY_LEN]>, KeyTextError> {
+    let mut values = Zeroizing::new(Vec::with_capacity(text.len()));
+    for c in text.chars() {
+        if c != SEPARATOR && !c.is_whitespace() {
+            values.push(symbol_value(c).ok_or(KeyTextError::InvalidCharacter)?);
+        }
+    }
+    if values.len() != SYMBOLS {
+        return Err(KeyTextError::WrongLength);
+    }
+    let mut bytes = Zeroizing::new([0; KEY_LEN]);
+    let mut buffer: u16 = 0;
+    let mut bits = 0;
+    let mut index = 0;
+    for &value in values.iter() {
+        buffer = (buffer << 5) + u16::from(value);
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            // Moins de 256 : `buffer` ne garde que `bits + 8` bits significatifs.
+            #[allow(clippy::cast_possible_truncation)]
+            let byte = (buffer >> bits) as u8;
+            bytes[index] = byte;
+            index += 1;
+            buffer &= (1 << bits) - 1;
+        }
+    }
+    // Les bits de complément doivent être nuls : chaque clé n'a qu'une seule écriture.
+    if buffer != 0 {
+        return Err(KeyTextError::InvalidLastCharacter);
+    }
+    Ok(bytes)
+}
+
+fn symbol_value(c: char) -> Option<u8> {
+    let c = match c.to_ascii_uppercase() {
+        'O' => '0',
+        'I' | 'L' => '1',
+        other => other,
+    };
+    let position = ALPHABET
+        .iter()
+        .position(|&symbol| char::from(symbol) == c)?;
+    u8::try_from(position).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    fn counting() -> [u8; KEY_LEN] {
+        std::array::from_fn(|i| u8::try_from(i).unwrap())
+    }
+
+    // Valeurs de référence : module `base64` de Python, alphabet transposé en Crockford.
+    #[test]
+    fn encoding_matches_reference() {
+        assert_eq!(
+            encode(&counting()).expose(),
+            "000G-40R4-0M30-E209-185G-R38E-1W81-24GK-2GAH-C5RR-34D1-P70X-3RFG"
+        );
+        assert_eq!(
+            encode(&[0xFF; KEY_LEN]).expose(),
+            "ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZG"
+        );
+    }
+
+    #[test]
+    fn decode_tolerates_case_spaces_and_lookalikes() {
+        let text = "ooog 40r4 om3o e2o9 l85g r38e iw8l 24gk 2gah c5rr 34d1 p7ox 3rfg";
+        assert_eq!(*decode(text).unwrap(), counting());
+    }
+
+    #[test]
+    fn decode_accepts_unseparated_text() {
+        let text = "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFG";
+        assert_eq!(*decode(text).unwrap(), counting());
+    }
+
+    #[test]
+    fn invalid_characters_are_rejected() {
+        for text in ["U", "*", "é", "000G_40R4"] {
+            assert_eq!(
+                decode(text).err(),
+                Some(KeyTextError::InvalidCharacter),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn wrong_length_is_rejected() {
+        let valid = encode(&counting());
+        let text = valid.expose();
+        for wrong in [&text[..text.len() - 1], &format!("{text}0"), ""] {
+            assert_eq!(
+                decode(wrong).err(),
+                Some(KeyTextError::WrongLength),
+                "{wrong}"
+            );
+        }
+    }
+
+    #[test]
+    fn padding_bits_must_be_zero() {
+        let valid = encode(&counting());
+        let text = format!("{}H", &valid.expose()[..valid.expose().len() - 1]);
+        assert_eq!(
+            decode(&text).err(),
+            Some(KeyTextError::InvalidLastCharacter)
+        );
+    }
+
+    proptest! {
+        #[test]
+        fn decode_reverses_encode(bytes in prop::array::uniform32(any::<u8>())) {
+            prop_assert_eq!(*decode(encode(&bytes).expose()).unwrap(), bytes);
+        }
+    }
+}
