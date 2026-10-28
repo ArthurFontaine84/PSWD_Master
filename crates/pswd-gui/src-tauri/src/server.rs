@@ -24,6 +24,8 @@ struct VaultStatus {
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Exchange {
+    /// Coffres que le serveur a retirés ; gardés sur cet appareil.
+    removed: Vec<String>,
     downloaded: Vec<Downloaded>,
     not_downloaded: Vec<Failure>,
     published: Vec<String>,
@@ -101,8 +103,12 @@ impl AppState {
     /// ne connaît pas.
     pub fn exchange(&self) -> Result<Exchange, UiError> {
         let _one_at_a_time = self.exclusive();
-        let mut exchange = Exchange::default();
-        for (name, result) in self.vaults.download_vaults().map_err(server_error)? {
+        let downloads = self.vaults.download_vaults().map_err(server_error)?;
+        let mut exchange = Exchange {
+            removed: downloads.removed,
+            ..Exchange::default()
+        };
+        for (name, result) in downloads.downloaded {
             match result {
                 Ok(local_name) => exchange.downloaded.push(Downloaded { name, local_name }),
                 Err(error) => exchange.not_downloaded.push(failure(name, &error)),
@@ -152,6 +158,7 @@ fn state_name(state: VaultState) -> &'static str {
         VaultState::ToPublish => "toPublish",
         VaultState::Published => "published",
         VaultState::Detached => "detached",
+        VaultState::Removed => "removed",
     }
 }
 
@@ -336,6 +343,7 @@ mod tests {
         assert_eq!(
             sent(&pc.exchange().unwrap()),
             json!({
+                "removed": [],
                 "downloaded": [],
                 "notDownloaded": [],
                 "published": ["perso"],

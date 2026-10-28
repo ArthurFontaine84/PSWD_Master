@@ -40,13 +40,15 @@ pub struct Connection {
 pub struct RemoteVaultInfo {
     pub id: Uuid,
     pub name: String,
+    /// Coffre commun.
+    pub shared: bool,
     pub version: Option<RemoteVersion>,
 }
 
 /// Connexion à un serveur, essayé à chacune de ses adresses dans l'ordre (locale, puis publique).
 #[derive(Clone)]
 pub struct ServerClient {
-    http: Client,
+    pub(crate) http: Client,
     addresses: Vec<String>,
     observed: Arc<Observed>,
     token: Option<Secret>,
@@ -139,18 +141,14 @@ impl ServerClient {
         }
     }
 
-    /// Réserve l'identifiant d'un nouveau coffre `name` sur le serveur, encore vide.
+    /// Réserve l'identifiant d'un nouveau coffre `name` sur le serveur, encore vide ; `shared`
+    /// en fait un coffre commun.
     ///
     /// # Errors
     ///
     /// Si le serveur est injoignable, refuse le nom ou répond de façon inattendue.
-    pub fn create_vault(&self, name: &str) -> Result<Uuid, PortError> {
-        #[derive(Deserialize)]
-        struct Created {
-            id: Uuid,
-        }
-
-        let body = serde_json::json!({ "name": name }).to_string();
+    pub fn create_vault(&self, name: &str, shared: bool) -> Result<Uuid, PortError> {
+        let body = serde_json::json!({ "name": name, "shared": shared }).to_string();
         let response = self.send(&|base| {
             self.authorized(self.http.post(format!("{base}/v1/vaults")))
                 .header(CONTENT_TYPE, "application/json")
@@ -173,6 +171,7 @@ impl ServerClient {
         struct Listed {
             id: Uuid,
             name: String,
+            shared: bool,
             version: Option<String>,
         }
 
@@ -186,6 +185,7 @@ impl ServerClient {
                     .map(|vault| RemoteVaultInfo {
                         id: vault.id,
                         name: vault.name,
+                        shared: vault.shared,
                         version: vault.version.map(RemoteVersion),
                     })
                     .collect())
@@ -255,7 +255,7 @@ impl ServerClient {
         }
     }
 
-    fn authorized(&self, request: RequestBuilder) -> RequestBuilder {
+    pub(crate) fn authorized(&self, request: RequestBuilder) -> RequestBuilder {
         match &self.token {
             Some(token) => request.bearer_auth(token.expose()),
             None => request,
@@ -263,7 +263,10 @@ impl ServerClient {
     }
 
     /// Envoie la requête à chaque adresse jusqu'à obtenir une réponse.
-    fn send(&self, request: &dyn Fn(&str) -> RequestBuilder) -> Result<Response, PortError> {
+    pub(crate) fn send(
+        &self,
+        request: &dyn Fn(&str) -> RequestBuilder,
+    ) -> Result<Response, PortError> {
         self.observed.mismatch.store(false, Ordering::Relaxed);
         for address in &self.addresses {
             if let Ok(response) = request(&format!("https://{address}")).send() {
@@ -334,13 +337,19 @@ impl RemoteStore for RemoteVault {
     }
 }
 
+/// Identifiant renvoyé par une création (`201`).
+#[derive(Deserialize)]
+pub(crate) struct Created {
+    pub(crate) id: Uuid,
+}
+
 /// Corps JSON d'une réponse.
-fn parse<T: DeserializeOwned>(response: Response) -> Result<T, PortError> {
+pub(crate) fn parse<T: DeserializeOwned>(response: Response) -> Result<T, PortError> {
     let body = response.bytes().map_err(|_| interrupted())?;
     serde_json::from_slice(&body).map_err(|_| invalid_response())
 }
 
-fn unknown_vault() -> PortError {
+pub(crate) fn unknown_vault() -> PortError {
     PortError::new("coffre inconnu du serveur")
 }
 
@@ -353,8 +362,9 @@ fn interrupted() -> PortError {
 }
 
 /// Refus ou réponse imprévue du serveur.
-fn status_error(status: StatusCode) -> PortError {
+pub(crate) fn status_error(status: StatusCode) -> PortError {
     match status {
+        StatusCode::GONE => PortError::removed("coffre retiré du serveur"),
         StatusCode::UNAUTHORIZED => {
             PortError::new("appareil non reconnu par le serveur : déconnecté ou révoqué")
         }
@@ -638,7 +648,7 @@ mod tests {
     #[test]
     fn vault_round_trip() {
         let (client, _) = admin();
-        let mut vault = client.vault(client.create_vault("perso").unwrap());
+        let mut vault = client.vault(client.create_vault("perso", false).unwrap());
         assert_eq!(vault.fetch().unwrap(), None);
 
         vault.push(&VAULT, None).unwrap();
@@ -656,19 +666,21 @@ mod tests {
     #[test]
     fn list_shows_vaults_and_versions() {
         let (client, _) = admin();
-        let published = client.create_vault("perso").unwrap();
+        let published = client.create_vault("perso", false).unwrap();
         client.vault(published).push(&VAULT, None).unwrap();
-        let empty = client.create_vault("travail").unwrap();
+        let empty = client.create_vault("travail", true).unwrap();
 
         let mut expected = vec![
             RemoteVaultInfo {
                 id: published,
                 name: "perso".to_owned(),
+                shared: false,
                 version: Some(RemoteVersion("\"1\"".to_owned())),
             },
             RemoteVaultInfo {
                 id: empty,
                 name: "travail".to_owned(),
+                shared: true,
                 version: None,
             },
         ];
@@ -681,7 +693,7 @@ mod tests {
     #[test]
     fn outdated_push_is_a_conflict() {
         let (client, _) = admin();
-        let mut vault = client.vault(client.create_vault("perso").unwrap());
+        let mut vault = client.vault(client.create_vault("perso", false).unwrap());
         assert_eq!(
             vault.push(&VAULT, Some(&RemoteVersion("\"1\"".to_owned()))),
             Err(PushError::Conflict)
@@ -703,7 +715,7 @@ mod tests {
     fn invalid_vault_name_is_refused_by_the_server() {
         let (client, _) = admin();
         assert_eq!(
-            client.create_vault("coffre perso"),
+            client.create_vault("coffre perso", false),
             Err(PortError::new("nom de coffre refusé par le serveur"))
         );
     }
@@ -711,7 +723,7 @@ mod tests {
     #[test]
     fn invalid_vault_file_is_refused_by_the_server() {
         let (client, _) = admin();
-        let mut vault = client.vault(client.create_vault("perso").unwrap());
+        let mut vault = client.vault(client.create_vault("perso", false).unwrap());
         assert_eq!(
             vault.push(b"pas un coffre", None),
             Err(PushError::Failed(PortError::new(
@@ -743,7 +755,7 @@ mod tests {
     #[test]
     fn new_device_joins_the_same_account() {
         let (client, address) = admin();
-        let id = client.create_vault("perso").unwrap();
+        let id = client.create_vault("perso", false).unwrap();
         let key = ConnectionKey::parse(client.new_device_key().unwrap().expose()).unwrap();
         let connection =
             ServerClient::connect(vec![address.clone()], &key, "Portable", None).unwrap();
@@ -772,7 +784,7 @@ mod tests {
         let client =
             ServerClient::new(vec![address], other, Secret::new("jeton".to_owned())).unwrap();
         let mismatch = PortError::new("le serveur n'est pas celui attendu");
-        assert_eq!(client.create_vault("perso"), Err(mismatch.clone()));
+        assert_eq!(client.create_vault("perso", false), Err(mismatch.clone()));
         assert_eq!(
             client.vault(Uuid::new_v4()).push(&VAULT, None),
             Err(PushError::Failed(mismatch))
@@ -800,7 +812,7 @@ mod tests {
             addresses: vec![closed_address(), impostor, address],
             ..admin
         };
-        let mut vault = client.vault(client.create_vault("perso").unwrap());
+        let mut vault = client.vault(client.create_vault("perso", false).unwrap());
         assert_eq!(vault.fetch().unwrap(), None);
     }
 
@@ -812,7 +824,7 @@ mod tests {
             addresses: vec![impostor, address],
             ..admin
         };
-        client.create_vault("perso").unwrap();
+        client.create_vault("perso", false).unwrap();
         let offline = ServerClient {
             addresses: vec![closed_address()],
             ..client
@@ -852,6 +864,7 @@ mod tests {
                 "appareil non reconnu par le serveur : déconnecté ou révoqué",
             ),
             (StatusCode::FORBIDDEN, "action réservée aux administrateurs"),
+            (StatusCode::GONE, "coffre retiré du serveur"),
             (
                 StatusCode::TOO_MANY_REQUESTS,
                 "trop d'essais refusés : réessayez dans quelques minutes",
@@ -862,7 +875,11 @@ mod tests {
             ),
         ];
         for (status, message) in cases {
-            assert_eq!(status_error(status), PortError::new(message));
+            assert_eq!(status_error(status).to_string(), message);
+            assert_eq!(
+                status_error(status).is_removed(),
+                status == StatusCode::GONE
+            );
         }
     }
 
@@ -870,7 +887,7 @@ mod tests {
     fn unexpected_statuses_are_reported() {
         let client = fake_server(|| async { StatusCode::IM_A_TEAPOT });
         let teapot = PortError::new("réponse inattendue du serveur (418)");
-        assert_eq!(client.create_vault("perso"), Err(teapot.clone()));
+        assert_eq!(client.create_vault("perso", false), Err(teapot.clone()));
         assert_eq!(client.list_vaults(), Err(teapot.clone()));
         assert_eq!(client.new_device_key().err(), Some(teapot.clone()));
         assert_eq!(client.disconnect(), Err(teapot.clone()));
@@ -892,7 +909,7 @@ mod tests {
     fn invalid_responses_are_refused() {
         let created = fake_server(|| async { (StatusCode::CREATED, "pas du JSON") });
         let invalid = PortError::new("réponse du serveur invalide");
-        assert_eq!(created.create_vault("perso"), Err(invalid.clone()));
+        assert_eq!(created.create_vault("perso", false), Err(invalid.clone()));
         assert_eq!(created.add_member("Camille").err(), Some(invalid.clone()));
         let key = ConnectionKey::generate(&created.observed.fingerprint().unwrap()).unwrap();
         assert_eq!(
@@ -919,7 +936,10 @@ mod tests {
     fn interrupted_responses_are_reported() {
         let interrupted = PortError::new("connexion au serveur interrompue");
         let created = fake_server(|| async { (StatusCode::CREATED, cut_body()) });
-        assert_eq!(created.create_vault("perso"), Err(interrupted.clone()));
+        assert_eq!(
+            created.create_vault("perso", false),
+            Err(interrupted.clone())
+        );
         assert_eq!(created.new_device_key().err(), Some(interrupted.clone()));
         let key = ConnectionKey::generate(&created.observed.fingerprint().unwrap()).unwrap();
         assert_eq!(

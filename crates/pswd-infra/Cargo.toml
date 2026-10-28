@@ -22,7 +22,7 @@ arboard.workspace = true
 [dev-dependencies]
 axum.workspace = true
 futures-util.workspace = true
-pswd-server = { path = "../pswd-server" }
+pswd-server = { path = "../pswd-server", features = ["testing"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["time"] }
 

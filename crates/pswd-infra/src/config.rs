@@ -99,6 +99,9 @@ impl Locations {
 #[serde(deny_unknown_fields)]
 pub struct VaultConfig {
     pub path: PathBuf,
+    /// Coffre commun, à partager avec d'autres comptes du serveur.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shared: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote: Option<RemoteLink>,
 }
@@ -111,6 +114,9 @@ pub struct RemoteLink {
     /// reconnexion.
     pub server: String,
     pub id: Uuid,
+    /// Le serveur a retiré le coffre, ou en a retiré le compte : il n'est plus synchronisé.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub removed: bool,
 }
 
 impl VaultConfig {
@@ -296,6 +302,7 @@ mod tests {
     fn vault(path: &str) -> VaultConfig {
         VaultConfig {
             path: PathBuf::from(path),
+            shared: false,
             remote: None,
         }
     }
@@ -304,6 +311,7 @@ mod tests {
         RemoteLink {
             server: "ab".repeat(32),
             id,
+            removed: false,
         }
     }
 
@@ -410,10 +418,33 @@ theme = \"dark\"
         let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         assert!(text.contains("[vaults.travail.remote]"), "{text}");
         assert!(!text.contains("[vaults.perso.remote]"), "{text}");
+        assert!(!text.contains("shared"), "{text}");
+        assert!(!text.contains("removed"), "{text}");
         assert_eq!(
             config.link_vault("inconnu", link(id)),
             Err(ConfigError::UnknownVault("inconnu".to_owned()))
         );
+    }
+
+    #[test]
+    fn shared_vaults_and_removed_links_are_saved() {
+        let dir = TempDir::new().unwrap();
+        let mut file = config_file_in(&dir);
+        let mut config = Config::default();
+        let famille = VaultConfig {
+            shared: true,
+            remote: Some(RemoteLink {
+                removed: true,
+                ..link(Uuid::new_v4())
+            }),
+            ..vault("famille")
+        };
+        config.add_vault("famille", famille).unwrap();
+        file.save(&config).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(text.contains("shared = true"), "{text}");
+        assert!(text.contains("removed = true"), "{text}");
+        assert_eq!(file.load().unwrap(), config);
     }
 
     #[test]

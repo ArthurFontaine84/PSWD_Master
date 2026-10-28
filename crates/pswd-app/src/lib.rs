@@ -10,6 +10,7 @@ mod idle_lock;
 mod password;
 mod random;
 mod server;
+mod sharing;
 mod utc;
 mod vaults;
 
@@ -21,7 +22,9 @@ pub use error::AppError;
 pub use idle_lock::IdleLock;
 pub use password::{MIN_CHARACTER_KINDS, MIN_PASSWORD_LENGTH, check_master_password};
 pub use random::generate;
-pub use server::{DEFAULT_PORT, Disconnected, KeptReason, SyncOutcome, VaultResults, VaultState};
+pub use server::{
+    DEFAULT_PORT, Disconnected, Downloads, KeptReason, SyncOutcome, VaultResults, VaultState,
+};
 pub use utc::{backup_file_name, format_timestamp, now};
 pub use vaults::Vaults;
 

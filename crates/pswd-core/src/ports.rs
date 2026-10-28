@@ -9,18 +9,39 @@ use crate::Secret;
 /// Erreur d'un adaptateur. Son message est affiché tel quel : il ne doit jamais contenir de
 /// secret.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PortError(String);
+pub struct PortError {
+    message: String,
+    removed: bool,
+}
 
 impl PortError {
     #[must_use]
     pub fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
+        Self {
+            message: message.into(),
+            removed: false,
+        }
+    }
+
+    /// Le distant a retiré le coffre, ou en a retiré l'utilisateur : il ne faut plus le
+    /// republier.
+    #[must_use]
+    pub fn removed(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            removed: true,
+        }
+    }
+
+    #[must_use]
+    pub fn is_removed(&self) -> bool {
+        self.removed
     }
 }
 
 impl fmt::Display for PortError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)
     }
 }
 
@@ -102,5 +123,16 @@ mod tests {
             PortError::new("serveur injoignable").to_string(),
             "serveur injoignable"
         );
+        assert_eq!(
+            PortError::removed("coffre retiré").to_string(),
+            "coffre retiré"
+        );
+    }
+
+    #[test]
+    fn only_a_removal_says_so() {
+        assert!(!PortError::new("serveur injoignable").is_removed());
+        assert!(PortError::removed("coffre retiré").is_removed());
+        assert_ne!(PortError::new("x"), PortError::removed("x"));
     }
 }

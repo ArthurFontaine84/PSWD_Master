@@ -44,7 +44,15 @@ impl<T: Terminal, C> App<T, C> {
     /// Renvoie `true` si un coffre a été téléchargé ou publié.
     fn exchange(&mut self) -> Result<bool, CliError> {
         let mut exchanged = false;
-        for (server_name, result) in self.vaults.download_vaults()? {
+        let downloads = self.vaults.download_vaults()?;
+        for name in downloads.removed {
+            exchanged = true;
+            self.terminal.print(&format!(
+                "Coffre « {name} » retiré du serveur : gardé sur cet appareil, il n'est plus \
+                 synchronisé."
+            ));
+        }
+        for (server_name, result) in downloads.downloaded {
             match result {
                 Ok(name) if name == server_name => {
                     exchanged = true;
@@ -141,6 +149,7 @@ impl<T: Terminal, C> App<T, C> {
                 VaultState::ToPublish => "à publier",
                 VaultState::Published => "publié",
                 VaultState::Detached => "détaché",
+                VaultState::Removed => "retiré",
             };
             self.terminal.print(&format!("  {name} : {state}"));
         }
@@ -181,6 +190,10 @@ fn describe(outcome: &SyncOutcome) -> String {
             "cet appareil n'est connecté à aucun serveur (pswd connect)".to_owned()
         }
         SyncOutcome::Detached => "coffre détaché, lié à un autre serveur".to_owned(),
+        SyncOutcome::Removed | SyncOutcome::Done(SyncStatus::Removed) => {
+            "coffre retiré du serveur : gardé sur cet appareil, il n'est plus synchronisé"
+                .to_owned()
+        }
         SyncOutcome::Done(SyncStatus::Synced) => "coffre à jour".to_owned(),
         SyncOutcome::Done(SyncStatus::Offline(error)) => {
             format!("hors ligne ({error}) ; les modifications seront publiées plus tard")
@@ -370,6 +383,28 @@ mod tests {
             let mut app = env.app("a", &[]);
             assert_eq!(app.run(command), Err(CliError::App(AppError::NotConnected)));
         }
+    }
+
+    #[test]
+    fn a_vault_left_on_another_device_is_kept_as_removed() {
+        let env = TestEnv::new();
+        env.connect_admin("a");
+        let params = pswd_core::crypto::KdfParams::new(8 * 1024, 1, 1).unwrap();
+        let password = pswd_core::Secret::new(PASSWORD.to_owned());
+        env.vaults("a")
+            .create_shared("famille", &password, params, Timestamp::from_millis(0))
+            .unwrap();
+        output(&env, "a", &[], Command::Sync);
+        env.connect_same_account("a", "b");
+        env.vaults("a").leave("famille").unwrap();
+
+        let shown = output(&env, "b", &[], Command::Sync);
+        assert_eq!(
+            shown,
+            "Coffre « famille » retiré du serveur : gardé sur cet appareil, il n'est plus \
+             synchronisé."
+        );
+        assert!(status(&env, "b").ends_with("  famille : retiré"));
     }
 
     #[test]
@@ -569,5 +604,11 @@ mod tests {
             describe(&SyncOutcome::Done(SyncStatus::Offline(PortError::new("x")))),
             "hors ligne (x) ; les modifications seront publiées plus tard"
         );
+        for removed in [SyncOutcome::Removed, SyncOutcome::Done(SyncStatus::Removed)] {
+            assert_eq!(
+                describe(&removed),
+                "coffre retiré du serveur : gardé sur cet appareil, il n'est plus synchronisé"
+            );
+        }
     }
 }

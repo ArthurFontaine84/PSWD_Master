@@ -8,6 +8,7 @@ mod config;
 mod file_store;
 mod remote;
 mod server_file;
+mod sharing;
 
 pub use backup::{read_backup, write_backup};
 pub use clipboard::{ClipboardAccess, TimedClipboard};
@@ -17,3 +18,4 @@ pub use config::{Config, ConfigError, ConfigFile, Locations, RemoteLink, Theme, 
 pub use file_store::FileStore;
 pub use remote::{Connection, RemoteVault, RemoteVaultInfo, ServerClient};
 pub use server_file::{ServerConfig, ServerFile};
+pub use sharing::{Account, ReceivedInvitation, SentInvitation, VaultMembers};

@@ -25,13 +25,27 @@ pub enum VaultState {
     Published,
     /// Lié à un autre serveur, ou appareil déconnecté : utilisé en local.
     Detached,
+    /// Le serveur l'a retiré, ou en a retiré le compte : gardé en local, jamais republié.
+    Removed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SyncOutcome {
     NotConnected,
     Detached,
+    /// Le coffre est retiré (§11) : il n'est plus synchronisé.
+    Removed,
+    /// Jamais [`SyncStatus::Removed`] : ce cas devient [`SyncOutcome::Removed`].
     Done(SyncStatus),
+}
+
+/// Résultat d'un téléchargement des coffres du compte.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Downloads {
+    /// Pour chaque coffre du serveur : son nom sur cet appareil.
+    pub downloaded: VaultResults<String>,
+    /// Coffres que le serveur a retirés depuis le dernier échange ; gardés en local.
+    pub removed: Vec<String>,
 }
 
 /// Pourquoi un coffre n'a pas été retiré de l'appareil à la déconnexion.
@@ -67,7 +81,7 @@ impl Vaults {
         Ok(self.server_file().load()?)
     }
 
-    fn connected(&self) -> Result<ServerConfig, AppError> {
+    pub(crate) fn connected(&self) -> Result<ServerConfig, AppError> {
         self.server()?.ok_or(AppError::NotConnected)
     }
 
@@ -93,44 +107,84 @@ impl Vaults {
         let address = with_default_port(address);
         let connection =
             ServerClient::connect(vec![address.clone()], key, device_name, account_name)?;
-        server_file.save(&ServerConfig {
+        let server = ServerConfig {
             local_address: address,
             public_address: None,
             fingerprint: connection.fingerprint,
             token: connection.token,
-        })?;
+        };
+        server_file.save(&server)?;
         Ok(())
     }
 
-    /// Télécharge les coffres publiés du compte que l'appareil n'a pas encore ; renvoie, pour
-    /// chacun, son nom sur cet appareil.
+    /// Télécharge les coffres publiés du compte que l'appareil n'a pas encore, et note comme
+    /// retirés ceux que le serveur ne lui donne plus. Un coffre retiré que le compte a rejoint
+    /// est de nouveau synchronisé.
     ///
     /// # Errors
     ///
     /// Si l'appareil n'est pas connecté ou si le serveur est injoignable : les coffres déjà
     /// téléchargés sont gardés.
-    pub fn download_vaults(&self) -> Result<VaultResults<String>, AppError> {
+    pub fn download_vaults(&self) -> Result<Downloads, AppError> {
         let server = self.connected()?;
         let client = server.client()?;
-        let mut results = Vec::new();
-        for remote in client.list_vaults()? {
-            if self.config()?.linked_to(remote.id).is_some() {
+        let listed = client.list_vaults()?;
+        let server_id = server.server_id();
+        let mut downloads = Downloads::default();
+        let mark_removed = |config: &mut Config| {
+            for (name, vault) in &mut config.vaults {
+                let Some(link) = vault.remote.as_mut() else {
+                    continue;
+                };
+                let listed = listed.iter().any(|remote| remote.id == link.id);
+                if link.server == server_id && !link.removed && !listed {
+                    link.removed = true;
+                    downloads.removed.push(name.clone());
+                }
+            }
+        };
+        self.update_config(mark_removed)?;
+        for remote in listed {
+            if let Some(name) = self.config()?.linked_to(remote.id) {
+                let name = name.to_owned();
+                if self.set_removed(&name, false)? {
+                    downloads.downloaded.push((remote.name, Ok(name)));
+                }
                 continue;
             }
             let Some(file) = client.vault(remote.id).fetch()? else {
                 continue;
             };
             let link = RemoteLink {
-                server: server.server_id(),
+                server: server_id.clone(),
                 id: remote.id,
+                removed: false,
             };
             let added = local_name(&self.config()?, &remote.name, remote.id).and_then(|name| {
-                self.add_vault_file(&name, &file.file, Some(link))
+                self.add_vault_file(&name, &file.file, remote.shared, Some(link))
                     .map(|()| name)
             });
-            results.push((remote.name, added));
+            downloads.downloaded.push((remote.name, added));
         }
-        Ok(results)
+        Ok(downloads)
+    }
+
+    /// Note le coffre `name` comme retiré, ou comme rejoint ; renvoie `true` si cela change son
+    /// état.
+    pub(crate) fn set_removed(&self, name: &str, removed: bool) -> Result<bool, AppError> {
+        let mut changed = false;
+        let mark = |config: &mut Config| {
+            let link = config
+                .vaults
+                .get_mut(name)
+                .and_then(|vault| vault.remote.as_mut());
+            if let Some(link) = link {
+                changed = link.removed != removed;
+                link.removed = removed;
+            }
+        };
+        self.update_config(mark)?;
+        Ok(changed)
     }
 
     /// Publie les coffres inconnus du serveur, tels quels : leur fichier est déjà chiffré.
@@ -158,7 +212,7 @@ impl Vaults {
         vault: &VaultConfig,
     ) -> Result<(), AppError> {
         let file = read_vault_file(name, vault)?;
-        let id = self.reserve(client, server, name)?;
+        let id = self.reserve(client, server, name, vault.shared)?;
         client.vault(id).push(&file, None).map_err(push_error)
     }
 
@@ -169,13 +223,15 @@ impl Vaults {
         client: &ServerClient,
         server: &ServerConfig,
         name: &str,
+        shared: bool,
     ) -> Result<Uuid, AppError> {
-        let id = client.create_vault(name)?;
+        let id = client.create_vault(name, shared)?;
         let mut config_file = self.config_file();
         let mut config = config_file.load()?;
         let link = RemoteLink {
             server: server.server_id(),
             id,
+            removed: false,
         };
         config.link_vault(name, link)?;
         config_file.save(&config)?;
@@ -196,9 +252,10 @@ impl Vaults {
         let vault = self.config()?.vault(name)?.clone();
         let client = server.client()?;
         let id = match vault.remote {
+            Some(link) if link.removed => return Ok(SyncOutcome::Removed),
             Some(link) if link.server == server.server_id() => link.id,
             Some(_) => return Ok(SyncOutcome::Detached),
-            None => match self.reserve(&client, &server, name) {
+            None => match self.reserve(&client, &server, name, vault.shared) {
                 Ok(id) => id,
                 Err(AppError::Port(error)) => {
                     return Ok(SyncOutcome::Done(SyncStatus::Offline(error)));
@@ -206,8 +263,13 @@ impl Vaults {
                 Err(error) => return Err(error),
             },
         };
-        let status = session.sync(&mut client.vault(id))?;
-        Ok(SyncOutcome::Done(status))
+        match session.sync(&mut client.vault(id))? {
+            SyncStatus::Removed => {
+                self.set_removed(name, true)?;
+                Ok(SyncOutcome::Removed)
+            }
+            status => Ok(SyncOutcome::Done(status)),
+        }
     }
 
     /// État de chaque coffre, par nom.
@@ -249,7 +311,7 @@ impl Vaults {
         if !keep_local {
             for (name, vault) in &self.config()?.vaults {
                 let Some(link) = &vault.remote else { continue };
-                if link.server != server.server_id() {
+                if link.server != server.server_id() || link.removed {
                     continue;
                 }
                 match same_as_server(&client, link.id, vault) {
@@ -283,6 +345,7 @@ fn with_default_port(address: &str) -> String {
 fn state(vault: &VaultConfig, server_id: Option<&str>) -> VaultState {
     match (&vault.remote, server_id) {
         (None, _) => VaultState::ToPublish,
+        (Some(link), _) if link.removed => VaultState::Removed,
         (Some(link), Some(id)) if link.server == id => VaultState::Published,
         (Some(_), _) => VaultState::Detached,
     }
@@ -499,12 +562,12 @@ mod tests {
         let b = device(&dir, "b");
         connect_same_account(&a, &b);
         assert_eq!(
-            b.download_vaults().unwrap(),
+            b.download_vaults().unwrap().downloaded,
             [("perso".to_owned(), Ok("perso".to_owned()))]
         );
         assert_eq!(states(&b), [state_of("perso", VaultState::Published)]);
         assert_eq!(titles(&open(&b, "perso")), ["Wi-Fi"]);
-        assert_eq!(b.download_vaults().unwrap(), []);
+        assert_eq!(b.download_vaults().unwrap(), Downloads::default());
     }
 
     #[test]
@@ -529,7 +592,7 @@ mod tests {
         connect_same_account(&a, &b);
         let expected = format!("perso-{}", &id.simple().to_string()[..8]);
         assert_eq!(
-            b.download_vaults().unwrap(),
+            b.download_vaults().unwrap().downloaded,
             [("perso".to_owned(), Ok(expected.clone()))]
         );
         assert_eq!(
@@ -552,6 +615,7 @@ mod tests {
                     name,
                     VaultConfig {
                         path: PathBuf::from(name),
+                        shared: false,
                         remote: None,
                     },
                 )
@@ -571,6 +635,7 @@ mod tests {
                 "perso-01234567",
                 VaultConfig {
                     path: PathBuf::from("x"),
+                    shared: false,
                     remote: None,
                 },
             )
@@ -591,11 +656,11 @@ mod tests {
             .unwrap()
             .client()
             .unwrap()
-            .create_vault("vide")
+            .create_vault("vide", false)
             .unwrap();
         let b = device(&dir, "b");
         connect_same_account(&a, &b);
-        assert_eq!(b.download_vaults().unwrap(), []);
+        assert_eq!(b.download_vaults().unwrap(), Downloads::default());
         assert_eq!(states(&b), []);
     }
 
@@ -610,7 +675,7 @@ mod tests {
         connect_same_account(&a, &b);
         let data = dir.path().join("b").join("data");
         fs::write(data.join("vaults"), b"").unwrap();
-        let results = b.download_vaults().unwrap();
+        let results = b.download_vaults().unwrap().downloaded;
         assert_eq!(results.len(), 1);
         assert!(
             matches!(results[0].1, Err(AppError::Port(_))),
@@ -750,6 +815,22 @@ mod tests {
         assert_eq!(states(&a), [state_of("perso", VaultState::Detached)]);
         assert_eq!(a.sync("perso", &mut session), Ok(SyncOutcome::Detached));
         assert_eq!(a.publish_vaults().unwrap(), []);
+        assert_eq!(a.download_vaults().unwrap(), Downloads::default());
+        assert_eq!(states(&a), [state_of("perso", VaultState::Detached)]);
+    }
+
+    #[test]
+    fn states_need_a_readable_configuration() {
+        let dir = TempDir::new().unwrap();
+        let a = device(&dir, "a");
+        connect_admin(&a);
+        let config = a.locations.config_file().to_owned();
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(&config, "couleur = 1").unwrap();
+        assert!(matches!(
+            a.vault_states(),
+            Err(AppError::Config(ConfigError::Invalid(_)))
+        ));
     }
 
     #[test]
@@ -783,7 +864,7 @@ mod tests {
         a.disconnect(true).unwrap();
         a.connect(&address, &device_key, "PC", None).unwrap();
         assert_eq!(states(&a), [state_of("perso", VaultState::Published)]);
-        assert_eq!(a.download_vaults().unwrap(), []);
+        assert_eq!(a.download_vaults().unwrap(), Downloads::default());
         assert_eq!(
             a.sync("perso", &mut session),
             Ok(SyncOutcome::Done(SyncStatus::Synced))
@@ -894,7 +975,7 @@ mod tests {
         create(&b, "perso");
         b.publish_vaults().unwrap();
         assert_eq!(
-            a.download_vaults().unwrap(),
+            a.download_vaults().unwrap().downloaded,
             [("perso".to_owned(), Ok("perso".to_owned()))]
         );
     }

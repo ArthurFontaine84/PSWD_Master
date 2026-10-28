@@ -59,8 +59,8 @@ impl Vaults {
         Ok(self.config()?.ensure_available(name)?)
     }
 
-    /// Crée un coffre vide et l'enregistre. Renvoie aussi sa clé de récupération, à montrer une
-    /// seule fois. Un essai raté ne laisse rien derrière lui.
+    /// Crée un coffre privé vide et l'enregistre. Renvoie aussi sa clé de récupération, à
+    /// montrer une seule fois. Un essai raté ne laisse rien derrière lui.
     ///
     /// # Errors
     ///
@@ -73,12 +73,40 @@ impl Vaults {
         params: KdfParams,
         now: Timestamp,
     ) -> Result<(VaultSession, RecoveryKey), AppError> {
+        self.create_vault(name, password, params, now, false)
+    }
+
+    /// Comme [`Vaults::create`], pour un coffre commun : il pourra être partagé avec d'autres
+    /// comptes du serveur une fois publié.
+    ///
+    /// # Errors
+    ///
+    /// Comme [`Vaults::create`].
+    pub fn create_shared(
+        &self,
+        name: &str,
+        password: &Secret,
+        params: KdfParams,
+        now: Timestamp,
+    ) -> Result<(VaultSession, RecoveryKey), AppError> {
+        self.create_vault(name, password, params, now, true)
+    }
+
+    fn create_vault(
+        &self,
+        name: &str,
+        password: &Secret,
+        params: KdfParams,
+        now: Timestamp,
+        shared: bool,
+    ) -> Result<(VaultSession, RecoveryKey), AppError> {
         let mut config_file = self.config_file();
         let mut config = config_file.load()?;
         config.ensure_available(name)?;
         check_master_password(password)?;
         let vault = VaultConfig {
             path: self.locations.vault_dir(name),
+            shared,
             remote: None,
         };
         let created = removing_on_failure(&vault.path, || {
@@ -131,7 +159,7 @@ impl Vaults {
         } else {
             format!("{name}-sauvegarde-{date}")
         };
-        self.add_vault_file(&target, file, None)?;
+        self.add_vault_file(&target, file, false, None)?;
         Ok(target)
     }
 
@@ -140,6 +168,7 @@ impl Vaults {
         &self,
         name: &str,
         file: &[u8],
+        shared: bool,
         remote: Option<RemoteLink>,
     ) -> Result<(), AppError> {
         let mut config_file = self.config_file();
@@ -147,6 +176,7 @@ impl Vaults {
         config.ensure_available(name)?;
         let vault = VaultConfig {
             path: self.locations.vault_dir(name),
+            shared,
             remote,
         };
         removing_on_failure(&vault.path, || {

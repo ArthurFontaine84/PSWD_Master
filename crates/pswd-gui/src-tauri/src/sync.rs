@@ -11,6 +11,8 @@ pub enum SyncState {
     NotConnected,
     /// Lié à un autre serveur : utilisé en local.
     Detached,
+    /// Le serveur l'a retiré, ou en a retiré le compte : gardé en local, plus synchronisé.
+    Removed,
     Offline,
     /// Le coffre a changé sur le serveur à chaque essai.
     Conflict,
@@ -35,6 +37,9 @@ impl SyncReport {
         let (state, detail) = match outcome {
             Ok(SyncOutcome::NotConnected) => (SyncState::NotConnected, None),
             Ok(SyncOutcome::Detached) => (SyncState::Detached, None),
+            Ok(SyncOutcome::Removed | SyncOutcome::Done(SyncStatus::Removed)) => {
+                (SyncState::Removed, None)
+            }
             Ok(SyncOutcome::Done(SyncStatus::Synced)) => (SyncState::Synced, None),
             Ok(SyncOutcome::Done(SyncStatus::Offline(error))) => {
                 (SyncState::Offline, Some(error.to_string()))
@@ -73,6 +78,11 @@ mod tests {
         let cases = [
             (Ok(SyncOutcome::NotConnected), report("notConnected", None)),
             (Ok(SyncOutcome::Detached), report("detached", None)),
+            (Ok(SyncOutcome::Removed), report("removed", None)),
+            (
+                Ok(SyncOutcome::Done(SyncStatus::Removed)),
+                report("removed", None),
+            ),
             (
                 Ok(SyncOutcome::Done(SyncStatus::Synced)),
                 report("synced", None),

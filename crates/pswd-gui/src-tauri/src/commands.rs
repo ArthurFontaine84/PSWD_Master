@@ -794,7 +794,7 @@ mod tests {
         assert_eq!(
             app.call("sync_server", json!({})),
             Ok(
-                json!({ "downloaded": [], "notDownloaded": [], "published": [], "notPublished": [] })
+                json!({ "removed": [], "downloaded": [], "notDownloaded": [], "published": [], "notPublished": [] })
             )
         );
         let key = app.call("add_device_key", json!({})).unwrap();
