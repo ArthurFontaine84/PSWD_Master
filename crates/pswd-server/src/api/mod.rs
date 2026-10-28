@@ -1,6 +1,7 @@
 //! Routes HTTP : traduisent les requêtes en appels à [`Storage`].
 
 mod accounts;
+mod sharing;
 mod vaults;
 
 use std::net::{IpAddr, SocketAddr};
@@ -74,7 +75,14 @@ pub fn router(storage: Storage, fingerprint: [u8; FINGERPRINT_LEN]) -> Router {
         .route("/v1/members", post(accounts::add_member))
         .route("/v1/devices/keys", post(accounts::new_device_key))
         .route("/v1/devices/self", delete(accounts::disconnect))
+        .route("/v1/accounts", get(sharing::accounts))
         .route("/v1/vaults", get(vaults::list).post(vaults::create))
+        .route("/v1/vaults/{id}/members", get(sharing::members))
+        .route("/v1/vaults/{id}/members/self", delete(sharing::leave))
+        .route("/v1/vaults/{id}/invitations", post(sharing::invite))
+        .route("/v1/invitations", get(sharing::received))
+        .route("/v1/invitations/{id}", delete(sharing::delete_invitation))
+        .route("/v1/invitations/{id}/accept", post(sharing::accept))
         .route(
             "/v1/vaults/{id}",
             get(vaults::fetch)
@@ -152,6 +160,12 @@ impl FromRequestParts<Shared> for Caller {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ApiError {
     NotFound,
+    /// Le compte a quitté le coffre ou en a été retiré.
+    Gone,
+    /// Coffre privé, ou compte invité inconnu.
+    InvalidInvitation,
+    /// Compte déjà membre ou déjà invité.
+    AlreadyMember,
     PreconditionFailed,
     PreconditionRequired,
     InvalidVault,
@@ -166,6 +180,9 @@ impl From<StorageError> for ApiError {
     fn from(error: StorageError) -> Self {
         match error {
             StorageError::NotFound => Self::NotFound,
+            StorageError::Gone => Self::Gone,
+            StorageError::NotShared | StorageError::UnknownAccount => Self::InvalidInvitation,
+            StorageError::AlreadyMember => Self::AlreadyMember,
             StorageError::Conflict => Self::PreconditionFailed,
             StorageError::MissingAccountName => Self::InvalidName,
             other => {
@@ -180,9 +197,13 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match self {
             Self::NotFound => StatusCode::NOT_FOUND,
+            Self::Gone => StatusCode::GONE,
+            Self::AlreadyMember => StatusCode::CONFLICT,
             Self::PreconditionFailed => StatusCode::PRECONDITION_FAILED,
             Self::PreconditionRequired => StatusCode::PRECONDITION_REQUIRED,
-            Self::InvalidVault | Self::InvalidName => StatusCode::BAD_REQUEST,
+            Self::InvalidVault | Self::InvalidName | Self::InvalidInvitation => {
+                StatusCode::BAD_REQUEST
+            }
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::TooManyAttempts => StatusCode::TOO_MANY_REQUESTS,

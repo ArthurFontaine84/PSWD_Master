@@ -18,6 +18,9 @@ use crate::storage::Caller;
 #[serde(deny_unknown_fields)]
 pub(super) struct CreateRequest {
     name: String,
+    /// Coffre commun ; privé par défaut.
+    #[serde(default)]
+    shared: bool,
 }
 
 #[derive(Serialize)]
@@ -29,6 +32,7 @@ struct Created {
 struct Listed {
     id: Uuid,
     name: String,
+    shared: bool,
     /// `ETag` de la version courante ; `null` si le coffre n'est pas encore publié.
     version: Option<String>,
 }
@@ -43,7 +47,7 @@ pub(super) async fn create(
     }
     let id = state
         .storage()
-        .create_vault(caller.account, &request.name)?;
+        .create_vault(caller.account, &request.name, request.shared)?;
     Ok((StatusCode::CREATED, Json(Created { id })).into_response())
 }
 
@@ -57,6 +61,7 @@ pub(super) async fn list(
         .map(|vault| Listed {
             id: vault.id,
             name: vault.name,
+            shared: vault.shared,
             version: vault.version.map(etag),
         })
         .collect();
@@ -241,14 +246,25 @@ mod tests {
         let member = add_member(&app, &admin, "Camille").await;
         let published = create_named(&app, &admin, "perso").await;
         send(&app, put(published, &admin, FIRST, VAULT.clone())).await;
-        let empty = create_named(&app, &admin, "travail").await;
+        let creation = request(
+            "POST",
+            "/v1/vaults",
+            Some(&admin),
+            Some(serde_json::json!({ "name": "travail", "shared": true })),
+        );
+        let response = send(&app, creation).await;
+        let empty: Uuid = json(response).await["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap();
         create(&app, &member).await;
 
         let response = send(&app, request("GET", "/v1/vaults", Some(&admin), None)).await;
         assert_eq!(response.status(), StatusCode::OK);
         let mut expected = vec![
-            serde_json::json!({ "id": published, "name": "perso", "version": "\"1\"" }),
-            serde_json::json!({ "id": empty, "name": "travail", "version": null }),
+            serde_json::json!({ "id": published, "name": "perso", "shared": false, "version": "\"1\"" }),
+            serde_json::json!({ "id": empty, "name": "travail", "shared": true, "version": null }),
         ];
         expected.sort_by_key(|vault| vault["id"].as_str().unwrap().to_owned());
         assert_eq!(json(response).await, serde_json::Value::Array(expected));

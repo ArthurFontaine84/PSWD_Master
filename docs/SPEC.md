@@ -34,9 +34,9 @@ Reste à faire sur le Mac : build iOS, plugin Swift du presse-papiers, écran ne
 1. Serveur minimal : crate `pswd-server`, base SQLite créée au démarrage, lecture et publication conditionnelle d'un coffre, 15 versions conservées ; HTTP simple, sans comptes, réservé aux tests.
 2. TLS et client : certificat, `rustls`, adaptateur `RemoteStore` HTTP dans `pswd-infra` avec vérification de l'empreinte, testé contre un `pswd-server` local.
 3. Comptes et appareils : jetons, clés de connexion, administrateur initial, `reset-admin`, révocation, membres de chaque coffre.
-4. Synchro dans la CLI : `connect`, `disconnect`, `add-device`, `status`, `sync` (commande et shell), états des coffres (sauf « retiré », qui attend la suppression sur le serveur, sous-étapes 6 et 7), téléchargement initial.
+4. Synchro dans la CLI : `connect`, `disconnect`, `add-device`, `status`, `sync` (commande et shell), états des coffres (sauf « retiré », ajouté à la sous-étape 6), téléchargement initial.
 5. Synchro dans PSWD Master : connexion, état de synchro, bouton « Synchroniser » (build Android repoussé, à lancer à la demande).
-6. Coffres communs : inviter, accepter ou refuser, quitter (serveur et PSWD Master).
+6. Coffres communs : inviter, accepter ou refuser, annuler une invitation, quitter (serveur et PSWD Master) ; état « retiré » d'un coffre quitté. Trois blocs : serveur, client (`pswd-infra`, `pswd-app`), interface.
 7. Administration : panneau de PSWD Master (membres, appareils, rôles, suppression, rattachement, versions, adresse publique, sauvegarde du serveur).
 8. Installation réelle : paquet `.deb`, `backup` / `restore` du serveur, VM puis PC réel, documentation, mutants.
 
@@ -320,7 +320,7 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 
 | `RemoteStore` | Requête | Réponses |
 |---|---|---|
-| — | `POST /v1/vaults` `{name}` | `201` + `{"id": "<uuid>"}` : emplacement réservé, encore vide ; `400` nom invalide |
+| — | `POST /v1/vaults` `{name, shared}` | `201` + `{"id": "<uuid>"}` : emplacement réservé, encore vide ; `shared` (faux par défaut) en fait un coffre commun ; `400` nom invalide |
 | `fetch()` | `GET /v1/vaults/{id}` | `200` + octets + `ETag: "<version>"` ; `204` jamais publié (`None`) ; `404` inconnu ; `410` retiré |
 | `push(…, Some(v))` | `PUT /v1/vaults/{id}` + `If-Match: "<v>"` | `204` + nouvel `ETag` ; `412` le coffre a bougé (`Conflict`) |
 | `push(…, None)` | `PUT /v1/vaults/{id}` + `If-None-Match: *` | `204` + `ETag: "1"` ; `412` déjà publié |
@@ -332,7 +332,14 @@ Autres routes (JSON, 16 Kio au plus par requête) :
 | Requête | Accès | Effet |
 |---|---|---|
 | `POST /v1/connect` `{key, device_name, account_name?}` | libre | `201 {token, account_id, device_id, is_admin}` ; `401` clé invalide, expirée ou déjà utilisée ; `400` nom invalide ou absent (une clé administrateur crée un compte nommé par `account_name`) |
-| `GET /v1/vaults` | appareil | `200 [{id, name, version}]` : coffres du compte, `version` = `ETag` ou `null` |
+| `GET /v1/vaults` | appareil | `200 [{id, name, shared, version}]` : coffres du compte, `version` = `ETag` ou `null` |
+| `GET /v1/accounts` | appareil | `200 [{id, name}]` : comptes du serveur, triés par nom, pour choisir qui inviter |
+| `GET /v1/vaults/{id}/members` | membre | `200 {members: [{id, name}], invitations: [{id, account: {id, name}}]}` : membres et invitations en attente |
+| `POST /v1/vaults/{id}/invitations` `{account_id}` | membre | `201 {id}` ; `400` coffre privé ou compte inconnu ; `409` déjà membre ou déjà invité |
+| `GET /v1/invitations` | appareil | `200 [{id, vault_id, vault_name, invited_by}]` : invitations reçues par le compte |
+| `POST /v1/invitations/{id}/accept` | invité | `204` : le compte devient membre ; ses appareils téléchargent le coffre au prochain échange |
+| `DELETE /v1/invitations/{id}` | invité ou membre | `204` : invitation refusée (invité) ou annulée (membre du coffre) |
+| `DELETE /v1/vaults/{id}/members/self` | membre | `204` : le compte quitte le coffre commun ; `400` coffre privé |
 | `POST /v1/members` `{name}` | administrateur | `201 {key}` : clé d'un nouveau membre ; `403` pour un non-administrateur |
 | `POST /v1/devices/keys` | appareil | `201 {key}` : clé d'un appareil de plus pour le même compte |
 | `DELETE /v1/devices/self` | appareil | `204` : déconnexion, le jeton est révoqué |
@@ -366,8 +373,9 @@ Le serveur identifie les coffres par son propre identifiant (UUID v4), jamais pa
 - **CLI** : se connecter, se déconnecter, synchroniser, générer une clé pour ajouter un appareil à son compte. Coffres communs (inviter, accepter, quitter) et administration se font seulement dans PSWD Master ; un coffre commun déjà accepté se synchronise normalement dans la CLI.
 
 **Coffres**
-- Un coffre est **privé** ou **commun**. Un coffre commun est protégé par un mot de passe maître partagé, transmis hors du serveur.
-- Tout membre d'un coffre commun peut inviter un utilisateur du même serveur, qui accepte ou refuse, et peut quitter le coffre. Tous les membres sont égaux ; seul un administrateur retire quelqu'un. Après un départ, changer le mot de passe (`passwd`) est conseillé : l'ancien membre le connaît.
+- Un coffre est **privé** ou **commun**, choisi à sa création dans PSWD Master et jamais changé : le mot de passe d'un coffre privé n'a jamais à être transmis. La CLI ne crée que des coffres privés. Un coffre commun est protégé par un mot de passe maître partagé, transmis hors du serveur. Le serveur garde ce type (`shared`), donné à la réservation ; un coffre local retient le sien dans `config.toml` (`shared = true`) jusqu'à sa publication.
+- Tout membre d'un coffre commun peut inviter un utilisateur du même serveur, choisi dans la liste des comptes, et annuler une invitation en attente. L'invité voit ses invitations en haut de la liste des coffres (demandées au serveur à chaque échange : connexion, « Synchroniser », ouverture de l'application) ; il accepte ou refuse. Accepter le rend membre : le coffre est téléchargé aussitôt, et s'ouvre avec le mot de passe que lui donne celui qui l'a invité. Tout membre peut quitter le coffre. Tous les membres sont égaux ; seul un administrateur retire quelqu'un. Après un départ, changer le mot de passe (`passwd`) est conseillé : l'ancien membre le connaît.
+- Un compte qui a quitté un coffre, ou en a été retiré, en garde une trace sur le serveur : ses appareils reçoivent `410` (coffre retiré), et non `404`. Une nouvelle invitation acceptée efface cette trace.
 - Être membre donne le droit de télécharger et de publier le fichier ; le lire exige le mot de passe du coffre.
 - Le serveur ne supprime jamais un coffre de lui-même, même sans membre. Depuis l'application, supprimer un coffre privé propose « local seulement » ou « local et serveur » ; un coffre commun se quitte. Supprimer un coffre sur le serveur ne touche pas aux copies locales des appareils.
 - Une suppression sur le serveur (nom du coffre à retaper) efface aussitôt son contenu et ses versions ; seule reste une trace (identifiant, « retiré ») pour que les appareils passent le coffre à l'état « retiré ». Pas de corbeille : les copies locales et les sauvegardes suffisent à rattraper une erreur.
@@ -445,7 +453,8 @@ Le serveur identifie les coffres par son propre identifiant (UUID v4), jamais pa
 - Sous Windows, le manifeste de l'application (contrôles communs v6) est lié à tous les exécutables par `build.rs`, sinon les tests ne démarrent pas.
 - Kotlin et Swift : réduits au minimum, testés à la main sur un appareil réel.
 - TypeScript : Vitest, 100 % des lignes pour la logique (`.ts`) ; composants Svelte testés par comportement avec Testing Library, sans seuil.
-- `svelte-check` et ESLint strict sans avertissement ; `package-lock.json` versionné et `npm audit` sans faille, comme `cargo deny`.
+- `svelte-check` et ESLint strict sans avertissement ; `package-lock.json` versionné et `npm audit` sans faille, comme `cargo deny`. `npm audit` est toujours lancé en entier (sans `--audit-level`) ; une faille n'est acceptée que si aucun correctif n'existe et qu'elle n'est pas exploitable, et elle est listée ici :
+  - `deepmerge` 4.3.1 (GHSA-gcqx-w48m-w2h4, gravité faible), par `@sveltejs/vite-plugin-svelte` : empoisonnement de prototype de l'objet fusionné. Seuls nos fichiers de configuration y passent, à la construction ; la bibliothèque n'est pas dans l'application livrée. Accepté le 2026-10-28, à revoir à chaque mise à jour du plugin.
 - Pas de test de bout en bout (`tauri-driver` : Windows et Linux seulement) : l'application construite est essayée à la main.
 - Builds mobiles lancés à la main : Android à la fin de chaque sous-étape qui touche au mobile ; iOS sur le Mac, quand il sera disponible.
 

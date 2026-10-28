@@ -1,6 +1,7 @@
 //! Base SQLite du serveur : coffres opaques et leurs versions, comptes, appareils, certificat.
 
 mod accounts;
+mod sharing;
 mod vaults;
 
 use std::fmt;
@@ -12,6 +13,7 @@ use zeroize::Zeroizing;
 use crate::tls::Identity;
 
 pub use accounts::{Caller, KeyPurpose, NewDevice};
+pub use sharing::{AccountSummary, Members, ReceivedInvitation, SentInvitation};
 pub use vaults::{KEPT_VERSIONS, StoredFile, VaultSummary};
 
 /// Version actuelle du schéma, rangée dans `PRAGMA user_version`.
@@ -42,12 +44,27 @@ const SCHEMA: &str = "
     CREATE TABLE vaults (
         id BLOB PRIMARY KEY,
         name TEXT NOT NULL,
+        shared INTEGER NOT NULL,
         current_version INTEGER
     );
     CREATE TABLE vault_members (
         vault_id BLOB NOT NULL REFERENCES vaults(id),
         account_id BLOB NOT NULL REFERENCES accounts(id),
         PRIMARY KEY (vault_id, account_id)
+    );
+    -- Comptes qui ont quitté le coffre ou en ont été retirés : leurs appareils reçoivent 410.
+    CREATE TABLE former_members (
+        vault_id BLOB NOT NULL REFERENCES vaults(id),
+        account_id BLOB NOT NULL REFERENCES accounts(id),
+        PRIMARY KEY (vault_id, account_id)
+    );
+    CREATE TABLE invitations (
+        id BLOB PRIMARY KEY,
+        vault_id BLOB NOT NULL REFERENCES vaults(id),
+        account_id BLOB NOT NULL REFERENCES accounts(id),
+        invited_by BLOB NOT NULL REFERENCES accounts(id),
+        created_at INTEGER NOT NULL,
+        UNIQUE (vault_id, account_id)
     );
     CREATE TABLE vault_versions (
         vault_id BLOB NOT NULL REFERENCES vaults(id),
@@ -65,8 +82,16 @@ const SCHEMA: &str = "
 
 #[derive(Debug)]
 pub enum StorageError {
-    /// Coffre inconnu, ou dont le compte n'est pas membre.
+    /// Coffre ou invitation inconnus, ou dont le compte n'est pas membre.
     NotFound,
+    /// Le compte a quitté le coffre ou en a été retiré.
+    Gone,
+    /// Un coffre privé ne se partage pas et ne se quitte pas.
+    NotShared,
+    /// Le compte invité n'existe pas.
+    UnknownAccount,
+    /// Le compte invité est déjà membre ou déjà invité.
+    AlreadyMember,
     /// Le coffre a changé depuis la version attendue.
     Conflict,
     /// Clé de connexion inconnue, expirée ou déjà utilisée.
@@ -83,6 +108,10 @@ impl fmt::Display for StorageError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotFound => f.write_str("coffre inconnu"),
+            Self::Gone => f.write_str("coffre retiré"),
+            Self::NotShared => f.write_str("coffre privé"),
+            Self::UnknownAccount => f.write_str("compte inconnu"),
+            Self::AlreadyMember => f.write_str("déjà membre ou déjà invité"),
             Self::Conflict => f.write_str("le coffre a changé depuis la version lue"),
             Self::InvalidKey => f.write_str("clé de connexion invalide ou expirée"),
             Self::MissingAccountName => f.write_str("nom du compte manquant"),
@@ -257,6 +286,10 @@ mod tests {
     fn errors_have_readable_messages() {
         let messages = [
             (StorageError::NotFound, "coffre inconnu"),
+            (StorageError::Gone, "coffre retiré"),
+            (StorageError::NotShared, "coffre privé"),
+            (StorageError::UnknownAccount, "compte inconnu"),
+            (StorageError::AlreadyMember, "déjà membre ou déjà invité"),
             (
                 StorageError::Conflict,
                 "le coffre a changé depuis la version lue",

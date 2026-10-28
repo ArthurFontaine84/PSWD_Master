@@ -10,7 +10,7 @@ use super::{Storage, StorageError};
 /// Nombre de versions conservées par coffre, la version courante comprise.
 pub const KEPT_VERSIONS: i64 = 15;
 
-const LIST_VAULTS: &str = "SELECT v.id, v.name, v.current_version FROM vaults v
+const LIST_VAULTS: &str = "SELECT v.id, v.name, v.shared, v.current_version FROM vaults v
      JOIN vault_members m ON m.vault_id = v.id
      WHERE m.account_id = ?1 ORDER BY v.id";
 const INSERT_VERSION: &str = "INSERT INTO vault_versions (vault_id, version, content, created_at)
@@ -30,21 +30,29 @@ pub struct StoredFile {
 pub struct VaultSummary {
     pub id: Uuid,
     pub name: String,
+    /// Coffre commun.
+    pub shared: bool,
     pub version: Option<i64>,
 }
 
 impl Storage {
-    /// Réserve l'identifiant d'un nouveau coffre `name`, encore vide, dont `account` est membre.
+    /// Réserve l'identifiant d'un nouveau coffre `name`, encore vide, dont `account` est membre ;
+    /// `shared` en fait un coffre commun.
     ///
     /// # Errors
     ///
     /// Si l'écriture dans la base échoue.
-    pub fn create_vault(&mut self, account: Uuid, name: &str) -> Result<Uuid, StorageError> {
+    pub fn create_vault(
+        &mut self,
+        account: Uuid,
+        name: &str,
+        shared: bool,
+    ) -> Result<Uuid, StorageError> {
         let id = Uuid::new_v4();
         let tx = self.conn.transaction()?;
         tx.execute(
-            "INSERT INTO vaults (id, name, current_version) VALUES (?1, ?2, NULL)",
-            params![id, name],
+            "INSERT INTO vaults (id, name, shared, current_version) VALUES (?1, ?2, ?3, NULL)",
+            params![id, name, shared],
         )?;
         tx.execute(
             "INSERT INTO vault_members (vault_id, account_id) VALUES (?1, ?2)",
@@ -70,7 +78,8 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// [`StorageError::NotFound`] si le coffre n'existe pas ou si `account` n'en est pas membre.
+    /// [`StorageError::NotFound`] si le coffre n'existe pas ou si `account` n'en est pas membre,
+    /// [`StorageError::Gone`] si `account` l'a quitté.
     pub fn fetch(&self, id: Uuid, account: Uuid) -> Result<Option<StoredFile>, StorageError> {
         let Some(version) = current_version(&self.conn, id, account)? else {
             return Ok(None);
@@ -90,7 +99,8 @@ impl Storage {
     /// # Errors
     ///
     /// [`StorageError::NotFound`] si le coffre n'existe pas ou si `account` n'en est pas membre,
-    /// [`StorageError::Conflict`] s'il a changé depuis `expected`.
+    /// [`StorageError::Gone`] si `account` l'a quitté, [`StorageError::Conflict`] s'il a changé
+    /// depuis `expected`.
     pub fn publish(
         &mut self,
         id: Uuid,
@@ -121,7 +131,8 @@ fn summary(row: &Row<'_>) -> rusqlite::Result<VaultSummary> {
     Ok(VaultSummary {
         id: row.get(0)?,
         name: row.get(1)?,
-        version: row.get(2)?,
+        shared: row.get(2)?,
+        version: row.get(3)?,
     })
 }
 
@@ -131,15 +142,49 @@ fn current_version(
     id: Uuid,
     account: Uuid,
 ) -> Result<Option<i64>, StorageError> {
-    conn.query_row(
-        "SELECT v.current_version FROM vaults v
-         JOIN vault_members m ON m.vault_id = v.id
-         WHERE v.id = ?1 AND m.account_id = ?2",
+    let version = conn
+        .query_row(
+            "SELECT v.current_version FROM vaults v
+             JOIN vault_members m ON m.vault_id = v.id
+             WHERE v.id = ?1 AND m.account_id = ?2",
+            params![id, account],
+            |row| row.get(0),
+        )
+        .optional()?;
+    version.ok_or_else(|| absence(conn, id, account))
+}
+
+/// Vérifie que `account` est membre du coffre, et renvoie s'il est commun.
+pub(super) fn shared_if_member(
+    conn: &Connection,
+    id: Uuid,
+    account: Uuid,
+) -> Result<bool, StorageError> {
+    let shared = conn
+        .query_row(
+            "SELECT v.shared FROM vaults v
+             JOIN vault_members m ON m.vault_id = v.id
+             WHERE v.id = ?1 AND m.account_id = ?2",
+            params![id, account],
+            |row| row.get(0),
+        )
+        .optional()?;
+    shared.ok_or_else(|| absence(conn, id, account))
+}
+
+/// Pourquoi `account` n'accède pas au coffre : il l'a quitté ([`StorageError::Gone`]), ou ne l'a
+/// jamais eu ([`StorageError::NotFound`]).
+fn absence(conn: &Connection, id: Uuid, account: Uuid) -> StorageError {
+    let former = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM former_members WHERE vault_id = ?1 AND account_id = ?2)",
         params![id, account],
         |row| row.get(0),
-    )
-    .optional()?
-    .ok_or(StorageError::NotFound)
+    );
+    match former {
+        Ok(true) => StorageError::Gone,
+        Ok(false) => StorageError::NotFound,
+        Err(error) => error.into(),
+    }
 }
 
 #[cfg(test)]
@@ -189,7 +234,7 @@ mod tests {
     #[test]
     fn new_vault_is_empty() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account, "perso").unwrap();
+        let id = storage.create_vault(account, "perso", false).unwrap();
         assert_eq!(storage.fetch(id, account).unwrap(), None);
     }
 
@@ -205,7 +250,7 @@ mod tests {
     #[test]
     fn vault_of_another_account_is_not_found() {
         let (mut storage, owner, other) = storage();
-        let id = storage.create_vault(owner, "perso").unwrap();
+        let id = storage.create_vault(owner, "perso", false).unwrap();
         storage.publish(id, owner, b"a", None, NOW).unwrap();
         assert!(matches!(
             storage.fetch(id, other),
@@ -222,7 +267,7 @@ mod tests {
     fn creation_fails_for_an_unknown_account() {
         let (mut storage, _, _) = storage();
         assert!(matches!(
-            storage.create_vault(Uuid::new_v4(), "perso"),
+            storage.create_vault(Uuid::new_v4(), "perso", false),
             Err(StorageError::Database(_))
         ));
         assert_eq!(
@@ -240,7 +285,7 @@ mod tests {
         let (mut storage, account, _) = storage();
         storage.break_for_tests("vaults");
         assert!(matches!(
-            storage.create_vault(account, "perso"),
+            storage.create_vault(account, "perso", false),
             Err(StorageError::Database(_))
         ));
     }
@@ -248,20 +293,22 @@ mod tests {
     #[test]
     fn accounts_list_their_own_vaults() {
         let (mut storage, first, second) = storage();
-        let a = storage.create_vault(first, "perso").unwrap();
-        let b = storage.create_vault(first, "travail").unwrap();
-        let c = storage.create_vault(second, "famille").unwrap();
+        let a = storage.create_vault(first, "perso", false).unwrap();
+        let b = storage.create_vault(first, "travail", true).unwrap();
+        let c = storage.create_vault(second, "famille", false).unwrap();
         storage.publish(b, first, b"x", None, NOW).unwrap();
 
         let mut expected = vec![
             VaultSummary {
                 id: a,
                 name: "perso".to_owned(),
+                shared: false,
                 version: None,
             },
             VaultSummary {
                 id: b,
                 name: "travail".to_owned(),
+                shared: true,
                 version: Some(1),
             },
         ];
@@ -272,6 +319,7 @@ mod tests {
             [VaultSummary {
                 id: c,
                 name: "famille".to_owned(),
+                shared: false,
                 version: None
             }]
         );
@@ -280,7 +328,7 @@ mod tests {
     #[test]
     fn first_publication_requires_an_empty_vault() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account, "perso").unwrap();
+        let id = storage.create_vault(account, "perso", false).unwrap();
         assert!(matches!(
             storage.publish(id, account, b"a", Some(1), NOW),
             Err(StorageError::Conflict)
@@ -298,7 +346,7 @@ mod tests {
     #[test]
     fn publication_requires_the_current_version() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account, "perso").unwrap();
+        let id = storage.create_vault(account, "perso", false).unwrap();
         storage.publish(id, account, b"a", None, NOW).unwrap();
         for expected in [None, Some(2)] {
             assert!(matches!(
@@ -313,7 +361,7 @@ mod tests {
     #[test]
     fn only_the_last_versions_are_kept() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account, "perso").unwrap();
+        let id = storage.create_vault(account, "perso", false).unwrap();
         let mut expected = None;
         for version in 1..=KEPT_VERSIONS + 2 {
             expected = Some(storage.publish(id, account, b"x", expected, NOW).unwrap());
@@ -333,7 +381,7 @@ mod tests {
     #[test]
     fn failed_publication_changes_nothing() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account, "perso").unwrap();
+        let id = storage.create_vault(account, "perso", false).unwrap();
         storage.break_for_tests("vault_versions");
         assert!(matches!(
             storage.publish(id, account, b"a", None, NOW),
@@ -345,7 +393,7 @@ mod tests {
     #[test]
     fn unreadable_content_is_a_database_error() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account, "perso").unwrap();
+        let id = storage.create_vault(account, "perso", false).unwrap();
         storage.publish(id, account, b"a", None, NOW).unwrap();
         storage.break_for_tests("vault_versions");
         assert!(matches!(
@@ -371,7 +419,7 @@ mod tests {
     #[test]
     fn unreadable_vault_row_is_a_database_error() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account, "perso").unwrap();
+        let id = storage.create_vault(account, "perso", false).unwrap();
         storage
             .conn
             .execute(
