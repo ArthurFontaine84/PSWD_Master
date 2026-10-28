@@ -31,6 +31,12 @@ const COMMANDS: &[&str] = &[
     "restore_from_file",
     "get_settings",
     "save_settings",
+    "server_status",
+    "connect_server",
+    "sync_server",
+    "add_device_key",
+    "disconnect_server",
+    "sync_vault",
 ];
 
 fn main() {

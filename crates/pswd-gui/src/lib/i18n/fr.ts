@@ -37,6 +37,10 @@ const errors = {
   invalidSettings: () => "Réglages hors des valeurs permises.",
   ioError: (detail: string) => `Erreur de fichier : ${detail}`,
   fileUnwritable: (detail: string) => `Écriture du fichier impossible : ${detail}`,
+  notConnected: () => "Cet appareil n'est connecté à aucun serveur.",
+  alreadyConnected: () => "Cet appareil est déjà connecté à un serveur.",
+  invalidConnectionKey: () => "Clé de connexion mal saisie : 52 caractères, par groupes de 4.",
+  serverError: (detail: string) => `Échange avec le serveur impossible : ${detail}.`,
   unexpected: (detail: string) => `Erreur : ${detail}`,
 } satisfies Record<string, Message>;
 
@@ -169,6 +173,61 @@ export const fr = {
   themes: { auto: "Comme le système", light: "Clair", dark: "Sombre" },
   settingsSaved: "Réglages enregistrés.",
   lockedAutomatically: "Coffre verrouillé automatiquement.",
+  server: "Serveur",
+  serverTitle: "Serveur maison",
+  serverExplanation:
+    "Connectez cet appareil à votre serveur pour retrouver vos coffres sur vos autres appareils. Le serveur ne reçoit que des coffres chiffrés.",
+  serverAddress: "Adresse du serveur",
+  serverAddressHint: "Par exemple 192.168.1.10 ; le port 8443 est ajouté s'il manque.",
+  connectionKey: "Clé de connexion",
+  connectionKeyHint: "52 caractères, par groupes de 4.",
+  deviceName: "Nom de cet appareil",
+  deviceNameHint: "Par exemple « PC du salon » : il le distingue de vos autres appareils.",
+  accountName: "Nom du compte",
+  accountNameHint: "Seulement avec la clé administrateur affichée à l'installation du serveur ; sinon, laissez vide.",
+  connect: "Se connecter",
+  connecting: "Connexion…",
+  connected: "Appareil connecté au serveur.",
+  connectedTo: (address: string) => `Connecté au serveur ${address}.`,
+  synchronize: "Synchroniser",
+  synchronizing: "Synchronisation…",
+  exchangeIncomplete: (message: string) =>
+    `Échange avec le serveur incomplet. ${message} Réessayez avec « Synchroniser ».`,
+  nothingToExchange: "Aucun coffre à échanger avec le serveur.",
+  downloaded: (name: string, localName: string) =>
+    name === localName
+      ? `Coffre « ${name} » téléchargé.`
+      : `Coffre « ${name} » téléchargé sous le nom « ${localName} » : ce nom était déjà pris.`,
+  notDownloaded: (name: string, reason: string) => `Coffre « ${name} » du serveur non téléchargé : ${reason}.`,
+  published: (name: string) => `Coffre « ${name} » publié.`,
+  notPublished: (name: string, reason: string) => `Coffre « ${name} » non publié : ${reason}.`,
+  addDevice: "Ajouter un appareil",
+  deviceKeyTitle: "Clé pour un nouvel appareil",
+  deviceKeyExplanation: (address: string) =>
+    `Sur le nouvel appareil, connectez-vous au serveur ${address} avec cette clé. Elle ne sert qu'une fois et expire dans 7 jours.`,
+  close: "Fermer",
+  disconnect: "Se déconnecter",
+  disconnectTitle: "Se déconnecter du serveur",
+  disconnectExplanation:
+    "Cet appareil ne sera plus synchronisé. Vous pourrez vous reconnecter plus tard avec une nouvelle clé de connexion.",
+  keepLocalCopies: "Garder une copie des coffres sur cet appareil",
+  removeExplanation:
+    "Seuls les coffres identiques à leur copie sur le serveur seront retirés de cet appareil ; les autres seront gardés.",
+  disconnecting: "Déconnexion…",
+  disconnected: "Appareil déconnecté du serveur.",
+  tokenNotRevoked: (reason: string) =>
+    `Le serveur n'a pas pu être prévenu (${reason}) : révoquez cet appareil depuis le panneau d'administration.`,
+  removedFromDevice: (name: string) => `Coffre « ${name} » retiré de cet appareil ; il reste sur le serveur.`,
+  keptOnDevice: (name: string, reason: string | null) =>
+    `Coffre « ${name} » gardé : ${reason ?? "des modifications ne sont pas encore sur le serveur"}.`,
+  vaultStates: { toPublish: "à publier", published: "publié", detached: "détaché" },
+  syncDone: "Coffre à jour.",
+  syncNotConnected: "Cet appareil n'est connecté à aucun serveur.",
+  syncDetached: "Coffre détaché : il est lié à un autre serveur.",
+  syncOffline: (detail: string) => `Synchro impossible : ${detail}. Les modifications seront publiées plus tard.`,
+  syncConflict: "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",
+  syncRejected: (detail: string) => `Copie du serveur refusée (${detail}) : elle n'est pas remplacée.`,
+  syncFailed: (detail: string) => `Synchro impossible : ${detail}.`,
   passwordRule: "Au moins 12 caractères, dont au moins 3 types parmi : minuscules, majuscules, chiffres, symboles.",
   validation: {
     nameRequired: "Le nom du coffre est obligatoire.",
@@ -180,6 +239,9 @@ export const fr = {
     passwordMismatch: "Les deux saisies ne correspondent pas.",
     titleRequired: "Le titre est obligatoire.",
     lengthInvalid: "La longueur doit être un nombre entier entre 8 et 24.",
+    addressRequired: "L'adresse du serveur est obligatoire.",
+    keyRequired: "La clé de connexion est obligatoire.",
+    deviceNameRequired: "Le nom de cet appareil est obligatoire.",
   },
   errors,
 };

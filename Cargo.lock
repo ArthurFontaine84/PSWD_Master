@@ -3196,6 +3196,7 @@ dependencies = [
  "pswd-app",
  "pswd-core",
  "pswd-infra",
+ "pswd-server",
  "serde",
  "serde_json",
  "tauri",

@@ -12,7 +12,9 @@ import {
   listTags,
   listVaults,
   lockVault,
+  onVaultSynced,
   recoverVault,
+  serverStatus,
   restoreFromFile,
   saveSettings,
 } from "../lib/api";
@@ -42,6 +44,8 @@ vi.mock("../lib/api", () => ({
   restoreFromFile: vi.fn(),
   getSettings: vi.fn(),
   saveSettings: vi.fn(),
+  onVaultSynced: vi.fn(),
+  serverStatus: vi.fn(),
 }));
 vi.mock("../lib/files", () => ({
   pickCsvFile: vi.fn(),
@@ -55,6 +59,8 @@ beforeEach(() => {
   vi.mocked(listVaults).mockResolvedValue(["perso"]);
   vi.mocked(listEntries).mockResolvedValue([]);
   vi.mocked(listTags).mockResolvedValue([]);
+  vi.mocked(serverStatus).mockResolvedValue({ address: null, vaults: [] });
+  vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
 });
 
 function field(label: string): HTMLInputElement {

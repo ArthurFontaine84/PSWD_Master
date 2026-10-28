@@ -83,6 +83,50 @@ export interface CreatedVault {
   recoveryKey: string;
 }
 
+/** État d'un coffre vis-à-vis du serveur de l'appareil. */
+export type VaultServerState = "toPublish" | "published" | "detached";
+
+export interface ServerStatus {
+  /** `null` si l'appareil n'est connecté à aucun serveur. */
+  address: string | null;
+  vaults: { name: string; state: VaultServerState }[];
+}
+
+/** Échec pour un coffre ; `reason` est un message du backend. */
+export interface VaultFailure {
+  name: string;
+  reason: string;
+}
+
+/** Résultat d'un échange avec le serveur. */
+export interface Exchange {
+  /** `name` sur le serveur, `localName` sur cet appareil (différent si le nom était pris). */
+  downloaded: { name: string; localName: string }[];
+  notDownloaded: VaultFailure[];
+  published: string[];
+  notPublished: VaultFailure[];
+}
+
+export interface Disconnection {
+  /** Le jeton n'a pas pu être révoqué. */
+  revokeError: string | null;
+  /** Coffres retirés de cet appareil ; ils restent sur le serveur. */
+  removed: string[];
+  /** `reason` à `null` : des modifications ne sont pas encore sur le serveur. */
+  kept: { name: string; reason: string | null }[];
+}
+
+export type SyncState = "synced" | "notConnected" | "detached" | "offline" | "conflict" | "rejected" | "failed";
+
+/** Résultat de la synchro du coffre ouvert. */
+export interface SyncReport {
+  vault: string;
+  state: SyncState;
+  detail: string | null;
+  /** La synchro a changé le contenu du coffre : il est à relire. */
+  changed: boolean;
+}
+
 export function listVaults(): Promise<string[]> {
   return invoke<string[]>("list_vaults");
 }
@@ -202,7 +246,48 @@ export function saveSettings(settings: Settings): Promise<Settings> {
   return invoke<Settings>("save_settings", { settings });
 }
 
+/** Le serveur de l'appareil et l'état de chaque coffre, sans échange avec le serveur. */
+export function serverStatus(): Promise<ServerStatus> {
+  return invoke<ServerStatus>("server_status");
+}
+
+/** `accountName` reste vide, sauf avec une clé administrateur. */
+export async function connectServer(
+  address: string,
+  key: string,
+  deviceName: string,
+  accountName: string,
+): Promise<void> {
+  await invoke("connect_server", { address, key, deviceName, accountName });
+}
+
+/** Télécharge les nouveaux coffres du compte et publie ceux de l'appareil. */
+export function syncServer(): Promise<Exchange> {
+  return invoke<Exchange>("sync_server");
+}
+
+/** Clé de connexion d'un autre appareil : seulement à la demande de l'utilisateur. */
+export function addDeviceKey(): Promise<string> {
+  return invoke<string>("add_device_key");
+}
+
+export function disconnectServer(keepLocal: boolean): Promise<Disconnection> {
+  return invoke<Disconnection>("disconnect_server", { keepLocal });
+}
+
+/** Synchronise le coffre ouvert et renvoie le résultat. */
+export function syncVault(): Promise<SyncReport> {
+  return invoke<SyncReport>("sync_vault");
+}
+
 /** Appelle `handler` quand le coffre se verrouille par inactivité. */
 export function onVaultLocked(handler: () => void): Promise<UnlistenFn> {
   return listen("vault-locked", handler);
+}
+
+/** Appelle `handler` à la fin de chaque synchro automatique du coffre ouvert. */
+export function onVaultSynced(handler: (report: SyncReport) => void): Promise<UnlistenFn> {
+  return listen<SyncReport>("vault-synced", (event) => {
+    handler(event.payload);
+  });
 }

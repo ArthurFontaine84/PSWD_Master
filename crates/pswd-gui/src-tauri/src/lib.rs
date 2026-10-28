@@ -12,8 +12,10 @@ mod editing;
 mod entries;
 mod error;
 mod files;
+mod server;
 mod settings;
 mod state;
+mod sync;
 
 use std::error::Error;
 
@@ -37,9 +39,9 @@ pub fn run() {
     let result = builder
         .setup(|app| {
             let locations = locations(app.handle())?;
-            let on_lock = commands::lock_notifier(app.handle().clone());
+            let events = commands::Events(app.handle().clone());
             let clipboard = clipboard(app.handle());
-            app.manage(AppState::new(Vaults::new(locations), clipboard, on_lock));
+            app.manage(AppState::new(Vaults::new(locations), clipboard, events));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -69,7 +71,13 @@ pub fn run() {
             commands::backup_file_contents,
             commands::restore_from_file,
             commands::get_settings,
-            commands::save_settings
+            commands::save_settings,
+            commands::server_status,
+            commands::connect_server,
+            commands::sync_server,
+            commands::add_device_key,
+            commands::disconnect_server,
+            commands::sync_vault
         ])
         .run(tauri::generate_context!());
     if let Err(error) = result {

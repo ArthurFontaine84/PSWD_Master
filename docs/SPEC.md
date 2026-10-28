@@ -35,7 +35,7 @@ Reste à faire sur le Mac : build iOS, plugin Swift du presse-papiers, écran ne
 2. TLS et client : certificat, `rustls`, adaptateur `RemoteStore` HTTP dans `pswd-infra` avec vérification de l'empreinte, testé contre un `pswd-server` local.
 3. Comptes et appareils : jetons, clés de connexion, administrateur initial, `reset-admin`, révocation, membres de chaque coffre.
 4. Synchro dans la CLI : `connect`, `disconnect`, `add-device`, `status`, `sync` (commande et shell), états des coffres (sauf « retiré », qui attend la suppression sur le serveur, sous-étapes 6 et 7), téléchargement initial.
-5. Synchro dans PSWD Master : connexion, état de synchro, bouton « Synchroniser » ; build Android.
+5. Synchro dans PSWD Master : connexion, état de synchro, bouton « Synchroniser » (build Android repoussé, à lancer à la demande).
 6. Coffres communs : inviter, accepter ou refuser, quitter (serveur et PSWD Master).
 7. Administration : panneau de PSWD Master (membres, appareils, rôles, suppression, rattachement, versions, adresse publique, sauvegarde du serveur).
 8. Installation réelle : paquet `.deb`, `backup` / `restore` du serveur, VM puis PC réel, documentation, mutants.
@@ -211,7 +211,8 @@ Précisions :
 - Si l'écriture locale d'une modification échoue, le coffre en mémoire revient à son état précédent.
 - Un fichier distant inutilisable (altéré, autre coffre, version inconnue) n'est **jamais écrasé** : état « refusé », le coffre local reste utilisable.
 - États de synchro : à jour, hors ligne (avec le message de l'adaptateur), conflit persistant après 3 tentatives, distant refusé.
-- Seul un coffre déverrouillé se synchronise (la fusion exige sa clé). Moments : au déverrouillage, après chaque modification, au verrouillage (manuel, automatique, passage en arrière-plan sur mobile) et à la demande (bouton « Synchroniser », commande `sync` de la CLI). Pas de synchro périodique. La modification est d'abord enregistrée localement ; la synchro se fait ensuite en arrière-plan, sans jamais figer l'interface.
+- Seul un coffre déverrouillé se synchronise (la fusion exige sa clé). Moments : au déverrouillage (création et récupération comprises), après chaque modification, à la fermeture s'il reste des modifications non publiées et à la demande (bouton « Synchroniser », commande `sync` de la CLI). Pas de synchro au verrouillage par inactivité : la clé est déjà effacée. Pas de synchro périodique. La modification est d'abord enregistrée localement ; la synchro se fait ensuite en arrière-plan, sans jamais figer l'interface.
+- PSWD Master synchronise une **copie** de la session (`Session` est `Clone`) : pendant l'échange, l'interface lit et modifie le coffre ouvert. La copie synchronisée ne remplace la session que si le coffre n'a été ni fermé ni modifié entre-temps ; sinon la modification a déjà prévu une autre synchro. Une seule synchro ou un seul échange avec le serveur à la fois : deux fils ne réservent jamais le même coffre et n'écrivent jamais la configuration ensemble. Une copie garde la clé du coffre jusqu'à la fin de son échange (2 min au plus), même si le coffre est verrouillé entre-temps.
 
 ## 8. CLI
 
@@ -431,6 +432,13 @@ Le serveur identifie les coffres par son propre identifiant (UUID v4), jamais pa
   - Au retour, Rust compare l'horloge du système à l'heure du départ, car une application suspendue (iOS) gèle aussi son minuteur : délai dépassé ou heure reculée → verrouillage, et l'interface revient à la liste.
   - Sur le bureau, ces signaux sont ignorés : une fenêtre réduite n'est soumise qu'au verrouillage par inactivité.
 - Bouton « Verrouiller » toujours visible. Pas de biométrie à cette étape (`EXTENSION(biometrie)`).
+
+**Serveur** (étape 3, §11)
+- Écran « Serveur », ouvert par un bouton de la barre du haut. Appareil non connecté : formulaire de connexion (adresse, clé de connexion, nom de l'appareil, nom du compte, ce dernier seulement avec la clé administrateur). La clé est effacée du champ dès l'envoi ; une fois connecté, l'appareil échange aussitôt ses coffres avec le serveur, et un échange incomplet est signalé. Appareil connecté : « Synchroniser » (télécharge les nouveaux coffres du compte, publie ceux de l'appareil), « Ajouter un appareil » (clé de connexion montrée une seule fois, à la demande de l'utilisateur, puis oubliée) et « Se déconnecter » (case « Garder une copie des coffres sur cet appareil », cochée par défaut).
+- Liste des coffres, si l'appareil est connecté : état « à publier » ou « détaché » sur la carte du coffre (rien pour un coffre publié) et bouton « Synchroniser ».
+- Coffre ouvert, si l'appareil est connecté : bouton « Synchroniser ». Les synchros automatiques se font en Rust, dans un autre fil ; à la fin de chacune, Rust envoie l'événement `vault-synced`. Un problème (hors ligne, conflit, copie du serveur refusée, erreur locale) reste affiché dans un bandeau jusqu'à la synchro réussie suivante ; une synchro qui apporte des modifications fait relire la liste.
+- Les commandes qui parlent au serveur s'exécutent hors du fil de l'interface (commandes `async`, `spawn_blocking`). La suppression d'un coffre aussi : elle attend la fin d'une synchro en cours, qui pourrait réécrire le coffre.
+- Les messages d'erreur du serveur (« serveur injoignable »…) viennent de Rust, en français, comme détail d'un code (`serverError`) ou d'un résultat par coffre (cf. `EXTENSION(anglais)`).
 
 **Tests**
 - `pswd-app` et le backend de `pswd-gui` : 100 % lignes et branches visées, comme `pswd-infra` ; exclusions justifiées (démarrage de Tauri, appel au plugin natif). Les commandes sont testées avec le moteur factice de Tauri (`tauri::test`) et la vraie configuration, capacités comprises.

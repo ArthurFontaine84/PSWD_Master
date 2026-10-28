@@ -7,6 +7,8 @@ import {
   entryHistory,
   listEntries,
   listTags,
+  onVaultSynced,
+  serverStatus,
   updateEntry,
   type EntryDetail,
   type EntrySummary,
@@ -26,6 +28,8 @@ vi.mock("../lib/api", () => ({
   updateEntry: vi.fn(),
   deleteEntry: vi.fn(),
   entryHistory: vi.fn(),
+  onVaultSynced: vi.fn(),
+  serverStatus: vi.fn(),
 }));
 
 const github: EntrySummary = {
@@ -52,6 +56,8 @@ beforeEach(() => {
   vi.mocked(listTags).mockResolvedValue([]);
   vi.mocked(entryDetail).mockResolvedValue(githubDetail);
   vi.mocked(entryHistory).mockResolvedValue([]);
+  vi.mocked(serverStatus).mockResolvedValue({ address: null, vaults: [] });
+  vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
 });
 
 function show() {

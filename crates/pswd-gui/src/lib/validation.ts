@@ -26,6 +26,20 @@ export function newVaultProblem(name: string, password: string, confirmation: st
   return newPasswordProblem(password, confirmation);
 }
 
+/** Champ manquant du formulaire de connexion à un serveur, ou `null`. */
+export function connectionProblem(address: string, key: string, deviceName: string): string | null {
+  if (address.trim() === "") {
+    return texts.validation.addressRequired;
+  }
+  if (key.trim() === "") {
+    return texts.validation.keyRequired;
+  }
+  if (deviceName.trim() === "") {
+    return texts.validation.deviceNameRequired;
+  }
+  return null;
+}
+
 /** Problème d'un nouveau mot de passe maître et de sa confirmation, ou `null`. */
 export function newPasswordProblem(password: string, confirmation: string): string | null {
   if (password === "") {

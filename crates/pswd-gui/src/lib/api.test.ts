@@ -27,10 +27,18 @@ import {
   listVaults,
   lockVault,
   onVaultLocked,
+  onVaultSynced,
   revealPassword,
   unlockVault,
   updateEntry,
+  serverStatus,
+  connectServer,
+  syncServer,
+  addDeviceKey,
+  disconnectServer,
+  syncVault,
   type EntryInput,
+  type SyncReport,
 } from "./api";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -85,6 +93,12 @@ describe("api", () => {
       theme: "dark" as const,
     };
     await saveSettings(settings);
+    await serverStatus();
+    await connectServer("pswd.local", "AAAA", "PC", "Arthur");
+    await syncServer();
+    await addDeviceKey();
+    await disconnectServer(false);
+    await syncVault();
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ["list_vaults"],
       ["create_vault", { name: "perso", password: "maître" }],
@@ -113,7 +127,25 @@ describe("api", () => {
       ["restore_from_file", { path: "E:/s.pswd", name: "perso" }],
       ["get_settings"],
       ["save_settings", { settings }],
+      ["server_status"],
+      ["connect_server", { address: "pswd.local", key: "AAAA", deviceName: "PC", accountName: "Arthur" }],
+      ["sync_server"],
+      ["add_device_key"],
+      ["disconnect_server", { keepLocal: false }],
+      ["sync_vault"],
     ]);
+  });
+
+  it("passes on the result of each automatic sync", async () => {
+    const stop = vi.fn();
+    vi.mocked(listen).mockClear().mockResolvedValue(stop);
+    const handler = vi.fn();
+    await expect(onVaultSynced(handler)).resolves.toBe(stop);
+    const report: SyncReport = { vault: "perso", state: "synced", detail: null, changed: true };
+    const call = vi.mocked(listen).mock.lastCall;
+    expect(call?.[0]).toBe("vault-synced");
+    call?.[1]({ event: "vault-synced", id: 1, payload: report });
+    expect(handler).toHaveBeenCalledWith(report);
   });
 
   it("listens to the automatic lock", async () => {

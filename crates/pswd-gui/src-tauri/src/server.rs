@@ -1,0 +1,439 @@
+//! Connexion de l'appareil à un serveur, depuis l'écran « Serveur » (SPEC §11).
+
+use pswd_app::{AppError, KeptReason, VaultState};
+use pswd_core::{ConnectionKey, Secret};
+use serde::Serialize;
+
+use crate::error::UiError;
+use crate::state::AppState;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ServerStatus {
+    /// `None` si l'appareil n'est connecté à aucun serveur.
+    address: Option<String>,
+    vaults: Vec<VaultStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct VaultStatus {
+    name: String,
+    state: &'static str,
+}
+
+/// Coffres téléchargés et publiés par un échange avec le serveur.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Exchange {
+    downloaded: Vec<Downloaded>,
+    not_downloaded: Vec<Failure>,
+    published: Vec<String>,
+    not_published: Vec<Failure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Downloaded {
+    /// Nom sur le serveur.
+    name: String,
+    /// Nom sur cet appareil, différent si le premier était pris.
+    local_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct Failure {
+    name: String,
+    /// Message de l'erreur, en français.
+    reason: String,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Disconnection {
+    /// Le jeton n'a pas pu être révoqué : à révoquer depuis le panneau d'administration.
+    revoke_error: Option<String>,
+    /// Coffres retirés de cet appareil ; ils restent sur le serveur.
+    removed: Vec<String>,
+    kept: Vec<Kept>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct Kept {
+    name: String,
+    /// `None` : des modifications ne sont pas encore sur le serveur.
+    reason: Option<String>,
+}
+
+impl AppState {
+    /// Le serveur de l'appareil et l'état de chaque coffre.
+    pub fn server_status(&self) -> Result<ServerStatus, UiError> {
+        let address = self.vaults.server()?.map(|server| server.local_address);
+        let vaults = self
+            .vaults
+            .vault_states()?
+            .into_iter()
+            .map(|(name, state)| VaultStatus {
+                name,
+                state: state_name(state),
+            })
+            .collect();
+        Ok(ServerStatus { address, vaults })
+    }
+
+    /// Connecte l'appareil ; `account_name`, laissé vide sauf avec une clé administrateur,
+    /// nomme le compte créé.
+    pub fn connect(
+        &self,
+        address: &str,
+        key: &Secret,
+        device_name: &str,
+        account_name: &str,
+    ) -> Result<(), UiError> {
+        let key = ConnectionKey::parse(key.expose())
+            .map_err(|_| UiError::code("invalidConnectionKey"))?;
+        let account_name = Some(account_name.trim()).filter(|name| !name.is_empty());
+        let _one_at_a_time = self.exclusive();
+        self.vaults
+            .connect(address, &key, device_name.trim(), account_name)
+            .map_err(server_error)
+    }
+
+    /// Télécharge les coffres du compte que l'appareil n'a pas, puis publie ceux que le serveur
+    /// ne connaît pas.
+    pub fn exchange(&self) -> Result<Exchange, UiError> {
+        let _one_at_a_time = self.exclusive();
+        let mut exchange = Exchange::default();
+        for (name, result) in self.vaults.download_vaults().map_err(server_error)? {
+            match result {
+                Ok(local_name) => exchange.downloaded.push(Downloaded { name, local_name }),
+                Err(error) => exchange.not_downloaded.push(failure(name, &error)),
+            }
+        }
+        for (name, result) in self.vaults.publish_vaults().map_err(server_error)? {
+            match result {
+                Ok(()) => exchange.published.push(name),
+                Err(error) => exchange.not_published.push(failure(name, &error)),
+            }
+        }
+        Ok(exchange)
+    }
+
+    /// Clé de connexion d'un appareil de plus pour le même compte, à montrer une seule fois.
+    pub fn new_device_key(&self) -> Result<Secret, UiError> {
+        self.vaults.new_device_key().map_err(server_error)
+    }
+
+    /// Sans `keep_local`, le coffre ouvert est d'abord verrouillé : il peut être retiré.
+    pub fn disconnect(&self, keep_local: bool) -> Result<Disconnection, UiError> {
+        if !keep_local {
+            self.lock();
+        }
+        let _one_at_a_time = self.exclusive();
+        let report = self.vaults.disconnect(keep_local)?;
+        Ok(Disconnection {
+            revoke_error: report.revoke_error.map(|error| error.to_string()),
+            removed: report.removed,
+            kept: report
+                .kept
+                .into_iter()
+                .map(|(name, reason)| Kept {
+                    name,
+                    reason: match reason {
+                        KeptReason::Unpublished => None,
+                        KeptReason::Error(error) => Some(error.to_string()),
+                    },
+                })
+                .collect(),
+        })
+    }
+}
+
+fn state_name(state: VaultState) -> &'static str {
+    match state {
+        VaultState::ToPublish => "toPublish",
+        VaultState::Published => "published",
+        VaultState::Detached => "detached",
+    }
+}
+
+fn failure(name: String, error: &AppError) -> Failure {
+    Failure {
+        name,
+        reason: error.to_string(),
+    }
+}
+
+/// Une erreur de port vient ici du serveur, pas d'un fichier.
+fn server_error(error: AppError) -> UiError {
+    match error {
+        AppError::Port(error) => UiError::new("serverError", error.to_string()),
+        other => other.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::net::TcpListener;
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    use pswd_app::Vaults;
+    use pswd_core::crypto::KdfParams;
+    use pswd_core::ports::{PortError, SecureClipboard};
+    use pswd_core::{Credentials, EntryContent, EntryKind, Timestamp};
+    use pswd_infra::{Locations, ServerFile};
+    use pswd_server::testing::TestServer;
+    use serde_json::{Value, json};
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::state::Notifier;
+    use crate::sync::SyncReport;
+
+    const PASSWORD: &str = "Maître-2026!";
+
+    /// Ni presse-papiers ni interface à prévenir.
+    struct Silent;
+
+    impl Notifier for Silent {
+        fn vault_locked(&self) {}
+        fn vault_synced(&self, _: &SyncReport) {}
+    }
+
+    impl SecureClipboard for Silent {
+        fn copy_secret(&mut self, _: &Secret, _: Duration) -> Result<(), PortError> {
+            Ok(())
+        }
+    }
+
+    fn device(dir: &TempDir) -> AppState {
+        let vaults = Vaults::new(Locations::new(
+            &dir.path().join("config"),
+            &dir.path().join("data"),
+        ));
+        AppState::with_settings(
+            vaults,
+            Box::new(Silent),
+            KdfParams::new(8 * 1024, 1, 1).unwrap(),
+            || Timestamp::from_millis(1_000),
+            None,
+            false,
+            Silent,
+        )
+    }
+
+    fn secret(value: &str) -> Secret {
+        Secret::new(value.to_owned())
+    }
+
+    fn create(state: &AppState, name: &str) {
+        state.create(name, &secret(PASSWORD)).unwrap();
+        state.lock();
+    }
+
+    fn connect_admin(state: &AppState) -> TestServer {
+        let server = TestServer::start();
+        state
+            .connect(&server.address, &server.admin_key, " PC ", " Arthur ")
+            .unwrap();
+        server
+    }
+
+    fn connect_same_account(connected: &AppState, other: &AppState) {
+        let address = connected.vaults.server().unwrap().unwrap().local_address;
+        let key = connected.new_device_key().unwrap();
+        other.connect(&address, &key, "Portable", "").unwrap();
+    }
+
+    fn sent<T: Serialize>(value: &T) -> Value {
+        serde_json::to_value(value).unwrap()
+    }
+
+    fn status(state: &AppState) -> Value {
+        sent(&state.server_status().unwrap())
+    }
+
+    /// Fait pointer `server.toml` vers une adresse qui coupe toute connexion.
+    fn go_offline(dir: &TempDir) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        std::thread::spawn(move || {
+            for connection in listener.incoming() {
+                drop(connection);
+            }
+        });
+        let mut file = ServerFile::new(dir.path().join("data").join("server.toml"));
+        let mut server = file.load().unwrap().unwrap();
+        server.local_address = address;
+        file.save(&server).unwrap();
+    }
+
+    fn vault_file(dir: &Path, name: &str) -> PathBuf {
+        dir.join("data").join("vaults").join(name).join("vault.enc")
+    }
+
+    #[test]
+    fn status_shows_the_server_and_the_state_of_each_vault() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        create(&state, "perso");
+        assert_eq!(
+            status(&state),
+            json!({
+                "address": null,
+                "vaults": [{ "name": "perso", "state": "toPublish" }],
+            })
+        );
+        let server = connect_admin(&state);
+        state.exchange().unwrap();
+        assert_eq!(status(&state)["address"], server.address.as_str());
+        assert_eq!(status(&state)["vaults"][0]["state"], "published");
+        assert_eq!(state.disconnect(true), Ok(Disconnection::default()));
+        assert_eq!(status(&state)["vaults"][0]["state"], "detached");
+    }
+
+    #[test]
+    fn connection_errors_are_explained() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        let server = TestServer::start();
+        let connect =
+            |key: &Secret, account: &str| state.connect(&server.address, key, "PC", account).err();
+        assert_eq!(
+            connect(&secret("pas une clé"), ""),
+            Some(UiError::code("invalidConnectionKey"))
+        );
+        assert_eq!(
+            connect(&server.admin_key, " "),
+            Some(UiError::new(
+                "serverError",
+                "nom d'appareil ou de compte invalide"
+            ))
+        );
+        assert_eq!(connect(&server.admin_key, "Arthur"), None);
+        assert_eq!(
+            connect(&server.admin_key, "Arthur"),
+            Some(UiError::code("alreadyConnected"))
+        );
+    }
+
+    #[test]
+    fn a_disconnected_device_has_nothing_to_exchange() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        let not_connected = Some(UiError::code("notConnected"));
+        assert_eq!(state.exchange().err(), not_connected);
+        assert_eq!(state.new_device_key().err(), not_connected);
+        assert_eq!(state.disconnect(true).err(), not_connected);
+    }
+
+    #[test]
+    fn vaults_are_published_then_downloaded_by_another_device() {
+        let dir = TempDir::new().unwrap();
+        let pc = device(&dir);
+        create(&pc, "perso");
+        connect_admin(&pc);
+        assert_eq!(
+            sent(&pc.exchange().unwrap()),
+            json!({
+                "downloaded": [],
+                "notDownloaded": [],
+                "published": ["perso"],
+                "notPublished": [],
+            })
+        );
+
+        let other = TempDir::new().unwrap();
+        let phone = device(&other);
+        create(&phone, "perso");
+        connect_same_account(&pc, &phone);
+        let exchange = sent(&phone.exchange().unwrap());
+        assert_eq!(exchange["downloaded"][0]["name"], "perso");
+        let local_name = exchange["downloaded"][0]["localName"].as_str().unwrap();
+        assert!(local_name.starts_with("perso-"), "{exchange}");
+        assert_eq!(exchange["published"], json!(["perso"]));
+    }
+
+    #[test]
+    fn failures_are_reported_per_vault() {
+        let dir = TempDir::new().unwrap();
+        let pc = device(&dir);
+        create(&pc, "abime");
+        connect_admin(&pc);
+        fs::write(vault_file(dir.path(), "abime"), b"pas un coffre").unwrap();
+        assert_eq!(
+            sent(&pc.exchange().unwrap())["notPublished"],
+            json!([{ "name": "abime", "reason": "réponse inattendue du serveur (400)" }])
+        );
+
+        create(&pc, "perso");
+        pc.exchange().unwrap();
+        let other = TempDir::new().unwrap();
+        let phone = device(&other);
+        connect_same_account(&pc, &phone);
+        fs::write(other.path().join("data").join("vaults"), b"").unwrap();
+        let exchange = sent(&phone.exchange().unwrap());
+        assert_eq!(exchange["notDownloaded"][0]["name"], "perso");
+        assert!(exchange["notDownloaded"][0]["reason"].is_string());
+    }
+
+    #[test]
+    fn an_offline_server_is_reported() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        connect_admin(&state);
+        go_offline(&dir);
+        let offline = Some(UiError::new("serverError", "serveur injoignable"));
+        assert_eq!(state.exchange().err(), offline);
+        assert_eq!(state.new_device_key().err(), offline);
+    }
+
+    #[test]
+    fn disconnection_without_copies_removes_what_the_server_has() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        create(&state, "modifie");
+        create(&state, "perso");
+        connect_admin(&state);
+        state.exchange().unwrap();
+        state
+            .vaults
+            .open("modifie", Credentials::Password(&secret(PASSWORD)))
+            .unwrap()
+            .edit(|vault| {
+                vault.add(
+                    EntryContent::new(EntryKind::Note, "Wi-Fi".to_owned()),
+                    Timestamp::from_millis(2),
+                )
+            })
+            .unwrap();
+        state.unlock("perso", &secret(PASSWORD)).unwrap();
+        assert_eq!(
+            sent(&state.disconnect(false).unwrap()),
+            json!({
+                "revokeError": null,
+                "removed": ["perso"],
+                "kept": [{ "name": "modifie", "reason": null }],
+            })
+        );
+        assert_eq!(state.current(), None);
+    }
+
+    #[test]
+    fn offline_disconnection_keeps_every_vault() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        create(&state, "perso");
+        connect_admin(&state);
+        state.exchange().unwrap();
+        go_offline(&dir);
+        assert_eq!(
+            sent(&state.disconnect(false).unwrap()),
+            json!({
+                "revokeError": "serveur injoignable",
+                "removed": [],
+                "kept": [{ "name": "perso", "reason": "serveur injoignable" }],
+            })
+        );
+    }
+}

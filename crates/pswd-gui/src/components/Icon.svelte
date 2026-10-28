@@ -11,7 +11,9 @@
     | "check"
     | "back"
     | "eye"
-    | "eye-off";
+    | "eye-off"
+    | "server"
+    | "sync";
 </script>
 
 <script lang="ts">
@@ -64,6 +66,15 @@
     <path d="M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6" />
     <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
     <path d="m2 2 20 20" />
+  {:else if name === "server"}
+    <rect x="3" y="4" width="18" height="7" rx="2" />
+    <rect x="3" y="13" width="18" height="7" rx="2" />
+    <path d="M7 7.5h.01M7 16.5h.01" />
+  {:else if name === "sync"}
+    <path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" />
+    <path d="M3 21v-5h5" />
+    <path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" />
+    <path d="M21 3v5h-5" />
   {:else}
     <path d="m9 18 6-6-6-6" />
   {/if}

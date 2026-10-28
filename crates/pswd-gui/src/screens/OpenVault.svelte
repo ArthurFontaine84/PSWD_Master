@@ -13,10 +13,14 @@
     listEntries,
     listTags,
     lockVault,
+    onVaultSynced,
+    serverStatus,
+    syncVault,
     updateEntry,
     type EntryDetail,
     type EntryInput,
     type EntrySummary,
+    type SyncReport,
     type TagCount,
     type VaultInfo,
   } from "../lib/api";
@@ -27,6 +31,7 @@
   import { verbatim } from "../lib/keyboard";
   import { pageCount, pageOf, pageSizeFor, remSize, watchWide } from "../lib/layout";
   import { motion } from "../lib/motion";
+  import { syncMessage, syncProblem } from "../lib/sync";
   import { showToast } from "../lib/toast.svelte";
 
   interface Props {
@@ -65,6 +70,43 @@
   const visible = $derived(wide ? pageOf(entries, shownPage, pageSize) : entries);
   /** Change dès que le volet de détail montre autre chose : son contenu arrive animé. */
   const paneKey = $derived(`${panel ?? ""}:${editor?.mode ?? ""}:${selected ?? ""}`);
+  /** L'appareil est connecté à un serveur : le bouton « Synchroniser » est proposé. */
+  let connected = $state(false);
+  let syncing = $state(false);
+  /** Dernier problème de synchro, effacé par la synchro suivante réussie. */
+  let syncNotice = $state<string | null>(null);
+
+  // Sans état lisible, le coffre reste utilisable en local, sans bouton de synchro.
+  serverStatus().then(
+    (status) => (connected = status.address !== null),
+    () => undefined,
+  );
+
+  /** Fin d'une synchro : les modifications reçues du serveur sont affichées. */
+  function synced(report: SyncReport) {
+    if (report.vault !== vault.name) {
+      return;
+    }
+    syncNotice = syncProblem(report);
+    if (report.changed) {
+      revision += 1;
+    }
+  }
+
+  async function synchronize() {
+    syncing = true;
+    try {
+      const report = await syncVault();
+      synced(report);
+      if (syncNotice === null) {
+        showToast(syncMessage(report));
+      }
+    } catch (error) {
+      fail(error);
+    } finally {
+      syncing = false;
+    }
+  }
 
   /** Une seule chose à la fois à la place du détail. */
   function show(next: "password" | "import" | "delete") {
@@ -164,9 +206,13 @@
   onMount(() => {
     const stopBack = onBack(back);
     const stopWide = watchWide((value) => (wide = value));
+    const stopSynced = onVaultSynced(synced);
     return () => {
       stopBack();
       stopWide();
+      void stopSynced.then((stop) => {
+        stop();
+      });
     };
   });
 
@@ -189,6 +235,18 @@
       <button type="button" class="icon-button" aria-label={texts.newEntry} title={texts.newEntry} onclick={startEntry}>
         <Icon name="plus" />
       </button>
+      {#if connected}
+        <button
+          type="button"
+          class="icon-button"
+          aria-label={texts.synchronize}
+          title={texts.synchronize}
+          disabled={syncing}
+          onclick={synchronize}
+        >
+          <Icon name="sync" />
+        </button>
+      {/if}
       <div class="menu-anchor" bind:this={menuAnchor}>
         <button
           type="button"
@@ -241,6 +299,9 @@
           </select>
         {/if}
       </div>
+      {#if syncNotice}
+        <p role="status" class="notice">{syncNotice}</p>
+      {/if}
       {#if problem}
         <p role="alert">{problem}</p>
       {/if}

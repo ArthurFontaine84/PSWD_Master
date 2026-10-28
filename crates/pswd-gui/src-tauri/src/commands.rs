@@ -5,17 +5,22 @@
 
 use pswd_core::Secret;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::editing::{EntryInput, HistoryItem};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
 use crate::files;
+use crate::server::{Disconnection, Exchange, ServerStatus};
 use crate::settings::Settings;
-use crate::state::{AppState, VaultInfo};
+use crate::state::{AppState, Notifier, VaultInfo};
+use crate::sync::SyncReport;
 
 /// Événement envoyé à l'interface quand le coffre se verrouille par inactivité.
 pub const VAULT_LOCKED: &str = "vault-locked";
+
+/// Événement envoyé à l'interface à la fin d'une synchro automatique du coffre ouvert.
+pub const VAULT_SYNCED: &str = "vault-synced";
 
 /// Coffre créé et ouvert, avec sa clé de récupération : affichée une seule fois, à la demande
 /// explicite de l'utilisateur qui vient de créer le coffre.
@@ -166,13 +171,14 @@ pub fn recover_vault(
     state.recover(&name, &Secret::new(recovery_key), &Secret::new(password))
 }
 
+/// Attend la fin d'une synchro en cours : hors du fil de l'interface.
 #[tauri::command]
-pub fn delete_vault(
-    state: State<'_, AppState>,
+pub async fn delete_vault<R: Runtime>(
+    app: AppHandle<R>,
     name: String,
     confirmation: String,
 ) -> Result<(), UiError> {
-    state.delete_vault(&name, &confirmation)
+    in_background(app, move |state| state.delete_vault(&name, &confirmation)).await
 }
 
 /// Le fichier est lu par Rust : son contenu en clair ne passe jamais par l'interface.
@@ -233,11 +239,84 @@ pub fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<S
     state.save_settings(settings)
 }
 
-/// Prévient l'interface quand le coffre se verrouille par inactivité.
-pub fn lock_notifier<R: Runtime>(app: AppHandle<R>) -> impl Fn() + Send + Sync + 'static {
-    move || {
-        // Au mieux : si la fenêtre est déjà fermée, il n'y a plus personne à prévenir.
-        let _ = app.emit(VAULT_LOCKED, ());
+/// Le serveur de l'appareil et l'état de chaque coffre ; aucun échange avec le serveur.
+#[tauri::command]
+pub fn server_status(state: State<'_, AppState>) -> Result<ServerStatus, UiError> {
+    state.server_status()
+}
+
+/// `account_name` reste vide, sauf avec une clé administrateur.
+#[tauri::command]
+pub async fn connect_server<R: Runtime>(
+    app: AppHandle<R>,
+    address: String,
+    key: String,
+    device_name: String,
+    account_name: String,
+) -> Result<(), UiError> {
+    let key = Secret::new(key);
+    in_background(app, move |state| {
+        state.connect(&address, &key, &device_name, &account_name)
+    })
+    .await
+}
+
+/// Télécharge les nouveaux coffres du compte et publie ceux de l'appareil.
+#[tauri::command]
+pub async fn sync_server<R: Runtime>(app: AppHandle<R>) -> Result<Exchange, UiError> {
+    in_background(app, AppState::exchange).await
+}
+
+/// Clé de connexion d'un autre appareil, sur demande explicite de l'utilisateur.
+#[tauri::command]
+pub async fn add_device_key<R: Runtime>(app: AppHandle<R>) -> Result<String, UiError> {
+    let key = in_background(app, AppState::new_device_key).await?;
+    Ok(key.expose().to_owned())
+}
+
+#[tauri::command]
+pub async fn disconnect_server<R: Runtime>(
+    app: AppHandle<R>,
+    keep_local: bool,
+) -> Result<Disconnection, UiError> {
+    in_background(app, move |state| state.disconnect(keep_local)).await
+}
+
+/// Synchronise le coffre ouvert (bouton « Synchroniser ») et renvoie le résultat.
+#[tauri::command]
+pub async fn sync_vault<R: Runtime>(app: AppHandle<R>) -> Result<SyncReport, UiError> {
+    in_background(app, AppState::sync_now).await
+}
+
+/// Exécute `task` hors du fil de l'interface : un échange avec le serveur peut durer.
+async fn in_background<R: Runtime, T: Send + 'static>(
+    app: AppHandle<R>,
+    task: impl FnOnce(&AppState) -> Result<T, UiError> + Send + 'static,
+) -> Result<T, UiError> {
+    tauri::async_runtime::spawn_blocking(move || task(&app.state::<AppState>()))
+        .await
+        .unwrap_or_else(task_failed)
+}
+
+/// Seule une panique de la tâche mène ici, et le code n'en provoque aucune.
+// Exclue de la couverture : aucun test ne peut l'atteindre.
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[allow(clippy::needless_pass_by_value)]
+fn task_failed<T>(error: tauri::Error) -> Result<T, UiError> {
+    Err(UiError::new("unexpected", error.to_string()))
+}
+
+/// Prévient l'interface depuis les autres fils de l'application.
+pub struct Events<R: Runtime>(pub AppHandle<R>);
+
+// Au mieux : si la fenêtre est déjà fermée, il n'y a plus personne à prévenir.
+impl<R: Runtime> Notifier for Events<R> {
+    fn vault_locked(&self) {
+        let _ = self.0.emit(VAULT_LOCKED, ());
+    }
+
+    fn vault_synced(&self, report: &SyncReport) {
+        let _ = self.0.emit(VAULT_SYNCED, report);
     }
 }
 
@@ -252,6 +331,7 @@ mod tests {
     use pswd_core::ports::{PortError, SecureClipboard};
     use pswd_core::{EntryContent, EntryKind, Tags, Timestamp};
     use pswd_infra::Locations;
+    use pswd_server::testing::TestServer;
     use serde_json::{Value, json};
     use tauri::http::HeaderMap;
     use tauri::ipc::{CallbackFn, InvokeBody};
@@ -314,6 +394,12 @@ mod tests {
                     restore_from_file,
                     get_settings,
                     save_settings,
+                    server_status,
+                    connect_server,
+                    sync_server,
+                    add_device_key,
+                    disconnect_server,
+                    sync_vault,
                     not_allowed
                 ])
                 .build(tauri::generate_context!())
@@ -325,7 +411,7 @@ mod tests {
                 || Timestamp::from_millis(1_000),
                 auto_lock,
                 true,
-                lock_notifier(app.handle().clone()),
+                Events(app.handle().clone()),
             ));
             let webview = tauri::WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
                 .build()
@@ -677,6 +763,50 @@ mod tests {
             Ok(Value::Null)
         );
         assert_eq!(app.call("current_vault", json!({})), Ok(Value::Null));
+    }
+
+    #[test]
+    fn the_server_is_reached_through_its_commands() {
+        let app = TestApp::new(None);
+        let (sender, receiver) = mpsc::channel();
+        app.app.listen_any(VAULT_SYNCED, move |event| {
+            let _ = sender.send(event.payload().to_owned());
+        });
+        assert_eq!(
+            app.call("server_status", json!({})),
+            Ok(json!({ "address": null, "vaults": [] }))
+        );
+        let server = TestServer::start();
+        let connection = json!({
+            "address": server.address,
+            "key": server.admin_key.expose(),
+            "deviceName": "PC",
+            "accountName": "Arthur",
+        });
+        assert_eq!(app.call("connect_server", connection), Ok(Value::Null));
+
+        app.create("perso", "Maître-2026!").unwrap();
+        let synced =
+            json!({ "vault": "perso", "state": "synced", "detail": null, "changed": false });
+        let report = receiver.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&report).unwrap(), synced);
+        assert_eq!(app.call("sync_vault", json!({})), Ok(synced));
+        assert_eq!(
+            app.call("sync_server", json!({})),
+            Ok(
+                json!({ "downloaded": [], "notDownloaded": [], "published": [], "notPublished": [] })
+            )
+        );
+        let key = app.call("add_device_key", json!({})).unwrap();
+        assert_eq!(key.as_str().unwrap().split('-').count(), 13, "{key}");
+        assert_eq!(
+            app.call("disconnect_server", json!({ "keepLocal": true })),
+            Ok(json!({ "revokeError": null, "removed": [], "kept": [] }))
+        );
+        assert_eq!(
+            app.call("add_device_key", json!({})),
+            Err(json!({ "code": "notConnected", "detail": null }))
+        );
     }
 
     /// Commande bien enregistrée, mais ni déclarée dans `build.rs` ni autorisée par une capacité.

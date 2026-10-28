@@ -59,7 +59,8 @@ impl From<FileError> for SessionError {
 }
 
 /// Coffre ouvert : toute modification est enregistrée localement, la publication se fait par
-/// [`Session::sync`].
+/// [`Session::sync`]. Une copie peut se synchroniser pendant que l'original reste consultable.
+#[derive(Clone)]
 pub struct Session<L> {
     local: L,
     file: VaultFile,
@@ -291,7 +292,7 @@ mod tests {
     use crate::ports::RemoteVersion;
     use crate::{EntryContent, EntryKind, VaultError};
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     struct FakeLocal {
         file: Option<Vec<u8>>,
         saves: usize,
@@ -518,6 +519,21 @@ mod tests {
         );
         assert_eq!(titles(session.vault()), ["départ"]);
         assert!(!session.has_pending_changes());
+    }
+
+    #[test]
+    fn a_copy_syncs_without_changing_the_original() {
+        let (mut session, _, file) = synced();
+        session
+            .edit(|vault| vault.add(note("nouvelle"), at(3)))
+            .unwrap();
+        let mut remote = FakeRemote::holding(&changed_elsewhere(&file, "ailleurs"));
+        let mut copy = session.clone();
+        assert_eq!(copy.sync(&mut remote), Ok(SyncStatus::Synced));
+        assert_eq!(titles(copy.vault()), ["ailleurs", "départ", "nouvelle"]);
+        assert!(!copy.has_pending_changes());
+        assert_eq!(titles(session.vault()), ["départ", "nouvelle"]);
+        assert!(session.has_pending_changes());
     }
 
     #[test]

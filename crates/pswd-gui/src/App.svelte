@@ -23,6 +23,7 @@
   import OpenVault from "./screens/OpenVault.svelte";
   import RecoveryKey from "./screens/RecoveryKey.svelte";
   import Restore from "./screens/Restore.svelte";
+  import Server from "./screens/Server.svelte";
   import Settings from "./screens/Settings.svelte";
   import Unlock from "./screens/Unlock.svelte";
   import VaultList from "./screens/VaultList.svelte";
@@ -35,6 +36,7 @@
     | { kind: "open"; vault: VaultInfo }
     | { kind: "backup" }
     | { kind: "restore" }
+    | { kind: "server" }
     | { kind: "settings" };
 
   /** Intervalle minimal entre deux signaux d'activité envoyés au backend. */
@@ -142,6 +144,15 @@
           <button
             type="button"
             class="icon-button"
+            aria-label={texts.server}
+            title={texts.server}
+            onclick={() => (screen = { kind: "server" })}
+          >
+            <Icon name="server" />
+          </button>
+          <button
+            type="button"
+            class="icon-button"
             aria-label={texts.settings}
             title={texts.settings}
             onclick={() => (screen = { kind: "settings" })}
@@ -191,6 +202,8 @@
           }}
           onCancel={() => (screen = { kind: "list" })}
         />
+      {:else if screen.kind === "server"}
+        <Server onClose={() => (screen = { kind: "list" })} />
       {:else if screen.kind === "settings"}
         <Settings onClose={() => (screen = { kind: "list" })} />
       {:else}
