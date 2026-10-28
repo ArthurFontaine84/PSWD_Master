@@ -302,8 +302,9 @@ mod tests {
         let key = json(response).await["key"].as_str().unwrap().to_owned();
         let second = connect(&app, &key, None).await;
 
+        let name = Some(serde_json::json!({ "name": "perso" }));
         let vault =
-            json(send(&app, request("POST", "/v1/vaults", Some(&member), None)).await).await;
+            json(send(&app, request("POST", "/v1/vaults", Some(&member), name)).await).await;
         let listed =
             json(send(&app, request("GET", "/v1/vaults", Some(&second), None)).await).await;
         assert_eq!(listed[0]["id"], vault["id"]);

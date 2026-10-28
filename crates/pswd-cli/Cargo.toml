@@ -18,6 +18,7 @@ rpassword.workspace = true
 shlex.workspace = true
 
 [dev-dependencies]
+pswd-server = { path = "../pswd-server", features = ["testing"] }
 tempfile.workspace = true
 uuid.workspace = true
 

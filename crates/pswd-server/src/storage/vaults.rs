@@ -10,7 +10,7 @@ use super::{Storage, StorageError};
 /// Nombre de versions conservées par coffre, la version courante comprise.
 pub const KEPT_VERSIONS: i64 = 15;
 
-const LIST_VAULTS: &str = "SELECT v.id, v.current_version FROM vaults v
+const LIST_VAULTS: &str = "SELECT v.id, v.name, v.current_version FROM vaults v
      JOIN vault_members m ON m.vault_id = v.id
      WHERE m.account_id = ?1 ORDER BY v.id";
 const INSERT_VERSION: &str = "INSERT INTO vault_versions (vault_id, version, content, created_at)
@@ -29,21 +29,22 @@ pub struct StoredFile {
 #[derive(Debug, PartialEq, Eq)]
 pub struct VaultSummary {
     pub id: Uuid,
+    pub name: String,
     pub version: Option<i64>,
 }
 
 impl Storage {
-    /// Réserve l'identifiant d'un nouveau coffre, encore vide, dont `account` est membre.
+    /// Réserve l'identifiant d'un nouveau coffre `name`, encore vide, dont `account` est membre.
     ///
     /// # Errors
     ///
     /// Si l'écriture dans la base échoue.
-    pub fn create_vault(&mut self, account: Uuid) -> Result<Uuid, StorageError> {
+    pub fn create_vault(&mut self, account: Uuid, name: &str) -> Result<Uuid, StorageError> {
         let id = Uuid::new_v4();
         let tx = self.conn.transaction()?;
         tx.execute(
-            "INSERT INTO vaults (id, current_version) VALUES (?1, NULL)",
-            params![id],
+            "INSERT INTO vaults (id, name, current_version) VALUES (?1, ?2, NULL)",
+            params![id, name],
         )?;
         tx.execute(
             "INSERT INTO vault_members (vault_id, account_id) VALUES (?1, ?2)",
@@ -119,7 +120,8 @@ impl Storage {
 fn summary(row: &Row<'_>) -> rusqlite::Result<VaultSummary> {
     Ok(VaultSummary {
         id: row.get(0)?,
-        version: row.get(1)?,
+        name: row.get(1)?,
+        version: row.get(2)?,
     })
 }
 
@@ -187,7 +189,7 @@ mod tests {
     #[test]
     fn new_vault_is_empty() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account).unwrap();
+        let id = storage.create_vault(account, "perso").unwrap();
         assert_eq!(storage.fetch(id, account).unwrap(), None);
     }
 
@@ -203,7 +205,7 @@ mod tests {
     #[test]
     fn vault_of_another_account_is_not_found() {
         let (mut storage, owner, other) = storage();
-        let id = storage.create_vault(owner).unwrap();
+        let id = storage.create_vault(owner, "perso").unwrap();
         storage.publish(id, owner, b"a", None, NOW).unwrap();
         assert!(matches!(
             storage.fetch(id, other),
@@ -220,7 +222,7 @@ mod tests {
     fn creation_fails_for_an_unknown_account() {
         let (mut storage, _, _) = storage();
         assert!(matches!(
-            storage.create_vault(Uuid::new_v4()),
+            storage.create_vault(Uuid::new_v4(), "perso"),
             Err(StorageError::Database(_))
         ));
         assert_eq!(
@@ -238,7 +240,7 @@ mod tests {
         let (mut storage, account, _) = storage();
         storage.break_for_tests("vaults");
         assert!(matches!(
-            storage.create_vault(account),
+            storage.create_vault(account, "perso"),
             Err(StorageError::Database(_))
         ));
     }
@@ -246,18 +248,20 @@ mod tests {
     #[test]
     fn accounts_list_their_own_vaults() {
         let (mut storage, first, second) = storage();
-        let a = storage.create_vault(first).unwrap();
-        let b = storage.create_vault(first).unwrap();
-        let c = storage.create_vault(second).unwrap();
+        let a = storage.create_vault(first, "perso").unwrap();
+        let b = storage.create_vault(first, "travail").unwrap();
+        let c = storage.create_vault(second, "famille").unwrap();
         storage.publish(b, first, b"x", None, NOW).unwrap();
 
         let mut expected = vec![
             VaultSummary {
                 id: a,
+                name: "perso".to_owned(),
                 version: None,
             },
             VaultSummary {
                 id: b,
+                name: "travail".to_owned(),
                 version: Some(1),
             },
         ];
@@ -267,6 +271,7 @@ mod tests {
             storage.list_vaults(second).unwrap(),
             [VaultSummary {
                 id: c,
+                name: "famille".to_owned(),
                 version: None
             }]
         );
@@ -275,7 +280,7 @@ mod tests {
     #[test]
     fn first_publication_requires_an_empty_vault() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account).unwrap();
+        let id = storage.create_vault(account, "perso").unwrap();
         assert!(matches!(
             storage.publish(id, account, b"a", Some(1), NOW),
             Err(StorageError::Conflict)
@@ -293,7 +298,7 @@ mod tests {
     #[test]
     fn publication_requires_the_current_version() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account).unwrap();
+        let id = storage.create_vault(account, "perso").unwrap();
         storage.publish(id, account, b"a", None, NOW).unwrap();
         for expected in [None, Some(2)] {
             assert!(matches!(
@@ -308,7 +313,7 @@ mod tests {
     #[test]
     fn only_the_last_versions_are_kept() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account).unwrap();
+        let id = storage.create_vault(account, "perso").unwrap();
         let mut expected = None;
         for version in 1..=KEPT_VERSIONS + 2 {
             expected = Some(storage.publish(id, account, b"x", expected, NOW).unwrap());
@@ -328,7 +333,7 @@ mod tests {
     #[test]
     fn failed_publication_changes_nothing() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account).unwrap();
+        let id = storage.create_vault(account, "perso").unwrap();
         storage.break_for_tests("vault_versions");
         assert!(matches!(
             storage.publish(id, account, b"a", None, NOW),
@@ -340,7 +345,7 @@ mod tests {
     #[test]
     fn unreadable_content_is_a_database_error() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account).unwrap();
+        let id = storage.create_vault(account, "perso").unwrap();
         storage.publish(id, account, b"a", None, NOW).unwrap();
         storage.break_for_tests("vault_versions");
         assert!(matches!(
@@ -366,7 +371,7 @@ mod tests {
     #[test]
     fn unreadable_vault_row_is_a_database_error() {
         let (mut storage, account, _) = storage();
-        let id = storage.create_vault(account).unwrap();
+        let id = storage.create_vault(account, "perso").unwrap();
         storage
             .conn
             .execute(

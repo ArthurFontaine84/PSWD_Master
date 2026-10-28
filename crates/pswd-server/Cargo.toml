@@ -9,6 +9,10 @@ publish.workspace = true
 name = "pswd-server"
 path = "src/main.rs"
 
+[features]
+# Serveur de test pour les crates clientes.
+testing = []
+
 [dependencies]
 pswd-core.workspace = true
 axum.workspace = true

@@ -7,6 +7,7 @@ use etcetera::BaseStrategy;
 use pswd_core::ports::{LocalStore, PortError};
 use pswd_core::{MAX_VAULT_NAME_LEN, is_valid_vault_name};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::FileStore;
 
@@ -41,10 +42,11 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// Emplacements standard : configuration et dossiers des coffres.
+/// Emplacements standard : configuration, serveur et dossiers des coffres.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Locations {
     config_file: PathBuf,
+    server_file: PathBuf,
     vaults_dir: PathBuf,
 }
 
@@ -69,6 +71,7 @@ impl Locations {
     pub fn new(config_dir: &Path, data_dir: &Path) -> Self {
         Self {
             config_file: config_dir.join("config.toml"),
+            server_file: data_dir.join("server.toml"),
             vaults_dir: data_dir.join("vaults"),
         }
     }
@@ -78,6 +81,12 @@ impl Locations {
         &self.config_file
     }
 
+    /// Serveur auquel l'appareil est connecté (`server.toml`).
+    #[must_use]
+    pub fn server_file(&self) -> &Path {
+        &self.server_file
+    }
+
     /// Dossier proposé pour un nouveau coffre.
     #[must_use]
     pub fn vault_dir(&self, name: &str) -> PathBuf {
@@ -85,11 +94,23 @@ impl Locations {
     }
 }
 
-/// Un coffre : son dossier local.
+/// Un coffre : son dossier local et, s'il en a un, son exemplaire sur un serveur.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VaultConfig {
     pub path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<RemoteLink>,
+}
+
+/// Lien d'un coffre avec son exemplaire sur un serveur, noté dès la réservation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteLink {
+    /// Empreinte du certificat du serveur, en hexadécimal : reconnaît le serveur à la
+    /// reconnexion.
+    pub server: String,
+    pub id: Uuid,
 }
 
 impl VaultConfig {
@@ -167,6 +188,28 @@ impl Config {
         self.ensure_available(name)?;
         self.vaults.insert(name.to_owned(), vault);
         Ok(())
+    }
+
+    /// Note le lien du coffre avec le serveur.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::UnknownVault`] si le coffre n'existe pas.
+    pub fn link_vault(&mut self, name: &str, remote: RemoteLink) -> Result<(), ConfigError> {
+        self.vaults
+            .get_mut(name)
+            .ok_or_else(|| ConfigError::UnknownVault(name.to_owned()))?
+            .remote = Some(remote);
+        Ok(())
+    }
+
+    /// Le coffre lié à l'exemplaire `id` d'un serveur.
+    #[must_use]
+    pub fn linked_to(&self, id: Uuid) -> Option<&str> {
+        self.vaults
+            .iter()
+            .find(|(_, vault)| vault.remote.as_ref().is_some_and(|remote| remote.id == id))
+            .map(|(name, _)| name.as_str())
     }
 
     /// Retire un coffre : son nom redevient libre.
@@ -253,6 +296,14 @@ mod tests {
     fn vault(path: &str) -> VaultConfig {
         VaultConfig {
             path: PathBuf::from(path),
+            remote: None,
+        }
+    }
+
+    fn link(id: Uuid) -> RemoteLink {
+        RemoteLink {
+            server: "ab".repeat(32),
+            id,
         }
     }
 
@@ -270,6 +321,10 @@ mod tests {
         assert_eq!(
             locations.vault_dir("perso"),
             Path::new("data").join("vaults").join("perso")
+        );
+        assert_eq!(
+            locations.server_file(),
+            Path::new("data").join("server.toml")
         );
     }
 
@@ -335,6 +390,30 @@ theme = \"dark\"
         let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         assert!(text.starts_with("auto_lock_minutes = 10\n"), "{text}");
         assert!(text.contains("[vaults.travail]"), "{text}");
+    }
+
+    #[test]
+    fn vault_links_are_saved_and_found() {
+        let dir = TempDir::new().unwrap();
+        let mut file = config_file_in(&dir);
+        let mut config = Config::default();
+        config.add_vault("perso", vault("perso")).unwrap();
+        config.add_vault("travail", vault("travail")).unwrap();
+        let id = Uuid::new_v4();
+        config.link_vault("travail", link(id)).unwrap();
+        file.save(&config).unwrap();
+
+        let loaded = file.load().unwrap();
+        assert_eq!(loaded, config);
+        assert_eq!(loaded.linked_to(id), Some("travail"));
+        assert_eq!(loaded.linked_to(Uuid::new_v4()), None);
+        let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(text.contains("[vaults.travail.remote]"), "{text}");
+        assert!(!text.contains("[vaults.perso.remote]"), "{text}");
+        assert_eq!(
+            config.link_vault("inconnu", link(id)),
+            Err(ConfigError::UnknownVault("inconnu".to_owned()))
+        );
     }
 
     #[test]

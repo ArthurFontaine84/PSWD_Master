@@ -3150,8 +3150,10 @@ version = "0.1.0"
 dependencies = [
  "pswd-core",
  "pswd-infra",
+ "pswd-server",
  "rand",
  "tempfile",
+ "uuid",
 ]
 
 [[package]]
@@ -3162,6 +3164,7 @@ dependencies = [
  "pswd-app",
  "pswd-core",
  "pswd-infra",
+ "pswd-server",
  "rpassword",
  "shlex",
  "tempfile",

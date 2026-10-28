@@ -6,6 +6,7 @@ mod backup;
 mod cli;
 mod commands;
 mod editing;
+mod server;
 mod setup;
 mod shell;
 mod terminal;

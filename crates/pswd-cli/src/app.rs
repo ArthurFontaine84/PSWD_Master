@@ -4,7 +4,7 @@ use std::time::Duration;
 use pswd_app::{AppError, Vaults};
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecureClipboard};
-use pswd_core::{RecoveryKeyError, SessionError, Timestamp, VaultError};
+use pswd_core::{ConnectionKeyError, RecoveryKeyError, SessionError, Timestamp, VaultError};
 use pswd_infra::ConfigError;
 
 use crate::cli::Command;
@@ -25,6 +25,7 @@ pub enum CliError {
     UnknownKind(String),
     Vault(VaultError),
     RecoveryKey(RecoveryKeyError),
+    ConnectionKey(ConnectionKeyError),
 }
 
 impl fmt::Display for CliError {
@@ -47,6 +48,7 @@ impl fmt::Display for CliError {
             Self::UnknownKind(kind) => write!(f, "type inconnu « {kind} » : login ou note"),
             Self::Vault(error) => error.fmt(f),
             Self::RecoveryKey(error) => error.fmt(f),
+            Self::ConnectionKey(error) => error.fmt(f),
         }
     }
 }
@@ -102,6 +104,11 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
             Command::Delete { name } => self.delete(&name),
             Command::Backup { destination, vault } => self.backup(&destination, vault.as_deref()),
             Command::Restore { backup, name } => self.restore(&backup, name.as_deref()),
+            Command::Connect { address } => self.connect(&address),
+            Command::Disconnect => self.disconnect(),
+            Command::AddDevice => self.add_device(),
+            Command::Status => self.status(),
+            Command::Sync => self.sync_vaults(),
         }
     }
 }
@@ -162,6 +169,10 @@ mod tests {
             (
                 CliError::RecoveryKey(RecoveryKeyError::WrongLength),
                 "la clé de récupération doit compter 52 caractères",
+            ),
+            (
+                CliError::ConnectionKey(ConnectionKeyError::WrongLength),
+                "la clé de connexion doit compter 52 caractères",
             ),
         ];
         for (error, message) in messages {

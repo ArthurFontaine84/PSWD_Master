@@ -22,6 +22,8 @@ pub enum AppError {
     NotInBackup(String),
     File(String),
     RandomUnavailable,
+    NotConnected,
+    AlreadyConnected,
 }
 
 impl fmt::Display for AppError {
@@ -50,6 +52,10 @@ impl fmt::Display for AppError {
             }
             Self::File(message) => f.write_str(message),
             Self::RandomUnavailable => f.write_str("générateur aléatoire du système indisponible"),
+            Self::NotConnected => f.write_str("cet appareil n'est connecté à aucun serveur"),
+            Self::AlreadyConnected => f.write_str(
+                "cet appareil est déjà connecté à un serveur : s'en déconnecter d'abord",
+            ),
         }
     }
 }
@@ -143,6 +149,14 @@ mod tests {
             (
                 AppError::RandomUnavailable,
                 "générateur aléatoire du système indisponible",
+            ),
+            (
+                AppError::NotConnected,
+                "cet appareil n'est connecté à aucun serveur",
+            ),
+            (
+                AppError::AlreadyConnected,
+                "cet appareil est déjà connecté à un serveur : s'en déconnecter d'abord",
             ),
         ];
         for (error, message) in messages {

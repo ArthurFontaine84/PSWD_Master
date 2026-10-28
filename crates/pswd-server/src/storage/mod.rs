@@ -41,6 +41,7 @@ const SCHEMA: &str = "
     );
     CREATE TABLE vaults (
         id BLOB PRIMARY KEY,
+        name TEXT NOT NULL,
         current_version INTEGER
     );
     CREATE TABLE vault_members (

@@ -6,13 +6,19 @@ use axum::extract::{Path, State};
 use axum::http::header::{CONTENT_TYPE, ETAG, IF_MATCH, IF_NONE_MATCH};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use pswd_core::VaultFile;
-use serde::Serialize;
+use pswd_core::{VaultFile, is_valid_vault_name};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{ApiError, Shared};
 use crate::clock::now;
 use crate::storage::Caller;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct CreateRequest {
+    name: String,
+}
 
 #[derive(Serialize)]
 struct Created {
@@ -22,6 +28,7 @@ struct Created {
 #[derive(Serialize)]
 struct Listed {
     id: Uuid,
+    name: String,
     /// `ETag` de la version courante ; `null` si le coffre n'est pas encore publié.
     version: Option<String>,
 }
@@ -29,8 +36,14 @@ struct Listed {
 pub(super) async fn create(
     State(state): State<Shared>,
     caller: Caller,
+    Json(request): Json<CreateRequest>,
 ) -> Result<Response, ApiError> {
-    let id = state.storage().create_vault(caller.account)?;
+    if !is_valid_vault_name(&request.name) {
+        return Err(ApiError::InvalidName);
+    }
+    let id = state
+        .storage()
+        .create_vault(caller.account, &request.name)?;
     Ok((StatusCode::CREATED, Json(Created { id })).into_response())
 }
 
@@ -43,6 +56,7 @@ pub(super) async fn list(
         .into_iter()
         .map(|vault| Listed {
             id: vault.id,
+            name: vault.name,
             version: vault.version.map(etag),
         })
         .collect();
@@ -128,8 +142,17 @@ mod tests {
         file.encrypt(&Vault::new()).unwrap()
     });
 
+    fn create_request(token: Option<&str>, name: &str) -> Request<Body> {
+        let body = serde_json::json!({ "name": name });
+        request("POST", "/v1/vaults", token, Some(body))
+    }
+
     async fn create(app: &Router, token: &str) -> Uuid {
-        let response = send(app, request("POST", "/v1/vaults", Some(token), None)).await;
+        create_named(app, token, "perso").await
+    }
+
+    async fn create_named(app: &Router, token: &str, name: &str) -> Uuid {
+        let response = send(app, create_request(Some(token), name)).await;
         assert_eq!(response.status(), StatusCode::CREATED);
         json(response).await["id"]
             .as_str()
@@ -203,7 +226,7 @@ mod tests {
         let (app, token) = app_with_admin().await;
         let id = create(&app, &token).await;
         for request in [
-            request("POST", "/v1/vaults", None, None),
+            create_request(None, "perso"),
             request("GET", "/v1/vaults", None, None),
             request("GET", &format!("/v1/vaults/{id}"), None, None),
             put(id, "faux", FIRST, VAULT.clone()),
@@ -216,19 +239,30 @@ mod tests {
     async fn list_shows_the_account_vaults_and_versions() {
         let (app, admin) = app_with_admin().await;
         let member = add_member(&app, &admin, "Camille").await;
-        let published = create(&app, &admin).await;
+        let published = create_named(&app, &admin, "perso").await;
         send(&app, put(published, &admin, FIRST, VAULT.clone())).await;
-        let empty = create(&app, &admin).await;
+        let empty = create_named(&app, &admin, "travail").await;
         create(&app, &member).await;
 
         let response = send(&app, request("GET", "/v1/vaults", Some(&admin), None)).await;
         assert_eq!(response.status(), StatusCode::OK);
         let mut expected = vec![
-            serde_json::json!({ "id": published, "version": "\"1\"" }),
-            serde_json::json!({ "id": empty, "version": null }),
+            serde_json::json!({ "id": published, "name": "perso", "version": "\"1\"" }),
+            serde_json::json!({ "id": empty, "name": "travail", "version": null }),
         ];
         expected.sort_by_key(|vault| vault["id"].as_str().unwrap().to_owned());
         assert_eq!(json(response).await, serde_json::Value::Array(expected));
+    }
+
+    #[tokio::test]
+    async fn vault_name_must_be_valid() {
+        let (app, token) = app_with_admin().await;
+        for name in ["", "coffre perso", "a/b", "con"] {
+            let response = send(&app, create_request(Some(&token), name)).await;
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{name:?}");
+        }
+        let response = send(&app, request("GET", "/v1/vaults", Some(&token), None)).await;
+        assert_eq!(json(response).await, serde_json::json!([]));
     }
 
     #[tokio::test]

@@ -8,6 +8,8 @@ mod api;
 mod clock;
 mod limiter;
 mod storage;
+#[cfg(feature = "testing")]
+pub mod testing;
 mod tls;
 
 pub use api::{issue_connection_key, router};

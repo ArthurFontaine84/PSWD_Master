@@ -9,8 +9,10 @@ publish.workspace = true
 pswd-core.workspace = true
 pswd-infra.workspace = true
 rand = { workspace = true, features = ["std_rng", "sys_rng"] }
+uuid.workspace = true
 
 [dev-dependencies]
+pswd-server = { path = "../pswd-server", features = ["testing"] }
 tempfile.workspace = true
 
 [lints]

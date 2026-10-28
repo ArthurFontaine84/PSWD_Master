@@ -97,6 +97,8 @@ enum ShellCommand {
     },
     /// Liste les tags.
     Tags,
+    /// Synchronise le coffre avec le serveur.
+    Sync,
     /// Ferme le coffre.
     #[command(visible_aliases = ["exit", "lock"])]
     Quit,
@@ -106,18 +108,24 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
     pub(crate) fn open(&mut self, name: &str) -> Result<(), CliError> {
         let Unlocked {
             name,
-            session,
+            mut session,
             config,
         } = self.unlock(name, Unlock::Password)?;
         self.terminal.print(&format!(
             "Coffre « {name} » ouvert. Tapez help pour l'aide."
         ));
+        self.sync_quietly(&name, &mut session);
         let timeout = self.auto_lock.unwrap_or_else(|| config.auto_lock());
         let guarded = IdleLock::new(session, timeout);
         self.shell(&name, &guarded, config.clipboard_clear())?;
-        if guarded.close().is_none() {
-            self.terminal
-                .print("Coffre verrouillé pour inactivité : relancez pswd open.");
+        match guarded.close() {
+            Some(mut session) if session.has_pending_changes() => {
+                self.sync_quietly(&name, &mut session);
+            }
+            Some(_) => {}
+            None => self
+                .terminal
+                .print("Coffre verrouillé pour inactivité : relancez pswd open."),
         }
         Ok(())
     }
@@ -149,7 +157,7 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
                     continue;
                 }
             };
-            match guarded.with(|session| self.execute(command, session, clipboard_ttl)) {
+            match guarded.with(|session| self.execute(name, command, session, clipboard_ttl)) {
                 Some(Ok(Flow::Continue)) => {}
                 Some(Ok(Flow::Quit)) | None => return Ok(()),
                 Some(Err(error)) => self.terminal.print(&format!("erreur : {error}")),
@@ -159,10 +167,15 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
 
     fn execute(
         &mut self,
+        name: &str,
         command: ShellCommand,
         session: &mut VaultSession,
         clipboard_ttl: Duration,
     ) -> Result<Flow, CliError> {
+        let modifies = matches!(
+            command,
+            ShellCommand::Add { .. } | ShellCommand::Edit { .. } | ShellCommand::Rm { .. }
+        );
         match command {
             ShellCommand::List { tag } => self.list(session.vault(), "", tag.as_deref()),
             ShellCommand::Search { text, tag } => {
@@ -199,7 +212,11 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
             ShellCommand::Rm { entry } => self.remove_entry(session, &entry)?,
             ShellCommand::History { entry } => self.show_history(session.vault(), &entry)?,
             ShellCommand::Tags => self.list_tags(session.vault()),
+            ShellCommand::Sync => self.sync_open_vault(name, session)?,
             ShellCommand::Quit => return Ok(Flow::Quit),
+        }
+        if modifies && session.has_pending_changes() {
+            self.sync_quietly(name, session);
         }
         Ok(Flow::Continue)
     }

@@ -34,7 +34,7 @@ Reste à faire sur le Mac : build iOS, plugin Swift du presse-papiers, écran ne
 1. Serveur minimal : crate `pswd-server`, base SQLite créée au démarrage, lecture et publication conditionnelle d'un coffre, 15 versions conservées ; HTTP simple, sans comptes, réservé aux tests.
 2. TLS et client : certificat, `rustls`, adaptateur `RemoteStore` HTTP dans `pswd-infra` avec vérification de l'empreinte, testé contre un `pswd-server` local.
 3. Comptes et appareils : jetons, clés de connexion, administrateur initial, `reset-admin`, révocation, membres de chaque coffre.
-4. Synchro dans la CLI : `connect`, `disconnect`, `sync`, états des coffres, téléchargement initial.
+4. Synchro dans la CLI : `connect`, `disconnect`, `add-device`, `status`, `sync` (commande et shell), états des coffres (sauf « retiré », qui attend la suppression sur le serveur, sous-étapes 6 et 7), téléchargement initial.
 5. Synchro dans PSWD Master : connexion, état de synchro, bouton « Synchroniser » ; build Android.
 6. Coffres communs : inviter, accepter ou refuser, quitter (serveur et PSWD Master).
 7. Administration : panneau de PSWD Master (membres, appareils, rôles, suppression, rattachement, versions, adresse publique, sauvegarde du serveur).
@@ -227,12 +227,19 @@ Précisions :
 | `pswd backup <dossier> [--vault nom]` | Sauvegarde tous les coffres (ou un seul) dans un nouveau fichier `.pswd` du dossier (§7). |
 | `pswd restore <fichier.pswd> [nom]` | Restaure un coffre d'une sauvegarde comme nouveau coffre local (§7). |
 | `pswd delete <nom>` | Supprime un coffre de cette machine, après avoir retapé son nom (§7). |
+| `pswd connect <adresse>` | Connecte l'appareil à un serveur (§11) : clé de connexion, nom de l'appareil, nom du compte pour une clé administrateur. `hôte` seul vaut `hôte:8443`. |
+| `pswd disconnect` | Déconnecte l'appareil (§11) ; demande s'il faut garder les copies locales. |
+| `pswd add-device` | Affiche une clé de connexion pour un appareil de plus du même compte. |
+| `pswd status` | Serveur et état de chaque coffre (§11). |
+| `pswd sync` | Télécharge les nouveaux coffres du compte et publie les coffres « à publier » (§11), sans mot de passe ; le contenu d'un coffre se synchronise à son ouverture. |
 
 Aucune commande n'écrase un coffre existant.
 
 `init` vérifie le nom du coffre avant toute question. Un essai raté ne laisse rien derrière lui : dossier du coffre supprimé (s'il n'existait pas avant), configuration inchangée.
 
-**Shell interactif** : `list [--tag t]`, `search <texte> [--tag t]`, `show <entrée> [--show]`, `copy <entrée>`, `add [--generate]`, `edit <entrée>`, `rm <entrée>`, `history <entrée>`, `tags`, `gen [--length N] [--no-symbols]`, `lock`, `quit`.
+**Shell interactif** : `list [--tag t]`, `search <texte> [--tag t]`, `show <entrée> [--show]`, `copy <entrée>`, `add [--generate]`, `edit <entrée>`, `rm <entrée>`, `history <entrée>`, `tags`, `gen [--length N] [--no-symbols]`, `sync`, `lock`, `quit`.
+
+- **Synchro** (appareil connecté, §7) : à l'ouverture, après chaque commande qui modifie le coffre (aussi `passwd`, `recover`, `import`), à la fermeture (`quit`, fin de saisie) s'il reste des modifications non publiées, et par `sync`. Pas au verrouillage automatique : le thread de surveillance détruit la session, et chaque modification a déjà été synchronisée. Elle se fait au premier plan ; une synchro automatique ne s'affiche qu'en cas de problème, `sync` affiche toujours le résultat.
 
 - **Désigner une entrée** (`show`, `copy`…) : par son titre, sans tenir compte de la casse, ou par le début de son identifiant (affiché par `list`). Si plusieurs entrées correspondent, la commande refuse et les liste. Une erreur dans le shell est affichée et le shell continue ; fin de l'entrée standard = `quit`.
 - **`add` / `edit`** : questions champ par champ (une note n'a ni identifiant, ni mot de passe, ni URL) ; URLs et tags séparés par des espaces. Dans `edit`, la valeur actuelle est rappelée : réponse vide = inchangé, `-` = effacer. `--generate` crée le mot de passe sans l'afficher (`copy` pour le copier). `rm` demande confirmation (non par défaut). `history` date chaque version (UTC) et signale un mot de passe différent.
@@ -312,7 +319,7 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 
 | `RemoteStore` | Requête | Réponses |
 |---|---|---|
-| — | `POST /v1/vaults` | `201` + `{"id": "<uuid>"}` : emplacement réservé, encore vide |
+| — | `POST /v1/vaults` `{name}` | `201` + `{"id": "<uuid>"}` : emplacement réservé, encore vide ; `400` nom invalide |
 | `fetch()` | `GET /v1/vaults/{id}` | `200` + octets + `ETag: "<version>"` ; `204` jamais publié (`None`) ; `404` inconnu ; `410` retiré |
 | `push(…, Some(v))` | `PUT /v1/vaults/{id}` + `If-Match: "<v>"` | `204` + nouvel `ETag` ; `412` le coffre a bougé (`Conflict`) |
 | `push(…, None)` | `PUT /v1/vaults/{id}` + `If-None-Match: *` | `204` + `ETag: "1"` ; `412` déjà publié |
@@ -324,14 +331,14 @@ Autres routes (JSON, 16 Kio au plus par requête) :
 | Requête | Accès | Effet |
 |---|---|---|
 | `POST /v1/connect` `{key, device_name, account_name?}` | libre | `201 {token, account_id, device_id, is_admin}` ; `401` clé invalide, expirée ou déjà utilisée ; `400` nom invalide ou absent (une clé administrateur crée un compte nommé par `account_name`) |
-| `GET /v1/vaults` | appareil | `200 [{id, version}]` : coffres du compte, `version` = `ETag` ou `null` |
+| `GET /v1/vaults` | appareil | `200 [{id, name, version}]` : coffres du compte, `version` = `ETag` ou `null` |
 | `POST /v1/members` `{name}` | administrateur | `201 {key}` : clé d'un nouveau membre ; `403` pour un non-administrateur |
 | `POST /v1/devices/keys` | appareil | `201 {key}` : clé d'un appareil de plus pour le même compte |
 | `DELETE /v1/devices/self` | appareil | `204` : déconnexion, le jeton est révoqué |
 
 Noms de compte et d'appareil : 1 à 64 caractères, ni espace en bordure, ni caractère de contrôle. Jeton : 32 octets aléatoires en hexadécimal, montré une seule fois.
 
-Le serveur identifie les coffres par son propre identifiant (UUID v4), jamais par leur nom.
+Le serveur identifie les coffres par son propre identifiant (UUID v4), jamais par leur nom. Il garde aussi ce nom (nom de coffre valide, §7), donné à la réservation : un appareil qui télécharge un coffre ne pourrait pas le nommer autrement (le nom n'est pas dans `vault.enc`), et un invité devra savoir à quel coffre il est invité. Le serveur voit donc les noms des coffres en clair, jamais leur contenu.
 
 **Protections**
 - Taille maximale : 64 Mio pour un coffre, quelques Ko pour une requête JSON ; délai maximal de 30 s par requête.
@@ -351,8 +358,10 @@ Le serveur identifie les coffres par son propre identifiant (UUID v4), jamais pa
 - Ajouter un membre produit l'adresse du serveur et une **clé de connexion**, à recopier dans l'application (ordinateur ou mobile). Même format que la clé de récupération (§5 : Base32 Crockford, 52 caractères en 13 groupes, mêmes tolérances), portant 32 octets : 16 octets de secret aléatoire, puis les 16 premiers octets de l'empreinte du certificat. L'application vérifie que le certificat présenté commence par ces octets, puis retient l'empreinte complète : le serveur est vérifié dès la première connexion, sans comparaison manuelle.
 - Une clé de connexion est à usage unique, valable 7 jours, annulable depuis le panneau. Le même format sert pour la clé administrateur, l'ajout d'un membre et l'ajout d'un appareil à un compte existant (clé générée depuis un appareil déjà connecté du compte).
 - Chaque appareil reçoit son propre jeton, révocable individuellement. Le serveur ne garde que l'empreinte (SHA-256) des jetons et des clés de connexion : une copie de la base ne donne aucun accès. Le compte n'a pas de mot de passe serveur : rien ne se confond avec le mot de passe maître.
-- Sur l'appareil, l'adresse locale, l'adresse publique, l'empreinte du certificat et le jeton sont rangés dans un fichier, `<data_dir>/pswd/server.toml` (droits `0600` sous Linux ; dossier privé de l'application sur mobile). Pas de trousseau du système : il ne protègerait pas mieux (le `vault.enc` chiffré, que le jeton permet de télécharger, est dans le même dossier), il manque souvent sous Linux sans bureau et exigerait du code natif sur mobile. Un jeton volé se révoque depuis le panneau.
-- Un appareil est connecté à un seul serveur. Il peut s'en déconnecter (son jeton est révoqué) puis se connecter à nouveau. En se connectant, il télécharge la copie chiffrée de tous les coffres dont le compte est membre ; chacun se synchronise ensuite à son ouverture (§7).
+- Sur l'appareil, l'adresse locale, l'adresse publique, l'empreinte du certificat et le jeton sont rangés dans un fichier, `<data_dir>/pswd/server.toml` (`local_address`, `public_address` facultative, `fingerprint` et `token` en hexadécimal ; droits `0600` sous Linux ; dossier privé de l'application sur mobile). Son existence signifie « connecté ». Pas de trousseau du système : il ne protègerait pas mieux (le `vault.enc` chiffré, que le jeton permet de télécharger, est dans le même dossier), il manque souvent sous Linux sans bureau et exigerait du code natif sur mobile. Un jeton volé se révoque depuis le panneau.
+- Un appareil est connecté à un seul serveur. Il peut s'en déconnecter (son jeton est révoqué) puis se connecter à nouveau. En se connectant, il télécharge la copie chiffrée de tous les coffres publiés dont le compte est membre et qu'il n'a pas déjà ; chacun se synchronise ensuite à son ouverture (§7). Les coffres créés plus tard par un autre appareil arrivent par le même échange, relancé à la demande (`pswd sync`, bouton « Synchroniser »).
+- Un coffre téléchargé prend le nom donné par le serveur ; s'il est pris sur l'appareil, `<nom>-<8 premiers caractères de l'identifiant>` (nom raccourci pour tenir en 64 caractères) ; s'il est pris à son tour, le coffre n'est pas téléchargé et le problème est signalé.
+- Le lien d'un coffre avec le serveur est noté dans `config.toml` : `[vaults.<nom>.remote]`, avec `server` (empreinte du certificat, en hexadécimal) et `id` (identifiant sur le serveur). Il est noté dès la réservation, avant la publication.
 - **CLI** : se connecter, se déconnecter, synchroniser, générer une clé pour ajouter un appareil à son compte. Coffres communs (inviter, accepter, quitter) et administration se font seulement dans PSWD Master ; un coffre commun déjà accepté se synchronise normalement dans la CLI.
 
 **Coffres**
@@ -367,12 +376,13 @@ Le serveur identifie les coffres par son propre identifiant (UUID v4), jamais pa
 
 | État | Signification | Comportement |
 |---|---|---|
-| à publier | Créé ou restauré, inconnu du serveur | Publié comme nouveau coffre privé dès que le serveur est joignable |
-| publié | Présent sur le serveur, synchronisé | Synchro normale (§7) |
-| détaché | L'appareil s'est déconnecté du serveur | Utilisé en local ; synchro reprise à la reconnexion au même serveur (reconnu par son certificat) |
+| à publier | Créé ou restauré, inconnu du serveur (sans lien) | Publié comme nouveau coffre privé à la connexion, puis à chaque synchro tant que le serveur est injoignable ; le fichier chiffré est envoyé tel quel, sans mot de passe |
+| publié | Lié au serveur de l'appareil | Synchro normale (§7) |
+| détaché | Lié à un autre serveur, ou appareil déconnecté | Utilisé en local ; synchro reprise à la reconnexion au même serveur (reconnu par son certificat) |
 | retiré | Le serveur l'a supprimé ou en a retiré l'utilisateur | Gardé en local, jamais republié automatiquement : seulement sur action volontaire, comme nouveau coffre |
 
-- À la déconnexion, l'application demande s'il faut garder une copie locale des coffres (oui par défaut). Sans copie, les données restent sur le serveur.
+- À la déconnexion, l'application demande s'il faut garder une copie locale des coffres (oui par défaut). Sans copie, les données restent sur le serveur : seuls sont supprimés de l'appareil les coffres publiés dont la copie locale est identique à celle du serveur ; les autres (modifications non publiées, serveur injoignable) sont gardés et signalés.
+- Déconnexion : vérification des copies (si demandée), révocation du jeton, suppression de `server.toml`, puis des copies locales. Un serveur injoignable n'empêche pas de se déconnecter : le jeton, non révoqué, est signalé, à révoquer depuis le panneau.
 - En se connectant à un **autre** serveur, les coffres détachés ne sont pas publiés automatiquement ; les coffres « à publier » le sont.
 - Le serveur distingue « coffre inconnu » de « coffre retiré » : `RemoteStore` reçoit pour cela une erreur dédiée.
 
