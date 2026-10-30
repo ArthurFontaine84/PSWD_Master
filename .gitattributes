@@ -1,0 +1,2 @@
+# Scripts et fichiers du paquet Debian : exécutés sous Linux, toujours en fins de ligne LF.
+crates/pswd-server/debian/** text eol=lf

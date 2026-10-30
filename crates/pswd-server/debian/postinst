@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # Utilisateur système, sans connexion : le serveur ne tourne jamais en root.
+    if ! getent passwd pswd-server >/dev/null; then
+        adduser --system --group --no-create-home --home /var/lib/pswd-server \
+            --shell /usr/sbin/nologin pswd-server
+    fi
+    # Base et certificat, accessibles à ce seul utilisateur.
+    install -d -o pswd-server -g pswd-server -m 0700 /var/lib/pswd-server
+fi
+
+# Première installation : la base, le certificat et la clé administrateur sont créés avant le
+# démarrage du service, qui ne doit pas créer le certificat en même temps.
+if [ "$1" = "configure" ] && [ -z "$2" ]; then
+    port=$(sed -n 's/^[[:space:]]*port[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' /etc/pswd-server/config.toml)
+    address=$(hostname -I | awk '{print $1}')
+    echo
+    echo "Adresse du serveur : ${address}:${port:-8443}"
+    runuser -u pswd-server -- /usr/bin/pswd-server reset-admin
+    echo "Dans PSWD Master, écran « Serveur » : saisissez cette adresse et cette clé."
+    echo "Nouvelle clé, si besoin : sudo -u pswd-server pswd-server reset-admin"
+    echo
+fi
+
+#DEBHELPER#

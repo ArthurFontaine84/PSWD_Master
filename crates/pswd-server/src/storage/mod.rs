@@ -7,8 +7,9 @@ mod vaults;
 
 use std::fmt;
 use std::path::Path;
+use std::time::Duration;
 
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use zeroize::Zeroizing;
 
 use crate::tls::Identity;
@@ -23,6 +24,9 @@ pub use vaults::{KEPT_VERSIONS, StoredFile, VaultSummary};
 
 /// Version actuelle du schéma, rangée dans `PRAGMA user_version`.
 const SCHEMA_VERSION: i64 = 1;
+
+/// Attente maximale d'une base occupée par une autre connexion.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const SCHEMA: &str = "
     CREATE TABLE accounts (
@@ -183,7 +187,23 @@ impl Storage {
         Self::init(Connection::open_in_memory()?)
     }
 
+    /// Ouvre une sauvegarde sans la modifier, après avoir vérifié son schéma.
+    ///
+    /// # Errors
+    ///
+    /// Si le fichier n'est pas une base SQLite, ou si son schéma est inconnu.
+    pub fn open_read_only(path: &Path) -> Result<Self, StorageError> {
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if version != SCHEMA_VERSION {
+            return Err(StorageError::UnknownSchema(version));
+        }
+        Ok(Self { conn })
+    }
+
     fn init(mut conn: Connection) -> Result<Self, StorageError> {
+        // `pswd-server backup` lit la base pendant que le service y écrit.
+        conn.busy_timeout(BUSY_TIMEOUT)?;
         conn.pragma_update(None, "foreign_keys", true)?;
         // Un coffre supprimé est effacé du fichier lui-même, et absent des sauvegardes.
         conn.pragma_update(None, "secure_delete", true)?;
@@ -236,6 +256,30 @@ impl Storage {
         Ok(())
     }
 
+    /// Base neuve : ni compte ni coffre ; une restauration peut la remplacer.
+    ///
+    /// # Errors
+    ///
+    /// Si la lecture de la base échoue.
+    pub fn is_fresh(&self) -> Result<bool, StorageError> {
+        let fresh = self.conn.query_row(
+            "SELECT NOT EXISTS (SELECT 1 FROM accounts) AND NOT EXISTS (SELECT 1 FROM vaults)",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(fresh)
+    }
+
+    /// Copie cohérente et compacte de la base dans le fichier `path`, qui ne doit pas exister.
+    ///
+    /// # Errors
+    ///
+    /// Si le fichier existe déjà ou ne peut pas être écrit.
+    pub fn backup_to(&self, path: &str) -> Result<(), StorageError> {
+        self.conn.execute("VACUUM INTO ?1", params![path])?;
+        Ok(())
+    }
+
     /// Casse la base pour vérifier le traitement des erreurs SQLite.
     #[cfg(test)]
     pub(crate) fn break_for_tests(&self, table: &str) {
@@ -282,6 +326,69 @@ mod tests {
         let error = Storage::open(dir.path()).err().unwrap();
         assert!(matches!(error, StorageError::Database(_)));
         assert!(error.to_string().starts_with("base de données : "));
+    }
+
+    #[test]
+    fn a_backup_is_a_readable_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::open(&dir.path().join("pswd.db")).unwrap();
+        let identity = Identity::from_parts(vec![1], Zeroizing::new(vec![2]));
+        storage.save_identity(&identity).unwrap();
+        let copy = dir.path().join("copie.db");
+        let copy_path = copy.to_str().unwrap();
+        storage.backup_to(copy_path).unwrap();
+        assert!(matches!(
+            storage.backup_to(copy_path),
+            Err(StorageError::Database(_))
+        ));
+
+        let mut restored = Storage::open_read_only(&copy).unwrap();
+        assert_eq!(restored.identity().unwrap().unwrap().certificate(), [1]);
+        assert!(matches!(
+            restored.save_identity(&identity),
+            Err(StorageError::Database(_))
+        ));
+    }
+
+    #[test]
+    fn only_a_pswd_database_opens_as_a_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = dir.path().join("texte.db");
+        std::fs::write(&text, "pas une base").unwrap();
+        assert!(matches!(
+            Storage::open_read_only(&text),
+            Err(StorageError::Database(_))
+        ));
+        let other = dir.path().join("autre.db");
+        Connection::open(&other).unwrap();
+        assert!(matches!(
+            Storage::open_read_only(&other),
+            Err(StorageError::UnknownSchema(0))
+        ));
+        assert!(matches!(
+            Storage::open_read_only(&dir.path().join("absente.db")),
+            Err(StorageError::Database(_))
+        ));
+    }
+
+    #[test]
+    fn a_base_without_account_nor_vault_is_fresh() {
+        let mut storage = Storage::open_in_memory().unwrap();
+        assert!(storage.is_fresh().unwrap());
+        storage
+            .add_connection_key(b"cle", &KeyPurpose::Admin, crate::clock::now())
+            .unwrap();
+        assert!(storage.is_fresh().unwrap());
+        storage
+            .conn
+            .execute(
+                "INSERT INTO accounts (id, name, is_admin, created_at) VALUES (X'01', 'A', 1, 0)",
+                [],
+            )
+            .unwrap();
+        assert!(!storage.is_fresh().unwrap());
+        storage.break_for_tests("vaults");
+        assert!(matches!(storage.is_fresh(), Err(StorageError::Database(_))));
     }
 
     #[test]

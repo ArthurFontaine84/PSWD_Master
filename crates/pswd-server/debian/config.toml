@@ -1,0 +1,5 @@
+# Configuration de pswd-server. Après une modification :
+#   sudo systemctl restart pswd-server
+
+# Port d'écoute HTTPS, sur toutes les interfaces de la machine.
+port = 8443

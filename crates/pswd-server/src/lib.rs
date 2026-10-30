@@ -7,12 +7,17 @@
 mod api;
 mod clock;
 mod limiter;
+mod maintenance;
 mod storage;
 #[cfg(feature = "testing")]
 pub mod testing;
 mod tls;
 
 pub use api::{issue_connection_key, router};
+pub use maintenance::{
+    DATABASE_FILE, DEFAULT_PORT, MaintenanceError, ServerSettings, adopt_folder_owner, backup,
+    load_settings, restore,
+};
 pub use storage::{
     Caller, KEPT_VERSIONS, KeyPurpose, NewDevice, Storage, StorageError, StoredFile, VaultSummary,
 };
