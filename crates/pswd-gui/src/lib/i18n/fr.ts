@@ -1,5 +1,10 @@
+import type { KeyPurpose } from "../api";
+
 /** Message construit à partir du détail d'une erreur (qui peut être ignoré). */
 type Message = (detail: string) => string;
+
+const day = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" });
+const dateTime = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" });
 
 const errors = {
   configInvalid: (detail: string) => `Configuration invalide : ${detail}`,
@@ -250,6 +255,80 @@ export const fr = {
   leaveExplanation: (name: string) =>
     `Le coffre « ${name} » ne sera plus synchronisé avec les autres membres. La copie de cet appareil est gardée. Pour le rejoindre plus tard, il faudra une nouvelle invitation.`,
   vaultLeft: (name: string) => `Vous avez quitté le coffre « ${name} ».`,
+  deleteWhere: "Supprimer",
+  deleteLocalOnly: "Sur cet appareil seulement",
+  deleteEverywhere: "Sur cet appareil et sur le serveur",
+  deleteEverywhereExplanation:
+    "Le coffre et ses versions seront aussi effacés du serveur. Vos autres appareils garderont leur copie, sans plus la synchroniser.",
+  account: (name: string, isAdmin: boolean) => `Compte : ${name}${isAdmin ? " (administrateur)" : ""}.`,
+  administration: "Administration",
+  adminTitle: "Administration du serveur",
+  adminTabs: { accounts: "Comptes", vaults: "Coffres", keys: "Clés", server: "Serveur" },
+  administrator: "administrateur",
+  devices: "Appareils",
+  noDevice: "Aucun appareil connecté.",
+  deviceAdded: (name: string, millis: number) => `${name}, ajouté le ${day.format(millis)}`,
+  revoke: (name: string) => `Révoquer ${name}`,
+  deviceRevoked: (name: string) => `Appareil « ${name} » révoqué : il ne peut plus joindre le serveur.`,
+  makeAdmin: "Nommer administrateur",
+  removeAdmin: "Retirer le rôle d'administrateur",
+  roleGiven: (name: string) => `${name} est maintenant administrateur.`,
+  roleRemoved: (name: string) => `${name} n'est plus administrateur.`,
+  deleteAccount: "Supprimer le compte",
+  deleteAccountExplanation: (name: string) =>
+    `Le compte « ${name} », ses appareils et ses clés seront supprimés. Ses coffres restent sur le serveur ; ceux dont il était le seul membre n'en auront plus. Pour confirmer, retapez son nom.`,
+  accountNameConfirmation: "Nom du compte",
+  accountDeleted: (name: string) => `Compte « ${name} » supprimé.`,
+  addMember: "Ajouter un membre",
+  memberName: "Nom du nouveau membre",
+  createKey: "Créer sa clé",
+  creatingKey: "Création…",
+  memberKeyTitle: (name: string) => `Clé de connexion de ${name}`,
+  memberKeyExplanation: (address: string) =>
+    `Transmettez à ce membre l'adresse du serveur (${address}) et cette clé. Elle ne sert qu'une fois et expire dans 7 jours.`,
+  noPendingKey: "Aucune clé de connexion en attente.",
+  keyPurpose: (purpose: KeyPurpose, name: string) =>
+    purpose === "admin"
+      ? "Clé administrateur"
+      : purpose === "member"
+        ? `Nouveau membre : ${name}`
+        : `Appareil de plus pour ${name}`,
+  expires: (millis: number) => `expire le ${day.format(millis)}`,
+  cancelKey: "Annuler la clé",
+  keyCancelled: "Clé annulée : elle ne peut plus servir.",
+  noServerVault: "Aucun coffre sur le serveur.",
+  privateVault: "privé",
+  neverPublished: "jamais publié",
+  version: (version: number) => `version ${version}`,
+  noMember: "Aucun membre.",
+  manageVault: (name: string) => `Gérer le coffre ${name}`,
+  allVaults: "Tous les coffres",
+  removeMember: (name: string) => `Retirer ${name}`,
+  memberRemoved: (name: string, vault: string) => `${name} a été retiré du coffre « ${vault} ».`,
+  attachExplanation: "Ce coffre n'a plus de membre : rattachez-y un compte pour qu'il le retrouve.",
+  attachAccount: "Compte à rattacher",
+  attach: "Rattacher",
+  attached: (name: string, vault: string) => `${name} est maintenant membre du coffre « ${vault} ».`,
+  versionsTitle: "Versions conservées",
+  noVersion: "Aucune version publiée.",
+  versionLine: (version: number, millis: number, size: number) =>
+    `Version ${version} — ${dateTime.format(millis)} — ${Math.ceil(size / 1024)} Kio`,
+  restoreVersion: (version: number) => `Restaurer la version ${version}`,
+  versionRestored: (name: string) =>
+    `Version restaurée dans le nouveau coffre « ${name} » ; ses membres le recevront au prochain échange.`,
+  deleteServerVault: "Supprimer du serveur",
+  deleteServerVaultExplanation: (name: string) =>
+    `Le contenu du coffre « ${name} » et ses versions seront effacés du serveur. Les copies des appareils sont gardées, mais ne sont plus synchronisées. Pour confirmer, retapez son nom.`,
+  serverVaultDeleted: (name: string) => `Coffre « ${name} » supprimé du serveur.`,
+  publicAddress: "Adresse publique",
+  publicAddressHint:
+    "Nom DNS ou adresse IP pour joindre le serveur hors de chez vous, par exemple maison.duckdns.org. Laissez vide pour l'effacer.",
+  publicAddressSaved: "Adresse publique enregistrée : les appareils la reçoivent au prochain échange.",
+  serverBackup: "Sauvegarder le serveur",
+  serverBackupExplanation:
+    "Copie complète du serveur : comptes, coffres chiffrés et clé privée de son certificat. Rangez-la en lieu sûr, hors de cette machine.",
+  serverBackupFileTitle: "Enregistrer la sauvegarde du serveur",
+  serverBackedUp: "Sauvegarde du serveur enregistrée.",
   syncDone: "Coffre à jour.",
   syncNotConnected: "Cet appareil n'est connecté à aucun serveur.",
   syncDetached: "Coffre détaché : il est lié à un autre serveur.",
@@ -272,6 +351,7 @@ export const fr = {
     addressRequired: "L'adresse du serveur est obligatoire.",
     keyRequired: "La clé de connexion est obligatoire.",
     deviceNameRequired: "Le nom de cet appareil est obligatoire.",
+    memberNameRequired: "Le nom du nouveau membre est obligatoire.",
   },
   errors,
 };

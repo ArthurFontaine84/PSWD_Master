@@ -1,6 +1,6 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { describe, expect, it, vi } from "vitest";
-import { pickBackupDestination, pickBackupFile, pickCsvFile } from "./files";
+import { pickBackupDestination, pickBackupFile, pickCsvFile, pickServerBackupDestination } from "./files";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
@@ -21,5 +21,15 @@ describe("files", () => {
     await expect(pickBackupDestination("Enregistrer", "s.pswd")).resolves.toBeNull();
     expect(open).toHaveBeenLastCalledWith({ title: "Restaurer", multiple: false, filters });
     expect(save).toHaveBeenCalledWith({ title: "Enregistrer", defaultPath: "s.pswd", filters });
+  });
+
+  it("asks the system where to write the server backup", async () => {
+    vi.mocked(save).mockResolvedValueOnce("E:/serveur.db");
+    await expect(pickServerBackupDestination("Sauvegarder", "serveur.db")).resolves.toBe("E:/serveur.db");
+    expect(save).toHaveBeenLastCalledWith({
+      title: "Sauvegarder",
+      defaultPath: "serveur.db",
+      filters: [{ name: "SQLite", extensions: ["db"] }],
+    });
   });
 });

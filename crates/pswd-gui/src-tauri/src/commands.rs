@@ -8,6 +8,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use uuid::Uuid;
 
+use crate::admin::{AccountStatus, AdminAccount, AdminVault, KeptVersion, Key, Restored};
 use crate::editing::{EntryInput, HistoryItem};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
@@ -342,6 +343,155 @@ pub async fn sync_vault<R: Runtime>(app: AppHandle<R>) -> Result<SyncReport, UiE
     in_background(app, AppState::sync_now).await
 }
 
+/// Compte de l'appareil sur le serveur et son rôle ; l'adresse publique est retenue au passage.
+#[tauri::command]
+pub async fn account_status<R: Runtime>(app: AppHandle<R>) -> Result<AccountStatus, UiError> {
+    in_background(app, AppState::account_status).await
+}
+
+/// Supprime le coffre privé `name` du serveur et de cet appareil ; le nom est retapé.
+#[tauri::command]
+pub async fn delete_vault_everywhere<R: Runtime>(
+    app: AppHandle<R>,
+    name: String,
+    confirmation: String,
+) -> Result<(), UiError> {
+    in_background(app, move |state| {
+        state.delete_everywhere(&name, &confirmation)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn admin_accounts<R: Runtime>(app: AppHandle<R>) -> Result<Vec<AdminAccount>, UiError> {
+    in_background(app, AppState::admin_accounts).await
+}
+
+/// Clé de connexion d'un nouveau membre, sur demande explicite de l'administrateur.
+#[tauri::command]
+pub async fn add_member<R: Runtime>(app: AppHandle<R>, name: String) -> Result<String, UiError> {
+    let key = in_background(app, move |state| state.add_member(&name)).await?;
+    Ok(key.expose().to_owned())
+}
+
+#[tauri::command]
+pub async fn delete_account<R: Runtime>(
+    app: AppHandle<R>,
+    id: Uuid,
+    name: String,
+    confirmation: String,
+) -> Result<(), UiError> {
+    in_background(app, move |state| {
+        state.delete_account(id, &name, &confirmation)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn set_admin<R: Runtime>(
+    app: AppHandle<R>,
+    id: Uuid,
+    is_admin: bool,
+) -> Result<(), UiError> {
+    in_background(app, move |state| state.set_admin(id, is_admin)).await
+}
+
+#[tauri::command]
+pub async fn revoke_device<R: Runtime>(app: AppHandle<R>, id: Uuid) -> Result<(), UiError> {
+    in_background(app, move |state| state.revoke_device(id)).await
+}
+
+#[tauri::command]
+pub async fn pending_keys<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Key>, UiError> {
+    in_background(app, AppState::pending_keys).await
+}
+
+#[tauri::command]
+pub async fn cancel_key<R: Runtime>(app: AppHandle<R>, id: Uuid) -> Result<(), UiError> {
+    in_background(app, move |state| state.cancel_key(id)).await
+}
+
+#[tauri::command]
+pub async fn server_vaults<R: Runtime>(app: AppHandle<R>) -> Result<Vec<AdminVault>, UiError> {
+    in_background(app, AppState::server_vaults).await
+}
+
+#[tauri::command]
+pub async fn delete_server_vault<R: Runtime>(
+    app: AppHandle<R>,
+    id: Uuid,
+    name: String,
+    confirmation: String,
+) -> Result<(), UiError> {
+    in_background(app, move |state| {
+        state.delete_server_vault(id, &name, &confirmation)
+    })
+    .await
+}
+
+/// Rattache un compte à un coffre qui n'a plus de membre.
+#[tauri::command]
+pub async fn attach_account<R: Runtime>(
+    app: AppHandle<R>,
+    vault: Uuid,
+    account: Uuid,
+) -> Result<(), UiError> {
+    in_background(app, move |state| state.attach(vault, account)).await
+}
+
+#[tauri::command]
+pub async fn remove_member<R: Runtime>(
+    app: AppHandle<R>,
+    vault: Uuid,
+    account: Uuid,
+) -> Result<(), UiError> {
+    in_background(app, move |state| state.remove_member(vault, account)).await
+}
+
+#[tauri::command]
+pub async fn vault_versions<R: Runtime>(
+    app: AppHandle<R>,
+    vault: Uuid,
+) -> Result<Vec<KeptVersion>, UiError> {
+    in_background(app, move |state| state.versions(vault)).await
+}
+
+/// Crée un nouveau coffre à partir d'une version conservée.
+#[tauri::command]
+pub async fn restore_version<R: Runtime>(
+    app: AppHandle<R>,
+    vault: Uuid,
+    version: i64,
+) -> Result<Restored, UiError> {
+    in_background(app, move |state| state.restore_version(vault, version)).await
+}
+
+/// Vide, l'adresse publique est effacée.
+#[tauri::command]
+pub async fn set_public_address<R: Runtime>(
+    app: AppHandle<R>,
+    address: String,
+) -> Result<(), UiError> {
+    in_background(app, move |state| state.set_public_address(&address)).await
+}
+
+/// Nom proposé dans la fenêtre d'enregistrement de la sauvegarde du serveur.
+#[tauri::command]
+pub fn server_backup_file_name(state: State<'_, AppState>) -> String {
+    state.server_backup_file_name()
+}
+
+/// Sauvegarde du serveur, écrite par Rust dans le fichier choisi : elle ne passe pas par
+/// l'interface.
+#[tauri::command]
+pub async fn backup_server_to_file<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+) -> Result<(), UiError> {
+    let backup = in_background(app.clone(), AppState::backup_server).await?;
+    files::write(&app, &path, &backup.content)
+}
+
 /// Exécute `task` hors du fil de l'interface : un échange avec le serveur peut durer.
 async fn in_background<R: Runtime, T: Send + 'static>(
     app: AppHandle<R>,
@@ -461,6 +611,24 @@ mod tests {
                     delete_invitation,
                     leave_vault,
                     sync_vault,
+                    account_status,
+                    delete_vault_everywhere,
+                    admin_accounts,
+                    add_member,
+                    delete_account,
+                    set_admin,
+                    revoke_device,
+                    pending_keys,
+                    cancel_key,
+                    server_vaults,
+                    delete_server_vault,
+                    attach_account,
+                    remove_member,
+                    vault_versions,
+                    restore_version,
+                    set_public_address,
+                    server_backup_file_name,
+                    backup_server_to_file,
                     not_allowed
                 ])
                 .build(tauri::generate_context!())
@@ -914,6 +1082,103 @@ mod tests {
         assert_eq!(
             app.call("vault_members", famille),
             Err(json!({ "code": "notPublished", "detail": "famille" }))
+        );
+    }
+
+    #[test]
+    fn the_server_is_administered_through_its_commands() {
+        let app = TestApp::new(None);
+        let server = TestServer::start();
+        let connection = json!({
+            "address": server.address,
+            "key": server.admin_key.expose(),
+            "deviceName": "PC",
+            "accountName": "Arthur",
+        });
+        app.call("connect_server", connection).unwrap();
+        app.create("perso", "Maître-2026!").unwrap();
+        app.call("sync_server", json!({})).unwrap();
+        let status = app.call("account_status", json!({})).unwrap();
+        assert_eq!(status["isAdmin"], true);
+
+        let key = app
+            .call("add_member", json!({ "name": "Camille" }))
+            .unwrap();
+        assert_eq!(key.as_str().unwrap().split('-').count(), 13, "{key}");
+        let keys = app.call("pending_keys", json!({})).unwrap();
+        assert_eq!(
+            app.call("cancel_key", json!({ "id": keys[0]["id"] })),
+            Ok(Value::Null)
+        );
+        let accounts = app.call("admin_accounts", json!({})).unwrap();
+        let arthur = accounts[0]["id"].clone();
+        let unknown = Uuid::nil();
+        let code = |result: Result<Value, Value>| result.unwrap_err()["code"].clone();
+        assert_eq!(
+            code(app.call("set_admin", json!({ "id": arthur, "isAdmin": false }))),
+            "serverError"
+        );
+        assert_eq!(
+            code(app.call(
+                "delete_account",
+                json!({ "id": unknown, "name": "X", "confirmation": "X" })
+            )),
+            "serverError"
+        );
+        assert_eq!(
+            code(app.call("revoke_device", json!({ "id": unknown }))),
+            "serverError"
+        );
+
+        let vaults = app.call("server_vaults", json!({})).unwrap();
+        let perso = vaults[0]["id"].clone();
+        let versions = app
+            .call("vault_versions", json!({ "vault": perso }))
+            .unwrap();
+        assert_eq!(versions[0]["version"], 1);
+        let restored = app
+            .call("restore_version", json!({ "vault": perso, "version": 1 }))
+            .unwrap();
+        assert_eq!(restored["name"], "perso-v1");
+        let member = json!({ "vault": restored["id"], "account": arthur });
+        assert_eq!(app.call("remove_member", member.clone()), Ok(Value::Null));
+        assert_eq!(app.call("attach_account", member), Ok(Value::Null));
+        let deletion =
+            json!({ "id": restored["id"], "name": "perso-v1", "confirmation": "perso-v1" });
+        assert_eq!(app.call("delete_server_vault", deletion), Ok(Value::Null));
+        assert_eq!(
+            app.call("set_public_address", json!({ "address": "maison" })),
+            Ok(Value::Null)
+        );
+
+        let name = app.call("server_backup_file_name", json!({})).unwrap();
+        assert_eq!(name, "pswd-server-sauvegarde_1970-01-01_00-00-01.db");
+        let file = app.dir.path().join("serveur.db");
+        let path = json!({ "path": file.display().to_string() });
+        assert_eq!(app.call("backup_server_to_file", path), Ok(Value::Null));
+        assert!(fs::read(&file).unwrap().starts_with(b"SQLite format 3\0"));
+        let elsewhere = app.dir.path().join("absent").join("serveur.db");
+        let path = json!({ "path": elsewhere.display().to_string() });
+        assert_eq!(
+            code(app.call("backup_server_to_file", path)),
+            "fileUnwritable"
+        );
+
+        let everywhere = json!({ "name": "perso", "confirmation": "perso" });
+        assert_eq!(
+            app.call("delete_vault_everywhere", everywhere.clone()),
+            Ok(Value::Null)
+        );
+        assert_eq!(app.call("list_vaults", json!({})), Ok(json!([])));
+        app.call("disconnect_server", json!({ "keepLocal": true }))
+            .unwrap();
+        assert_eq!(
+            code(app.call("backup_server_to_file", json!({ "path": "x" }))),
+            "notConnected"
+        );
+        assert_eq!(
+            code(app.call("delete_vault_everywhere", everywhere)),
+            "notConnected"
         );
     }
 

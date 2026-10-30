@@ -80,13 +80,16 @@
   let syncNotice = $state<string | null>(null);
   /** Coffre commun publié sur le serveur : ses membres se gèrent ici. */
   let sharing = $state(false);
+  /** Coffre privé publié sur le serveur : il peut aussi y être supprimé. */
+  let privateOnServer = $state(false);
 
   // Sans état lisible, le coffre reste utilisable en local, sans bouton de synchro.
   serverStatus().then(
     (status) => {
       connected = status.address !== null;
-      sharing =
-        connected && status.vaults.some(({ name, shared, state }) => name === vault.name && shared && state === "published");
+      const published = status.vaults.find(({ name, state }) => name === vault.name && state === "published");
+      sharing = connected && published?.shared === true;
+      privateOnServer = connected && published?.shared === false;
     },
     () => undefined,
   );
@@ -369,7 +372,7 @@
           {:else if panel === "leave"}
             <LeaveVault name={vault.name} onLeft={left} onClose={() => (panel = null)} />
           {:else if panel === "delete"}
-            <DeleteVault name={vault.name} {onDeleted} onClose={() => (panel = null)} />
+            <DeleteVault name={vault.name} onServer={privateOnServer} {onDeleted} onClose={() => (panel = null)} />
           {:else if editor}
             <h3>{editor.mode === "edit" ? texts.editEntry(editor.detail.title) : texts.newEntry}</h3>
             {#key editor}

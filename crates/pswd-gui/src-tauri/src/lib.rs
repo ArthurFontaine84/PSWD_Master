@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+mod admin;
 #[cfg(target_os = "android")]
 mod android_clipboard;
 mod commands;
@@ -85,7 +86,25 @@ pub fn run() {
             commands::accept_invitation,
             commands::delete_invitation,
             commands::leave_vault,
-            commands::sync_vault
+            commands::sync_vault,
+            commands::account_status,
+            commands::delete_vault_everywhere,
+            commands::admin_accounts,
+            commands::add_member,
+            commands::delete_account,
+            commands::set_admin,
+            commands::revoke_device,
+            commands::pending_keys,
+            commands::cancel_key,
+            commands::server_vaults,
+            commands::delete_server_vault,
+            commands::attach_account,
+            commands::remove_member,
+            commands::vault_versions,
+            commands::restore_version,
+            commands::set_public_address,
+            commands::server_backup_file_name,
+            commands::backup_server_to_file
         ])
         .run(tauri::generate_context!());
     if let Err(error) = result {

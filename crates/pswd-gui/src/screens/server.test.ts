@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  accountStatus,
   addDeviceKey,
   connectServer,
   disconnectServer,
@@ -13,6 +14,7 @@ import Toast from "../components/Toast.svelte";
 import Server from "./Server.svelte";
 
 vi.mock("../lib/api", () => ({
+  accountStatus: vi.fn(),
   serverStatus: vi.fn(),
   connectServer: vi.fn(),
   syncServer: vi.fn(),
@@ -26,6 +28,7 @@ const nothing: Exchange = { removed: [], downloaded: [], notDownloaded: [], publ
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(accountStatus).mockResolvedValue({ accountName: "Camille", isAdmin: false, publicAddress: null });
   render(Toast);
 });
 
@@ -36,7 +39,7 @@ function field(label: string): HTMLInputElement {
 function show(status: ServerStatus) {
   vi.mocked(serverStatus).mockResolvedValue(status);
   const onClose = vi.fn();
-  render(Server, { onClose });
+  render(Server, { onClose, onAdmin: vi.fn() });
   return onClose;
 }
 
@@ -103,7 +106,7 @@ describe("Server, before connecting", () => {
   it("explains an unreadable state and goes back", async () => {
     vi.mocked(serverStatus).mockRejectedValue({ code: "configInvalid", detail: "ligne 2" });
     const onClose = vi.fn();
-    render(Server, { onClose });
+    render(Server, { onClose, onAdmin: vi.fn() });
     expect(await screen.findByRole("alert")).toHaveTextContent("Configuration invalide : ligne 2");
     await fireEvent.click(screen.getByRole("button", { name: "Retour" }));
     expect(onClose).toHaveBeenCalled();
@@ -127,7 +130,7 @@ describe("Server, once connected", () => {
     await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
     expect(await screen.findByText("Aucun coffre à échanger avec le serveur.")).toBeInTheDocument();
     vi.mocked(syncServer).mockRejectedValue({ code: "serverError", detail: "serveur injoignable" });
-    await fireEvent.click(screen.getByRole("button", { name: "Synchroniser" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Échange avec le serveur impossible : serveur injoignable.",
     );
@@ -190,5 +193,29 @@ describe("Server, once connected", () => {
     const onClose = show(connected);
     await fireEvent.click(await screen.findByRole("button", { name: "Retour" }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("offers the administration panel to an administrator only", async () => {
+    vi.mocked(accountStatus).mockResolvedValue({ accountName: "Arthur", isAdmin: true, publicAddress: "maison:8443" });
+    vi.mocked(serverStatus).mockResolvedValue(connected);
+    const onAdmin = vi.fn();
+    const { unmount } = render(Server, { onClose: vi.fn(), onAdmin });
+    expect(await screen.findByText("Compte : Arthur (administrateur).")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Administration" }));
+    expect(onAdmin).toHaveBeenCalledWith("pswd.local:8443", "maison:8443");
+    unmount();
+
+    vi.mocked(accountStatus).mockResolvedValue({ accountName: "Camille", isAdmin: false, publicAddress: null });
+    show(connected);
+    expect(await screen.findByText("Compte : Camille.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Administration" })).not.toBeInTheDocument();
+  });
+
+  it("stays usable when the server does not answer", async () => {
+    vi.mocked(accountStatus).mockRejectedValue({ code: "serverError", detail: "serveur injoignable" });
+    show(connected);
+    expect(await screen.findByText("Connecté au serveur pswd.local:8443.")).toBeInTheDocument();
+    expect(screen.queryByText(/Compte :/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

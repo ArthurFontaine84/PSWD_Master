@@ -154,6 +154,48 @@ export interface Invitation {
   invitedBy: string;
 }
 
+/** Compte de l'appareil sur le serveur. */
+export interface AccountStatus {
+  accountName: string;
+  /** Le panneau d'administration est proposé. */
+  isAdmin: boolean;
+  publicAddress: string | null;
+}
+
+/** Compte du serveur vu par un administrateur ; dates en millisecondes. */
+export interface AdminAccount {
+  id: string;
+  name: string;
+  isAdmin: boolean;
+  devices: { id: string; name: string; createdAt: number }[];
+}
+
+export type KeyPurpose = "admin" | "member" | "device";
+
+/** Clé de connexion pas encore utilisée ; `name` : compte à créer, ou compte de l'appareil. */
+export interface PendingKey {
+  id: string;
+  purpose: KeyPurpose;
+  name: string | null;
+  expiresAt: number;
+}
+
+/** Coffre du serveur ; `version` à `null` tant qu'il n'est pas publié. */
+export interface AdminVault {
+  id: string;
+  name: string;
+  shared: boolean;
+  version: number | null;
+  members: Account[];
+}
+
+/** Version conservée d'un coffre ; `size` en octets. */
+export interface VaultVersion {
+  version: number;
+  createdAt: number;
+  size: number;
+}
+
 /** Résultat de la synchro du coffre ouvert. */
 export interface SyncReport {
   vault: string;
@@ -347,6 +389,86 @@ export async function leaveVault(vault: string): Promise<void> {
 /** Synchronise le coffre ouvert et renvoie le résultat. */
 export function syncVault(): Promise<SyncReport> {
   return invoke<SyncReport>("sync_vault");
+}
+
+/** Compte de l'appareil et son rôle ; l'adresse publique est retenue au passage. */
+export function accountStatus(): Promise<AccountStatus> {
+  return invoke<AccountStatus>("account_status");
+}
+
+/** Supprime le coffre privé du serveur, puis de cet appareil. */
+export async function deleteVaultEverywhere(name: string, confirmation: string): Promise<void> {
+  await invoke("delete_vault_everywhere", { name, confirmation });
+}
+
+export function adminAccounts(): Promise<AdminAccount[]> {
+  return invoke<AdminAccount[]>("admin_accounts");
+}
+
+/** Clé de connexion d'un nouveau membre : seulement à la demande de l'administrateur. */
+export function addMember(name: string): Promise<string> {
+  return invoke<string>("add_member", { name });
+}
+
+export async function deleteAccount(id: string, name: string, confirmation: string): Promise<void> {
+  await invoke("delete_account", { id, name, confirmation });
+}
+
+export async function setAdmin(id: string, isAdmin: boolean): Promise<void> {
+  await invoke("set_admin", { id, isAdmin });
+}
+
+export async function revokeDevice(id: string): Promise<void> {
+  await invoke("revoke_device", { id });
+}
+
+export function pendingKeys(): Promise<PendingKey[]> {
+  return invoke<PendingKey[]>("pending_keys");
+}
+
+export async function cancelKey(id: string): Promise<void> {
+  await invoke("cancel_key", { id });
+}
+
+export function serverVaults(): Promise<AdminVault[]> {
+  return invoke<AdminVault[]>("server_vaults");
+}
+
+export async function deleteServerVault(id: string, name: string, confirmation: string): Promise<void> {
+  await invoke("delete_server_vault", { id, name, confirmation });
+}
+
+/** Rattache un compte à un coffre qui n'a plus de membre. */
+export async function attachAccount(vault: string, account: string): Promise<void> {
+  await invoke("attach_account", { vault, account });
+}
+
+export async function removeMember(vault: string, account: string): Promise<void> {
+  await invoke("remove_member", { vault, account });
+}
+
+export function vaultVersions(vault: string): Promise<VaultVersion[]> {
+  return invoke<VaultVersion[]>("vault_versions", { vault });
+}
+
+/** Crée un nouveau coffre à partir d'une version ; renvoie son identifiant et son nom. */
+export function restoreVersion(vault: string, version: number): Promise<{ id: string; name: string }> {
+  return invoke<{ id: string; name: string }>("restore_version", { vault, version });
+}
+
+/** Vide, l'adresse publique est effacée. */
+export async function setPublicAddress(address: string): Promise<void> {
+  await invoke("set_public_address", { address });
+}
+
+/** Nom proposé pour la sauvegarde du serveur, daté par le backend. */
+export function serverBackupFileName(): Promise<string> {
+  return invoke<string>("server_backup_file_name");
+}
+
+/** Le backend écrit la sauvegarde du serveur dans le fichier choisi. */
+export async function backupServerToFile(path: string): Promise<void> {
+  await invoke("backup_server_to_file", { path });
 }
 
 /** Appelle `handler` quand le coffre se verrouille par inactivité. */

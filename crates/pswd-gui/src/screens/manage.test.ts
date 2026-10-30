@@ -6,6 +6,7 @@ import {
   backupToFile,
   changePassword,
   deleteVault,
+  deleteVaultEverywhere,
   getSettings,
   importEntries,
   listEntries,
@@ -38,6 +39,7 @@ vi.mock("../lib/api", () => ({
   changePassword: vi.fn(),
   importEntries: vi.fn(),
   deleteVault: vi.fn(),
+  deleteVaultEverywhere: vi.fn(),
   backupFileName: vi.fn(),
   backupToFile: vi.fn(),
   backupFileContents: vi.fn(),
@@ -182,6 +184,43 @@ describe("deleting the vault", () => {
     expect(deleteVault).toHaveBeenCalledWith("perso", "perso");
     await fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
     expect(screen.getByText("Choisissez une entrée dans la liste.")).toBeInTheDocument();
+  });
+
+  it("offers to delete a private vault from the server too", async () => {
+    vi.mocked(deleteVaultEverywhere).mockResolvedValue();
+    const shared = { address: "pswd.local:8443", vaults: [{ name: "perso", state: "published" as const, shared: true }] };
+    vi.mocked(serverStatus).mockResolvedValueOnce(shared);
+    const { unmount } = render(OpenVault, {
+      vault: { name: "perso", entries: 0 },
+      onLocked: vi.fn(),
+      onExpired: vi.fn(),
+      onDeleted: vi.fn(),
+    });
+    await vi.waitFor(() => {
+      expect(serverStatus).toHaveBeenCalled();
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Gérer le coffre" }));
+    await fireEvent.click(await screen.findByRole("menuitem", { name: "Supprimer ce coffre" }));
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    unmount();
+
+    vi.mocked(serverStatus).mockResolvedValue({
+      address: "pswd.local:8443",
+      vaults: [{ name: "perso", state: "published", shared: false }],
+    });
+    const { onDeleted } = await manage();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Supprimer ce coffre" }));
+    const local = await screen.findByRole("radio", { name: "Sur cet appareil seulement" });
+    expect(local).toBeChecked();
+    await fireEvent.click(screen.getByRole("radio", { name: "Sur cet appareil et sur le serveur" }));
+    expect(screen.getByText(/aussi effacés du serveur/)).toBeInTheDocument();
+    await type("Nom du coffre", "perso");
+    await fireEvent.click(screen.getByRole("button", { name: "Supprimer" }));
+    await vi.waitFor(() => {
+      expect(onDeleted).toHaveBeenCalled();
+    });
+    expect(deleteVaultEverywhere).toHaveBeenCalledWith("perso", "perso");
+    expect(deleteVault).not.toHaveBeenCalled();
   });
 
   it("is closed by the back button", async () => {

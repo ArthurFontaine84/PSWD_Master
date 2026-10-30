@@ -62,7 +62,7 @@ pub type Clipboard = Box<dyn SecureClipboard + Send>;
 pub struct AppState {
     pub vaults: Vaults,
     kdf: KdfParams,
-    clock: fn() -> Timestamp,
+    pub(crate) clock: fn() -> Timestamp,
     /// Délai de verrouillage imposé ; `None` : celui de la configuration.
     auto_lock: Option<Duration>,
     background_lock: bool,
@@ -367,16 +367,18 @@ impl AppState {
     /// Supprime un coffre de cet appareil ; `confirmation` doit être son nom, retapé. Une
     /// synchro en cours est d'abord attendue : elle pourrait réécrire le coffre.
     pub fn delete_vault(&self, name: &str, confirmation: &str) -> Result<(), UiError> {
-        if confirmation.trim() != name {
-            return Err(UiError::code("confirmationMismatch"));
-        }
+        confirm(name, confirmation)?;
         let _one_at_a_time = self.exclusive();
-        // Fermé sans rien publier : il va être supprimé.
+        self.close_without_publishing(name);
+        Ok(self.vaults.delete(name)?)
+    }
+
+    /// Ferme le coffre `name` s'il est ouvert, sans rien publier : il va être supprimé.
+    pub(crate) fn close_without_publishing(&self, name: &str) {
         let open = self.open().take_if(|open| open.name == name);
         if let Some(open) = open {
             drop(open.lock.close());
         }
-        Ok(self.vaults.delete(name)?)
     }
 
     /// Importe un fichier CSV dans le coffre ouvert, tout ou rien ; renvoie le nombre d'entrées.
@@ -527,6 +529,15 @@ fn password_of(vault: &Vault, id: Uuid) -> Result<Secret, UiError> {
         .password
         .clone()
         .ok_or_else(|| UiError::new("noPassword", content.title.clone()))
+}
+
+/// Une suppression se confirme en retapant le nom de ce qui est supprimé.
+pub(crate) fn confirm(name: &str, confirmation: &str) -> Result<(), UiError> {
+    if confirmation.trim() == name {
+        Ok(())
+    } else {
+        Err(UiError::code("confirmationMismatch"))
+    }
 }
 
 #[cfg(test)]

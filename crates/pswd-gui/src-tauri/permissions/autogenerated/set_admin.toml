@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-admin"
+description = "Enables the set_admin command without any pre-configured scope."
+commands.allow = ["set_admin"]
+
+[[permission]]
+identifier = "deny-set-admin"
+description = "Denies the set_admin command without any pre-configured scope."
+commands.deny = ["set_admin"]

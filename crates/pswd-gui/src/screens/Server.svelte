@@ -1,10 +1,12 @@
 <script lang="ts">
   import {
+    accountStatus,
     addDeviceKey,
     connectServer,
     disconnectServer,
     serverStatus,
     syncServer,
+    type AccountStatus,
     type ServerStatus,
   } from "../lib/api";
   import { errorMessage } from "../lib/errors";
@@ -16,13 +18,17 @@
 
   interface Props {
     onClose: () => void;
+    /** Ouvre le panneau d'administration de ce serveur. */
+    onAdmin: (address: string, publicAddress: string | null) => void;
   }
 
-  const { onClose }: Props = $props();
+  const { onClose, onAdmin }: Props = $props();
 
   type Task = "connect" | "sync" | "key" | "disconnect";
 
   let status = $state<ServerStatus | null>(null);
+  /** Compte de l'appareil ; inconnu tant que le serveur n'a pas répondu. */
+  let account = $state<AccountStatus | null>(null);
   let problem = $state<string | null>(null);
   /** Échecs coffre par coffre du dernier échange ou de la déconnexion. */
   let problems = $state<string[]>([]);
@@ -41,7 +47,10 @@
       status = await serverStatus();
     } catch (error) {
       problem = errorMessage(error);
+      return;
     }
+    // Serveur injoignable : l'écran reste utilisable, sans panneau d'administration.
+    account = status.address === null ? null : await accountStatus().catch(() => null);
   }
 
   void load();
@@ -192,6 +201,9 @@
     </div>
   {:else}
     <p>{texts.connectedTo(status.address)}</p>
+    {#if account !== null}
+      <p>{texts.account(account.accountName, account.isAdmin)}</p>
+    {/if}
     {#if problem}
       <p role="alert">{problem}</p>
     {/if}
@@ -201,6 +213,13 @@
       </button>
       <button type="button" disabled={running !== null} onclick={newDeviceKey}>{texts.addDevice}</button>
     </div>
+    {#if account?.isAdmin}
+      <div class="actions">
+        <button type="button" onclick={() => onAdmin(status?.address ?? "", account?.publicAddress ?? null)}>
+          {texts.administration}
+        </button>
+      </div>
+    {/if}
     <div class="actions">
       <button type="button" onclick={onClose}>{texts.back}</button>
       <button type="button" class="danger" disabled={running !== null} onclick={startDisconnection}>

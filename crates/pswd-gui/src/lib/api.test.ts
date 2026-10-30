@@ -44,6 +44,24 @@ import {
   acceptInvitation,
   deleteInvitation,
   leaveVault,
+  accountStatus,
+  deleteVaultEverywhere,
+  adminAccounts,
+  addMember,
+  deleteAccount,
+  setAdmin,
+  revokeDevice,
+  pendingKeys,
+  cancelKey,
+  serverVaults,
+  deleteServerVault,
+  attachAccount,
+  removeMember,
+  vaultVersions,
+  restoreVersion,
+  setPublicAddress,
+  serverBackupFileName,
+  backupServerToFile,
   type EntryInput,
   type SyncReport,
 } from "./api";
@@ -113,6 +131,24 @@ describe("api", () => {
     await deleteInvitation("i1");
     await leaveVault("famille");
     await syncVault();
+    await accountStatus();
+    await deleteVaultEverywhere("perso", "perso");
+    await adminAccounts();
+    await addMember("Camille");
+    await deleteAccount("a2", "Camille", "Camille");
+    await setAdmin("a2", true);
+    await revokeDevice("d1");
+    await pendingKeys();
+    await cancelKey("k1");
+    await serverVaults();
+    await deleteServerVault("v1", "famille", "famille");
+    await attachAccount("v1", "a2");
+    await removeMember("v1", "a2");
+    await vaultVersions("v1");
+    await restoreVersion("v1", 3);
+    await setPublicAddress("maison");
+    await serverBackupFileName();
+    await backupServerToFile("E:/serveur.db");
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ["list_vaults"],
       ["create_vault", { name: "perso", password: "maître", shared: false }],
@@ -154,6 +190,24 @@ describe("api", () => {
       ["delete_invitation", { id: "i1" }],
       ["leave_vault", { vault: "famille" }],
       ["sync_vault"],
+      ["account_status"],
+      ["delete_vault_everywhere", { name: "perso", confirmation: "perso" }],
+      ["admin_accounts"],
+      ["add_member", { name: "Camille" }],
+      ["delete_account", { id: "a2", name: "Camille", confirmation: "Camille" }],
+      ["set_admin", { id: "a2", isAdmin: true }],
+      ["revoke_device", { id: "d1" }],
+      ["pending_keys"],
+      ["cancel_key", { id: "k1" }],
+      ["server_vaults"],
+      ["delete_server_vault", { id: "v1", name: "famille", confirmation: "famille" }],
+      ["attach_account", { vault: "v1", account: "a2" }],
+      ["remove_member", { vault: "v1", account: "a2" }],
+      ["vault_versions", { vault: "v1" }],
+      ["restore_version", { vault: "v1", version: 3 }],
+      ["set_public_address", { address: "maison" }],
+      ["server_backup_file_name"],
+      ["backup_server_to_file", { path: "E:/serveur.db" }],
     ]);
   });
 

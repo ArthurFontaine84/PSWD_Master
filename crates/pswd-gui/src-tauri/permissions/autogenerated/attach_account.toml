@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-attach-account"
+description = "Enables the attach_account command without any pre-configured scope."
+commands.allow = ["attach_account"]
+
+[[permission]]
+identifier = "deny-attach-account"
+description = "Denies the attach_account command without any pre-configured scope."
+commands.deny = ["attach_account"]
