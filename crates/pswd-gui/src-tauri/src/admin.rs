@@ -248,35 +248,18 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use pswd_app::Vaults;
     use pswd_core::Timestamp;
     use pswd_core::crypto::KdfParams;
-    use pswd_core::ports::{PortError, SecureClipboard};
     use pswd_infra::Locations;
     use pswd_server::testing::TestServer;
     use serde_json::{Value, json};
     use tempfile::TempDir;
 
     use super::*;
-    use crate::state::Notifier;
-    use crate::sync::SyncReport;
+    use crate::testing::Silent;
 
     const PASSWORD: &str = "Maître-2026!";
-
-    struct Silent;
-
-    impl Notifier for Silent {
-        fn vault_locked(&self) {}
-        fn vault_synced(&self, _: &SyncReport) {}
-    }
-
-    impl SecureClipboard for Silent {
-        fn copy_secret(&mut self, _: &Secret, _: Duration) -> Result<(), PortError> {
-            Ok(())
-        }
-    }
 
     fn device(dir: &TempDir, name: &str) -> AppState {
         let root = dir.path().join(name);
@@ -370,6 +353,31 @@ mod tests {
             arthur.delete_everywhere("perso", "perso"),
             Err(UiError::new("unknownVault", "perso"))
         );
+    }
+
+    #[test]
+    fn key_purposes_are_named_for_the_interface() {
+        for (purpose, named) in [
+            (KeyPurpose::Admin, "admin"),
+            (KeyPurpose::Member, "member"),
+            (KeyPurpose::Device, "device"),
+        ] {
+            let key = Key::from(PendingKey {
+                id: Uuid::nil(),
+                purpose,
+                name: Some("Arthur".to_owned()),
+                expires_at: Timestamp::from_millis(42),
+            });
+            assert_eq!(
+                sent(&key),
+                json!({
+                    "id": Uuid::nil(),
+                    "purpose": named,
+                    "name": "Arthur",
+                    "expiresAt": 42,
+                })
+            );
+        }
     }
 
     #[test]

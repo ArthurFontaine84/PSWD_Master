@@ -412,6 +412,7 @@ mod tests {
             "",
             "a b",
             "a\tb",
+            "a\u{7}b",
             "https://maison",
             "a?b",
             "a#b",

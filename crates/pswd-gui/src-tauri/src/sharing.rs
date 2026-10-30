@@ -113,11 +113,8 @@ impl AppState {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use pswd_app::Vaults;
     use pswd_core::crypto::KdfParams;
-    use pswd_core::ports::{PortError, SecureClipboard};
     use pswd_core::{Secret, Timestamp};
     use pswd_infra::Locations;
     use pswd_server::testing::TestServer;
@@ -125,23 +122,9 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::state::Notifier;
-    use crate::sync::SyncReport;
+    use crate::testing::Silent;
 
     const PASSWORD: &str = "Maître-2026!";
-
-    struct Silent;
-
-    impl Notifier for Silent {
-        fn vault_locked(&self) {}
-        fn vault_synced(&self, _: &SyncReport) {}
-    }
-
-    impl SecureClipboard for Silent {
-        fn copy_secret(&mut self, _: &Secret, _: Duration) -> Result<(), PortError> {
-            Ok(())
-        }
-    }
 
     fn device(dir: &TempDir, name: &str) -> AppState {
         let root = dir.path().join(name);

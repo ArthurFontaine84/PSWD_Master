@@ -18,6 +18,8 @@ mod settings;
 mod sharing;
 mod state;
 mod sync;
+#[cfg(test)]
+mod testing;
 
 use std::error::Error;
 

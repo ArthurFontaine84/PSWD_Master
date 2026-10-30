@@ -193,11 +193,9 @@ mod tests {
     use std::fs;
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};
-    use std::time::Duration;
 
     use pswd_app::Vaults;
     use pswd_core::crypto::KdfParams;
-    use pswd_core::ports::{PortError, SecureClipboard};
     use pswd_core::{Credentials, EntryContent, EntryKind, Timestamp};
     use pswd_infra::{Locations, ServerFile};
     use pswd_server::testing::TestServer;
@@ -205,24 +203,9 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::state::Notifier;
-    use crate::sync::SyncReport;
+    use crate::testing::Silent;
 
     const PASSWORD: &str = "Maître-2026!";
-
-    /// Ni presse-papiers ni interface à prévenir.
-    struct Silent;
-
-    impl Notifier for Silent {
-        fn vault_locked(&self) {}
-        fn vault_synced(&self, _: &SyncReport) {}
-    }
-
-    impl SecureClipboard for Silent {
-        fn copy_secret(&mut self, _: &Secret, _: Duration) -> Result<(), PortError> {
-            Ok(())
-        }
-    }
 
     fn device(dir: &TempDir) -> AppState {
         let vaults = Vaults::new(Locations::new(
@@ -232,7 +215,7 @@ mod tests {
         AppState::with_settings(
             vaults,
             Box::new(Silent),
-            KdfParams::new(8 * 1024, 1, 1).unwrap(),
+            kdf(),
             || Timestamp::from_millis(1_000),
             None,
             false,
@@ -240,13 +223,22 @@ mod tests {
         )
     }
 
+    fn kdf() -> KdfParams {
+        KdfParams::new(8 * 1024, 1, 1).unwrap()
+    }
+
     fn secret(value: &str) -> Secret {
         Secret::new(value.to_owned())
     }
 
+    /// Crée le coffre sans l'ouvrir : le verrouiller lancerait une synchro en arrière-plan,
+    /// qui pourrait le publier à la place de l'échange vérifié par le test.
     fn create(state: &AppState, name: &str) {
-        state.create(name, &secret(PASSWORD), false).unwrap();
-        state.lock();
+        let now = (state.clock)();
+        state
+            .vaults
+            .create(name, &secret(PASSWORD), kdf(), now)
+            .unwrap();
     }
 
     fn connect_admin(state: &AppState) -> TestServer {
