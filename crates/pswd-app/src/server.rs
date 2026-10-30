@@ -68,7 +68,7 @@ pub struct Disconnected {
 pub type VaultResults<T> = Vec<(String, Result<T, AppError>)>;
 
 impl Vaults {
-    fn server_file(&self) -> ServerFile {
+    pub(crate) fn server_file(&self) -> ServerFile {
         ServerFile::new(self.locations.server_file())
     }
 
@@ -118,7 +118,8 @@ impl Vaults {
     }
 
     /// Télécharge les coffres publiés du compte que l'appareil n'a pas encore, et note comme
-    /// retirés ceux que le serveur ne lui donne plus. Un coffre retiré que le compte a rejoint
+    /// retirés ceux que le serveur ne lui donne plus. L'adresse publique du serveur est reprise
+    /// au passage. Un coffre retiré que le compte a rejoint
     /// est de nouveau synchronisé.
     ///
     /// # Errors
@@ -129,6 +130,7 @@ impl Vaults {
         let server = self.connected()?;
         let client = server.client()?;
         let listed = client.list_vaults()?;
+        self.remember_public_address(&server, client.server_info()?.public_address.as_deref())?;
         let server_id = server.server_id();
         let mut downloads = Downloads::default();
         let mark_removed = |config: &mut Config| {
@@ -333,7 +335,7 @@ impl Vaults {
     }
 }
 
-fn with_default_port(address: &str) -> String {
+pub(crate) fn with_default_port(address: &str) -> String {
     let address = address.trim();
     if address.contains(':') {
         address.to_owned()

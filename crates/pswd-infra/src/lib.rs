@@ -2,6 +2,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+mod admin;
 mod backup;
 mod clipboard;
 mod config;
@@ -10,6 +11,10 @@ mod remote;
 mod server_file;
 mod sharing;
 
+pub use admin::{
+    AccountInfo, DeviceInfo, KeyPurpose, PendingKey, RestoredVault, ServerInfo, ServerVaultInfo,
+    VaultVersion,
+};
 pub use backup::{read_backup, write_backup};
 pub use clipboard::{ClipboardAccess, TimedClipboard};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

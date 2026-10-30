@@ -31,6 +31,13 @@ pub fn backup_file_name(timestamp: Timestamp) -> String {
     format!("pswd-sauvegarde_{}.pswd", backup_stamp(timestamp))
 }
 
+/// Nom proposé pour une sauvegarde du serveur :
+/// `pswd-server-sauvegarde_2026-10-22_14-05-09.db`.
+#[must_use]
+pub fn server_backup_file_name(timestamp: Timestamp) -> String {
+    format!("pswd-server-sauvegarde_{}.db", backup_stamp(timestamp))
+}
+
 /// Date et heure d'une sauvegarde, à la seconde : `2026-10-22_14-05-09`.
 fn backup_stamp(timestamp: Timestamp) -> String {
     let time = UtcTime::new(timestamp);
@@ -130,6 +137,14 @@ mod tests {
         for (millis, expected) in cases {
             assert_eq!(backup_file_name(Timestamp::from_millis(millis)), expected);
         }
+    }
+
+    #[test]
+    fn server_backups_are_sqlite_files() {
+        assert_eq!(
+            server_backup_file_name(Timestamp::from_millis(1_761_229_809_999)),
+            "pswd-server-sauvegarde_2025-10-23_14-30-09.db"
+        );
     }
 
     #[test]

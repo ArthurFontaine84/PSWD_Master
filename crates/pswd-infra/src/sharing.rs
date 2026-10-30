@@ -143,7 +143,7 @@ impl ServerClient {
         }
     }
 
-    fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, PortError> {
+    pub(crate) fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, PortError> {
         let request = |base: &str| -> RequestBuilder {
             self.authorized(self.http.get(format!("{base}{path}")))
         };

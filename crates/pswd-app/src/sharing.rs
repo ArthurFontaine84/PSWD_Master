@@ -83,13 +83,13 @@ impl Vaults {
         Ok(())
     }
 
-    fn client(&self) -> Result<(ServerClient, ServerConfig), AppError> {
+    pub(crate) fn client(&self) -> Result<(ServerClient, ServerConfig), AppError> {
         let server = self.connected()?;
         Ok((server.client()?, server))
     }
 
     /// Identifiant sur le serveur du coffre `name`, publié sur le serveur de l'appareil.
-    fn published_id(&self, server: &ServerConfig, name: &str) -> Result<Uuid, AppError> {
+    pub(crate) fn published_id(&self, server: &ServerConfig, name: &str) -> Result<Uuid, AppError> {
         match &self.config()?.vault(name)?.remote {
             Some(link) if link.server == server.server_id() && !link.removed => Ok(link.id),
             _ => Err(AppError::NotPublished(name.to_owned())),

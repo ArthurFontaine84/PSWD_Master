@@ -305,7 +305,7 @@ impl RemoteStore for RemoteVault {
                     .and_then(|value| value.to_str().ok())
                     .map(|value| RemoteVersion(value.to_owned()))
                     .ok_or_else(invalid_response)?;
-                let file = response.bytes().map_err(|_| interrupted())?.to_vec();
+                let file = body(response)?;
                 Ok(Some(RemoteFile { file, version }))
             }
             StatusCode::NO_CONTENT => Ok(None),
@@ -341,6 +341,11 @@ impl RemoteStore for RemoteVault {
 #[derive(Deserialize)]
 pub(crate) struct Created {
     pub(crate) id: Uuid,
+}
+
+/// Corps d'une réponse, en octets.
+pub(crate) fn body(response: Response) -> Result<Vec<u8>, PortError> {
+    Ok(response.bytes().map_err(|_| interrupted())?.to_vec())
 }
 
 /// Corps JSON d'une réponse.
