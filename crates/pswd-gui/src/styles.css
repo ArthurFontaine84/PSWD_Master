@@ -349,6 +349,18 @@ small {
   }
 }
 
+/* Clé à recopier (récupération, connexion d'un appareil), affichée une seule fois. */
+.key {
+  padding: var(--space-m);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  word-break: break-all;
+  font-size: 1.1rem;
+  font-family: ui-monospace, monospace;
+  text-align: center;
+}
+
 .notice {
   padding: var(--space-s) var(--space-m);
   border-left: 3px solid var(--accent);

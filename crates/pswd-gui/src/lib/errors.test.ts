@@ -59,6 +59,14 @@ describe("errorMessage", () => {
       ["invalidBackup", "altérée", "Sauvegarde inutilisable : altérée"],
       ["invalidSettings", null, "Réglages hors des valeurs permises."],
       ["ioError", "disque absent", "Erreur de fichier : disque absent"],
+      ["notConnected", null, "Cet appareil n'est connecté à aucun serveur."],
+      ["alreadyConnected", null, "Cet appareil est déjà connecté à un serveur."],
+      ["invalidConnectionKey", null, "Clé de connexion mal saisie : 52 caractères, par groupes de 4."],
+      [
+        "serverError",
+        "serveur injoignable",
+        "Échange avec le serveur impossible : serveur injoignable.",
+      ],
       ["unexpected", "disque plein", "Erreur : disque plein"],
     ];
     for (const [code, detail, message] of cases) {

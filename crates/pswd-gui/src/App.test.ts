@@ -20,6 +20,8 @@ import {
   listVaults,
   lockVault,
   onVaultLocked,
+  onVaultSynced,
+  serverStatus,
   restoreFromFile,
   saveSettings,
   unlockVault,
@@ -37,6 +39,8 @@ vi.mock("./lib/api", () => ({
   deviceKind: vi.fn(),
   appShown: vi.fn(),
   onVaultLocked: vi.fn(),
+  onVaultSynced: vi.fn(),
+  serverStatus: vi.fn(),
   listEntries: vi.fn(),
   listTags: vi.fn(),
   getSettings: vi.fn(),
@@ -78,6 +82,8 @@ beforeEach(() => {
     { id: "2", kind: "note", title: "Code", username: null, tags: [], hasPassword: false },
   ]);
   vi.mocked(getSettings).mockResolvedValue(defaults);
+  vi.mocked(serverStatus).mockResolvedValue({ address: null, vaults: [] });
+  vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
   vi.mocked(onVaultLocked).mockImplementation((handler) => {
     lockHandler = handler;
     return Promise.resolve(stopListening);
@@ -313,6 +319,14 @@ describe("App", () => {
     expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
     expect(document.documentElement.dataset.theme).toBe("dark");
     await fireEvent.click(screen.getByRole("button", { name: "Retour" }));
+    expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
+  });
+
+  it("opens the server screen from the list", async () => {
+    render(App);
+    await fireEvent.click(screen.getByRole("button", { name: "Serveur" }));
+    expect(await screen.findByRole("heading", { name: "Serveur maison" })).toBeInTheDocument();
+    await fireEvent.click(await screen.findByRole("button", { name: "Retour" }));
     expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
   });
 

@@ -25,6 +25,7 @@ tauri-plugin-fs.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+pswd-server = { path = "../../pswd-server", features = ["testing"] }
 serde_json.workspace = true
 tauri = { workspace = true, features = ["test"] }
 tempfile.workspace = true

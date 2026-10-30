@@ -22,6 +22,10 @@ pub enum AppError {
     NotInBackup(String),
     File(String),
     RandomUnavailable,
+    NotConnected,
+    AlreadyConnected,
+    /// Le coffre n'est pas publié sur le serveur de l'appareil (à publier, détaché ou retiré).
+    NotPublished(String),
 }
 
 impl fmt::Display for AppError {
@@ -50,6 +54,14 @@ impl fmt::Display for AppError {
             }
             Self::File(message) => f.write_str(message),
             Self::RandomUnavailable => f.write_str("générateur aléatoire du système indisponible"),
+            Self::NotConnected => f.write_str("cet appareil n'est connecté à aucun serveur"),
+            Self::AlreadyConnected => f.write_str(
+                "cet appareil est déjà connecté à un serveur : s'en déconnecter d'abord",
+            ),
+            Self::NotPublished(name) => write!(
+                f,
+                "le coffre « {name} » n'est pas publié sur le serveur de cet appareil"
+            ),
         }
     }
 }
@@ -143,6 +155,18 @@ mod tests {
             (
                 AppError::RandomUnavailable,
                 "générateur aléatoire du système indisponible",
+            ),
+            (
+                AppError::NotConnected,
+                "cet appareil n'est connecté à aucun serveur",
+            ),
+            (
+                AppError::AlreadyConnected,
+                "cet appareil est déjà connecté à un serveur : s'en déconnecter d'abord",
+            ),
+            (
+                AppError::NotPublished("famille".to_owned()),
+                "le coffre « famille » n'est pas publié sur le serveur de cet appareil",
             ),
         ];
         for (error, message) in messages {

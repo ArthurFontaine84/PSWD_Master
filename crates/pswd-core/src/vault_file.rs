@@ -104,7 +104,8 @@ pub struct RemoteMerge {
 }
 
 /// Coffre déverrouillé : garde la clé du coffre et l'en-tête, pour réécrire le fichier sans
-/// redemander le mot de passe.
+/// redemander le mot de passe. Une copie garde sa propre clé, effacée à sa libération.
+#[derive(Clone)]
 pub struct VaultFile {
     vault_key: Key,
     header: Header,

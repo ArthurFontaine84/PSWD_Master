@@ -7,9 +7,14 @@ import {
   listEntries,
   listTags,
   lockVault,
+  onVaultSynced,
   revealPassword,
+  serverStatus,
+  syncVault,
   type EntryDetail,
   type EntrySummary,
+  type SyncReport,
+  type SyncState,
 } from "../lib/api";
 import Toast from "../components/Toast.svelte";
 import OpenVault from "./OpenVault.svelte";
@@ -22,6 +27,9 @@ vi.mock("../lib/api", () => ({
   revealPassword: vi.fn(),
   copyPassword: vi.fn(),
   lockVault: vi.fn(),
+  onVaultSynced: vi.fn(),
+  serverStatus: vi.fn(),
+  syncVault: vi.fn(),
 }));
 
 const github: EntrySummary = {
@@ -66,6 +74,8 @@ beforeEach(() => {
     { tag: "perso", count: 1 },
   ]);
   vi.mocked(entryHistory).mockResolvedValue([]);
+  vi.mocked(serverStatus).mockResolvedValue({ address: null, vaults: [] });
+  vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
   vi.mocked(entryDetail).mockImplementation((id) =>
     Promise.resolve(id === "1" ? githubDetail : wifiDetail),
   );
@@ -333,5 +343,99 @@ describe("pagination on a wide screen", () => {
     vi.mocked(listEntries).mockResolvedValue(many.slice(0, 4));
     await fireEvent.change(screen.getByRole("combobox", { name: "Filtrer par tag" }), { target: { value: "dev" } });
     expect(await screen.findByText("Page 1 / 2")).toBeInTheDocument();
+  });
+});
+
+describe("OpenVault and the server", () => {
+  const connected = { address: "pswd.local:8443", vaults: [] };
+
+  function report(state: SyncState, changed = false, vault = "perso"): SyncReport {
+    return { vault, state, detail: state === "offline" ? "serveur injoignable" : null, changed };
+  }
+
+  /** Le gestionnaire passé à `onVaultSynced`, et la fonction qui arrête l'écoute. */
+  function listenSyncs() {
+    const stop = vi.fn();
+    let handler: (report: SyncReport) => void = () => undefined;
+    vi.mocked(onVaultSynced).mockImplementation((listener) => {
+      handler = listener;
+      return Promise.resolve(stop);
+    });
+    return { stop, send: (sent: SyncReport) => handler(sent) };
+  }
+
+  it("offers no sync to a device without a server", async () => {
+    show();
+    await screen.findByText("2 entrées");
+    expect(screen.queryByRole("button", { name: "Synchroniser" })).not.toBeInTheDocument();
+  });
+
+  it("stays usable without a readable server state", async () => {
+    vi.mocked(serverStatus).mockRejectedValue({ code: "configInvalid", detail: "server.toml" });
+    show();
+    expect(await screen.findByText("2 entrées")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Synchroniser" })).not.toBeInTheDocument();
+  });
+
+  it("synchronizes on demand and shows what came from the server", async () => {
+    vi.mocked(serverStatus).mockResolvedValue(connected);
+    vi.mocked(syncVault).mockResolvedValue(report("synced", true));
+    show();
+    await screen.findByText("2 entrées");
+    vi.mocked(listEntries).mockResolvedValue([github, wifi, { ...wifi, id: "3", title: "Banque" }]);
+    await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
+    expect(await screen.findByText("Coffre à jour.")).toBeInTheDocument();
+    expect(await screen.findByText("3 entrées")).toBeInTheDocument();
+  });
+
+  it("keeps a sync problem on screen until the next sync succeeds", async () => {
+    vi.mocked(serverStatus).mockResolvedValue(connected);
+    vi.mocked(syncVault).mockResolvedValue(report("offline"));
+    show();
+    await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
+    const notice = await screen.findByText(
+      "Synchro impossible : serveur injoignable. Les modifications seront publiées plus tard.",
+    );
+    expect(screen.queryByText("Coffre à jour.")).not.toBeInTheDocument();
+    vi.mocked(syncVault).mockResolvedValue(report("synced"));
+    await fireEvent.click(screen.getByRole("button", { name: "Synchroniser" }));
+    await vi.waitFor(() => {
+      expect(notice).not.toBeInTheDocument();
+    });
+  });
+
+  it("returns to the list when the vault locked itself during the sync", async () => {
+    vi.mocked(serverStatus).mockResolvedValue(connected);
+    vi.mocked(syncVault).mockRejectedValue({ code: "vaultLocked", detail: null });
+    const { onExpired } = show();
+    await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
+    await vi.waitFor(() => {
+      expect(onExpired).toHaveBeenCalled();
+    });
+  });
+
+  it("follows the automatic syncs of this vault only", async () => {
+    const syncs = listenSyncs();
+    const { unmount } = render(OpenVault, {
+      vault: { name: "perso", entries: 2 },
+      onLocked: vi.fn(),
+      onExpired: vi.fn(),
+      onDeleted: vi.fn(),
+    });
+    await screen.findByText("2 entrées");
+    syncs.send(report("offline", false, "travail"));
+    syncs.send(report("conflict"));
+    expect(
+      await screen.findByText("Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau."),
+    ).toBeInTheDocument();
+    vi.mocked(listEntries).mockResolvedValue([github]);
+    syncs.send(report("synced", true));
+    expect(await screen.findByText("1 entrée")).toBeInTheDocument();
+    expect(screen.queryByText(/Le coffre a changé/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Synchro impossible/)).not.toBeInTheDocument();
+    unmount();
+    await vi.waitFor(() => {
+      expect(syncs.stop).toHaveBeenCalled();
+    });
   });
 });

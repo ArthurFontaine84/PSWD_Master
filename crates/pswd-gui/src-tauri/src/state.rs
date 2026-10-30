@@ -1,4 +1,6 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::thread;
 use std::time::Duration;
 
 use pswd_app::{
@@ -15,6 +17,7 @@ use crate::editing::{EntryInput, HistoryItem, history};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
 use crate::settings::Settings;
+use crate::sync::SyncReport;
 
 /// Coffre ouvert, tel que l'interface le voit : jamais de secret.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -25,8 +28,22 @@ pub struct VaultInfo {
 
 struct OpenVault {
     name: String,
+    /// Numéro de cette ouverture : une synchro ne rend sa copie qu'à l'ouverture d'où elle vient.
+    opening: u64,
+    /// Nombre de modifications faites depuis l'ouverture.
+    edits: u64,
     lock: IdleLock<VaultSession>,
 }
+
+/// Ce que l'état signale à l'interface, depuis un autre fil.
+pub trait Notifier: Send + Sync + 'static {
+    /// Le coffre s'est verrouillé par inactivité.
+    fn vault_locked(&self);
+    /// Une synchro automatique du coffre ouvert est terminée.
+    fn vault_synced(&self, report: &SyncReport);
+}
+
+type SharedVault = Arc<Mutex<Option<OpenVault>>>;
 
 /// L'application est en arrière-plan depuis `since` ; le coffre se verrouille après `delay`.
 struct Hidden {
@@ -38,9 +55,6 @@ struct Hidden {
 /// réduite reste soumise au seul verrouillage par inactivité.
 const BACKGROUND_LOCK: bool = cfg!(mobile);
 
-/// Prévient l'interface qu'un coffre s'est verrouillé par inactivité.
-type LockNotifier = Arc<dyn Fn() + Send + Sync>;
-
 /// Presse-papiers de la plateforme, qui s'efface tout seul.
 pub type Clipboard = Box<dyn SecureClipboard + Send>;
 
@@ -48,22 +62,22 @@ pub type Clipboard = Box<dyn SecureClipboard + Send>;
 pub struct AppState {
     pub vaults: Vaults,
     kdf: KdfParams,
-    clock: fn() -> Timestamp,
+    pub(crate) clock: fn() -> Timestamp,
     /// Délai de verrouillage imposé ; `None` : celui de la configuration.
     auto_lock: Option<Duration>,
     background_lock: bool,
-    on_lock: LockNotifier,
+    notifier: Arc<dyn Notifier>,
     clipboard: Mutex<Clipboard>,
-    open: Mutex<Option<OpenVault>>,
+    open: SharedVault,
+    openings: AtomicU64,
+    /// Une seule synchro ou un seul échange avec le serveur à la fois : deux fils ne réservent
+    /// jamais le même coffre et n'écrivent jamais la configuration en même temps.
+    syncing: Arc<Mutex<()>>,
     hidden: Mutex<Option<Hidden>>,
 }
 
 impl AppState {
-    pub fn new(
-        vaults: Vaults,
-        clipboard: Clipboard,
-        on_lock: impl Fn() + Send + Sync + 'static,
-    ) -> Self {
+    pub fn new(vaults: Vaults, clipboard: Clipboard, notifier: impl Notifier) -> Self {
         Self::with_settings(
             vaults,
             clipboard,
@@ -71,7 +85,7 @@ impl AppState {
             pswd_app::now,
             None,
             BACKGROUND_LOCK,
-            on_lock,
+            notifier,
         )
     }
 
@@ -82,7 +96,7 @@ impl AppState {
         clock: fn() -> Timestamp,
         auto_lock: Option<Duration>,
         background_lock: bool,
-        on_lock: impl Fn() + Send + Sync + 'static,
+        notifier: impl Notifier,
     ) -> Self {
         Self {
             vaults,
@@ -90,20 +104,31 @@ impl AppState {
             clock,
             auto_lock,
             background_lock,
-            on_lock: Arc::new(on_lock),
+            notifier: Arc::new(notifier),
             clipboard: Mutex::new(clipboard),
-            open: Mutex::new(None),
+            open: Arc::new(Mutex::new(None)),
+            openings: AtomicU64::new(0),
+            syncing: Arc::new(Mutex::new(())),
             hidden: Mutex::new(None),
         }
     }
 
     /// Crée le coffre et le garde ouvert. Renvoie aussi sa clé de récupération, à montrer une
     /// seule fois.
-    pub fn create(&self, name: &str, password: &Secret) -> Result<(VaultInfo, Secret), UiError> {
+    /// `shared` en fait un coffre commun, à partager avec d'autres comptes du serveur.
+    pub fn create(
+        &self,
+        name: &str,
+        password: &Secret,
+        shared: bool,
+    ) -> Result<(VaultInfo, Secret), UiError> {
         let timeout = self.auto_lock()?;
-        let (session, recovery_key) =
-            self.vaults
-                .create(name, password, self.kdf, (self.clock)())?;
+        let now = (self.clock)();
+        let (session, recovery_key) = if shared {
+            self.vaults.create_shared(name, password, self.kdf, now)?
+        } else {
+            self.vaults.create(name, password, self.kdf, now)?
+        };
         let vault = self.keep_open(name, session, timeout);
         Ok((vault, recovery_key.encode()))
     }
@@ -122,28 +147,74 @@ impl AppState {
         })
     }
 
+    /// Garde le coffre ouvert, puis le synchronise en arrière-plan.
     fn keep_open(&self, name: &str, session: VaultSession, timeout: Duration) -> VaultInfo {
         let vault = VaultInfo {
             name: name.to_owned(),
             entries: live_count(session.vault()),
         };
-        let on_lock = Arc::clone(&self.on_lock);
-        let lock = IdleLock::notifying(session, timeout, move || on_lock());
+        let notifier = Arc::clone(&self.notifier);
+        let lock = IdleLock::notifying(session, timeout, move || notifier.vault_locked());
         let previous = self.open().replace(OpenVault {
             name: name.to_owned(),
+            opening: self.openings.fetch_add(1, Ordering::Relaxed),
+            edits: 0,
             lock,
         });
         if let Some(previous) = previous {
-            drop(previous.lock.close());
+            self.close(previous);
         }
+        self.sync_later();
         vault
     }
 
-    /// Verrouille tout de suite : la clé du coffre est effacée de la mémoire.
+    /// Verrouille tout de suite : la clé du coffre est effacée de la mémoire, après la
+    /// publication en arrière-plan des modifications qui attendent encore.
     pub fn lock(&self) {
-        if let Some(open) = self.open().take() {
-            drop(open.lock.close());
+        let open = self.open().take();
+        if let Some(open) = open {
+            self.close(open);
         }
+    }
+
+    fn close(&self, open: OpenVault) {
+        let Some(mut session) = open.lock.close() else {
+            return;
+        };
+        if !session.has_pending_changes() {
+            return;
+        }
+        let vaults = self.vaults.clone();
+        let syncing = Arc::clone(&self.syncing);
+        thread::spawn(move || {
+            let _one_at_a_time = lock(&syncing);
+            // Au mieux : le coffre est fermé, personne n'attend le résultat ; ce qui n'est pas
+            // publié le sera à la prochaine ouverture.
+            let _ = vaults.sync(&open.name, &mut session);
+        });
+    }
+
+    /// Attend la fin de la synchro ou de l'échange en cours, et empêche le suivant de commencer.
+    pub(crate) fn exclusive(&self) -> MutexGuard<'_, ()> {
+        lock(&self.syncing)
+    }
+
+    /// Synchronise le coffre ouvert en arrière-plan ; l'interface est prévenue du résultat.
+    fn sync_later(&self) {
+        let vaults = self.vaults.clone();
+        let open = Arc::clone(&self.open);
+        let syncing = Arc::clone(&self.syncing);
+        let notifier = Arc::clone(&self.notifier);
+        thread::spawn(move || {
+            if let Some(report) = sync_open(&vaults, &open, &syncing) {
+                notifier.vault_synced(&report);
+            }
+        });
+    }
+
+    /// Synchronise le coffre ouvert et attend le résultat (bouton « Synchroniser »).
+    pub fn sync_now(&self) -> Result<SyncReport, UiError> {
+        sync_open(&self.vaults, &self.open, &self.syncing).ok_or_else(UiError::vault_locked)
     }
 
     /// L'application passe en arrière-plan : le coffre ouvert se verrouillera après
@@ -236,7 +307,7 @@ impl AppState {
     pub fn add_entry(&self, input: EntryInput) -> Result<EntryDetail, UiError> {
         let content = input.into_content(None)?;
         let now = (self.clock)();
-        self.with_session(|session| {
+        self.modify(|session| {
             let id = session.edit(|vault| vault.add(content, now))?;
             Ok(EntryDetail::from(find(session.vault(), id)?))
         })?
@@ -246,7 +317,7 @@ impl AppState {
     pub fn update_entry(&self, id: &str, input: EntryInput) -> Result<EntryDetail, UiError> {
         let id = parse_id(id)?;
         let now = (self.clock)();
-        self.with_session(|session| {
+        self.modify(|session| {
             let current = find(session.vault(), id)?.content().password.clone();
             let content = input.into_content(current)?;
             session.edit(|vault| vault.update(id, content, now))??;
@@ -257,7 +328,7 @@ impl AppState {
     pub fn delete_entry(&self, id: &str) -> Result<(), UiError> {
         let id = parse_id(id)?;
         let now = (self.clock)();
-        self.with_session(|session| Ok(session.edit(|vault| vault.delete(id, now))??))?
+        self.modify(|session| Ok(session.edit(|vault| vault.delete(id, now))??))?
     }
 
     /// Versions précédentes de l'entrée, sans mot de passe.
@@ -272,7 +343,7 @@ impl AppState {
         check_master_password(new)?;
         self.vaults.open(&name, Credentials::Password(current))?;
         let now = (self.clock)();
-        self.with_session(|session| session.change_password(new, self.kdf, now))??;
+        self.modify(|session| session.change_password(new, self.kdf, now))??;
         Ok(())
     }
 
@@ -293,23 +364,28 @@ impl AppState {
         Ok(self.keep_open(name, session, timeout))
     }
 
-    /// Supprime un coffre de cet appareil ; `confirmation` doit être son nom, retapé.
+    /// Supprime un coffre de cet appareil ; `confirmation` doit être son nom, retapé. Une
+    /// synchro en cours est d'abord attendue : elle pourrait réécrire le coffre.
     pub fn delete_vault(&self, name: &str, confirmation: &str) -> Result<(), UiError> {
-        if confirmation.trim() != name {
-            return Err(UiError::code("confirmationMismatch"));
-        }
-        let is_open = self.open().as_ref().is_some_and(|open| open.name == name);
-        if is_open {
-            self.lock();
-        }
+        confirm(name, confirmation)?;
+        let _one_at_a_time = self.exclusive();
+        self.close_without_publishing(name);
         Ok(self.vaults.delete(name)?)
+    }
+
+    /// Ferme le coffre `name` s'il est ouvert, sans rien publier : il va être supprimé.
+    pub(crate) fn close_without_publishing(&self, name: &str) {
+        let open = self.open().take_if(|open| open.name == name);
+        if let Some(open) = open {
+            drop(open.lock.close());
+        }
     }
 
     /// Importe un fichier CSV dans le coffre ouvert, tout ou rien ; renvoie le nombre d'entrées.
     pub fn import_entries(&self, data: &[u8]) -> Result<usize, UiError> {
         let contents = import_csv(data).map_err(AppError::Csv)?;
         let now = (self.clock)();
-        Ok(self.with_session(|session| add_entries(session, contents, now))??)
+        Ok(self.modify(|session| add_entries(session, contents, now))??)
     }
 
     /// Nom proposé pour une sauvegarde : `pswd-sauvegarde_<date>.pswd`.
@@ -368,13 +444,70 @@ impl AppState {
             .ok_or_else(UiError::vault_locked)
     }
 
+    /// Modifie le coffre ouvert, puis le synchronise en arrière-plan.
+    fn modify<T>(&self, change: impl FnOnce(&mut VaultSession) -> T) -> Result<T, UiError> {
+        let result = {
+            let mut open = self.open();
+            let open = open.as_mut().ok_or_else(UiError::vault_locked)?;
+            let result = open.lock.with(change).ok_or_else(UiError::vault_locked)?;
+            open.edits += 1;
+            result
+        };
+        self.sync_later();
+        Ok(result)
+    }
+
     fn open(&self) -> MutexGuard<'_, Option<OpenVault>> {
-        self.open.lock().unwrap_or_else(PoisonError::into_inner)
+        lock(&self.open)
     }
 
     fn hidden(&self) -> MutexGuard<'_, Option<Hidden>> {
-        self.hidden.lock().unwrap_or_else(PoisonError::into_inner)
+        lock(&self.hidden)
     }
+}
+
+/// Synchronise une copie de la session ouverte : l'interface continue de lire et de modifier le
+/// coffre pendant l'échange avec le serveur. `None` si aucun coffre n'est ouvert.
+fn sync_open(
+    vaults: &Vaults,
+    open: &Mutex<Option<OpenVault>>,
+    syncing: &Mutex<()>,
+) -> Option<SyncReport> {
+    let _one_at_a_time = lock(syncing);
+    let (name, opening, edits, mut session) = {
+        let open = lock(open);
+        let open = open.as_ref()?;
+        let session = open.lock.with(|session| session.clone())?;
+        (open.name.clone(), open.opening, open.edits, session)
+    };
+    let outcome = vaults.sync(&name, &mut session);
+    let changed = give_back(open, opening, edits, session);
+    Some(SyncReport::new(name, outcome, changed))
+}
+
+/// Rend la copie synchronisée au coffre ouvert, s'il n'a été ni fermé ni modifié entre-temps ;
+/// sinon, la modification a prévu une autre synchro. Renvoie `true` si le contenu a changé.
+fn give_back(
+    open: &Mutex<Option<OpenVault>>,
+    opening: u64,
+    edits: u64,
+    synced: VaultSession,
+) -> bool {
+    match lock(open).as_ref() {
+        Some(open) if open.opening == opening && open.edits == edits => open
+            .lock
+            .with(|session| {
+                let changed = session.vault() != synced.vault();
+                *session = synced;
+                changed
+            })
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Un identifiant illisible désigne une entrée qui n'existe pas.
@@ -398,19 +531,30 @@ fn password_of(vault: &Vault, id: Uuid) -> Result<Secret, UiError> {
         .ok_or_else(|| UiError::new("noPassword", content.title.clone()))
 }
 
+/// Une suppression se confirme en retapant le nom de ce qui est supprimé.
+pub(crate) fn confirm(name: &str, confirmation: &str) -> Result<(), UiError> {
+    if confirmation.trim() == name {
+        Ok(())
+    } else {
+        Err(UiError::code("confirmationMismatch"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::thread;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::mpsc;
 
     use pswd_core::ports::PortError;
     use pswd_core::{EntryContent, EntryKind, Tags};
     use pswd_infra::Locations;
+    use pswd_server::testing::TestServer;
     use serde_json::json;
     use tempfile::TempDir;
 
     use super::*;
+    use crate::sync::SyncState;
 
     fn secret(value: &str) -> Secret {
         Secret::new(value.to_owned())
@@ -458,23 +602,41 @@ mod tests {
         NOW.with(|now| now.set(now.get() + millis));
     }
 
-    /// Notification de verrouillage qui compte ses appels.
-    fn lock_counter() -> (Arc<AtomicUsize>, impl Fn() + Send + Sync + 'static) {
-        let count = Arc::new(AtomicUsize::new(0));
-        let notified = Arc::clone(&count);
-        (count, move || {
-            notified.fetch_add(1, Ordering::SeqCst);
-        })
+    /// Interface factice : compte les verrouillages par inactivité et transmet les synchros.
+    struct FakeNotifier {
+        locks: Arc<AtomicUsize>,
+        reports: Mutex<mpsc::Sender<SyncReport>>,
     }
 
-    /// État dans un dossier temporaire, et le nombre de verrouillages par inactivité signalés.
-    fn state_with(
+    impl Notifier for FakeNotifier {
+        fn vault_locked(&self) {
+            self.locks.fetch_add(1, Ordering::SeqCst);
+        }
+
+        fn vault_synced(&self, report: &SyncReport) {
+            let _ = self.reports.lock().unwrap().send(report.clone());
+        }
+    }
+
+    fn notifier() -> (FakeNotifier, Arc<AtomicUsize>, mpsc::Receiver<SyncReport>) {
+        let locks = Arc::new(AtomicUsize::new(0));
+        let (sender, receiver) = mpsc::channel();
+        let notifier = FakeNotifier {
+            locks: Arc::clone(&locks),
+            reports: Mutex::new(sender),
+        };
+        (notifier, locks, receiver)
+    }
+
+    /// État dans un dossier temporaire, le nombre de verrouillages par inactivité signalés et
+    /// les synchros automatiques.
+    fn build(
         dir: &TempDir,
         auto_lock: Option<Duration>,
         clipboard: FakeClipboard,
-    ) -> (AppState, Arc<AtomicUsize>) {
+    ) -> (AppState, Arc<AtomicUsize>, mpsc::Receiver<SyncReport>) {
         let kdf = KdfParams::new(8 * 1024, 1, 1).unwrap();
-        let (count, on_lock) = lock_counter();
+        let (notifier, locks, reports) = notifier();
         let state = AppState::with_settings(
             vaults_in(dir),
             Box::new(clipboard),
@@ -482,9 +644,18 @@ mod tests {
             test_clock,
             auto_lock,
             true,
-            on_lock,
+            notifier,
         );
-        (state, count)
+        (state, locks, reports)
+    }
+
+    fn state_with(
+        dir: &TempDir,
+        auto_lock: Option<Duration>,
+        clipboard: FakeClipboard,
+    ) -> (AppState, Arc<AtomicUsize>) {
+        let (state, locks, _) = build(dir, auto_lock, clipboard);
+        (state, locks)
     }
 
     fn state_in(dir: &TempDir, auto_lock: Option<Duration>) -> (AppState, Arc<AtomicUsize>) {
@@ -501,15 +672,14 @@ mod tests {
     #[test]
     fn default_settings_create_a_usable_vault() {
         let dir = TempDir::new().unwrap();
-        let calls = Arc::new(AtomicUsize::new(0));
-        let counted = Arc::clone(&calls);
+        let (notifier, locks, _) = notifier();
         let clipboard = Box::new(FakeClipboard::default());
-        let state = AppState::new(vaults_in(&dir), clipboard, move || {
-            counted.fetch_add(1, Ordering::SeqCst);
-        });
-        (state.on_lock)();
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        let state = AppState::new(vaults_in(&dir), clipboard, notifier);
+        state.notifier.vault_locked();
+        assert_eq!(locks.load(Ordering::SeqCst), 1);
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.lock();
         assert_eq!(
             state.unlock("perso", &secret("Maître-2026!")),
@@ -521,7 +691,9 @@ mod tests {
     fn created_vault_stays_open_and_gives_its_recovery_key() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        let (vault, recovery_key) = state.create("perso", &secret("Maître-2026!")).unwrap();
+        let (vault, recovery_key) = state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         assert_eq!(vault, info("perso", 0));
         assert_eq!(recovery_key.expose().split('-').count(), 13);
         assert_eq!(state.current(), Some(info("perso", 0)));
@@ -532,11 +704,13 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         assert_eq!(
-            state.create("perso", &secret("")).err(),
+            state.create("perso", &secret(""), false).err(),
             Some(UiError::code("passwordTooShort"))
         );
         assert_eq!(
-            state.create("perso", &secret("mot de passe maître")).err(),
+            state
+                .create("perso", &secret("mot de passe maître"), false)
+                .err(),
             Some(UiError::code("passwordTooSimple"))
         );
         assert_eq!(state.current(), None);
@@ -577,8 +751,12 @@ mod tests {
     fn only_one_vault_is_open_at_a_time() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
-        state.create("travail", &secret("Autre-mot-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
+        state
+            .create("travail", &secret("Autre-mot-2026!"), false)
+            .unwrap();
         assert_eq!(state.current(), Some(info("travail", 0)));
         state.unlock("perso", &secret("Maître-2026!")).unwrap();
         assert_eq!(state.current(), Some(info("perso", 0)));
@@ -588,7 +766,9 @@ mod tests {
     fn locking_closes_the_vault_without_notification() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, Some(Duration::from_millis(50)));
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.lock();
         state.lock();
         thread::sleep(Duration::from_millis(200));
@@ -600,10 +780,14 @@ mod tests {
     fn idle_vault_locks_itself_and_says_so() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, Some(Duration::from_millis(30)));
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         thread::sleep(Duration::from_millis(300));
         assert_eq!(state.current(), None);
         assert_eq!(count.load(Ordering::SeqCst), 1);
+        state.lock();
+        assert_eq!(state.current(), None);
     }
 
     fn lock_in_background_after(state: &AppState, seconds: u32) {
@@ -617,7 +801,9 @@ mod tests {
     fn vault_locks_at_once_in_background_when_the_delay_is_zero() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         lock_in_background_after(&state, 0);
         state.hide();
         thread::sleep(Duration::from_millis(300));
@@ -629,7 +815,9 @@ mod tests {
     fn vault_stays_open_after_a_short_absence() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.hide();
         advance(59_999);
         assert_eq!(state.show(), Some(info("perso", 0)));
@@ -642,7 +830,9 @@ mod tests {
     fn long_absence_locks_the_vault_on_return() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.hide();
         advance(60_000);
         assert_eq!(state.show(), None);
@@ -654,7 +844,9 @@ mod tests {
     fn clock_going_back_locks_the_vault_on_return() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.hide();
         advance(-1);
         assert_eq!(state.show(), None);
@@ -664,7 +856,9 @@ mod tests {
     fn hiding_twice_keeps_the_first_moment() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.hide();
         advance(30_000);
         state.hide();
@@ -678,7 +872,9 @@ mod tests {
         let (state, _) = state_in(&dir, None);
         state.hide();
         assert_eq!(state.show(), None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         advance(3_600_000);
         assert_eq!(state.show(), Some(info("perso", 0)));
     }
@@ -688,7 +884,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         assert_eq!(state.show(), None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         advance(3_600_000);
         assert_eq!(state.show(), Some(info("perso", 0)));
     }
@@ -697,7 +895,9 @@ mod tests {
     fn unreadable_configuration_locks_at_once_in_background() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         std::fs::write(dir.path().join("config").join("config.toml"), "couleur = 1").unwrap();
         state.hide();
         thread::sleep(Duration::from_millis(300));
@@ -710,9 +910,11 @@ mod tests {
     fn desktop_ignores_the_background() {
         let dir = TempDir::new().unwrap();
         let clipboard = Box::new(FakeClipboard::default());
-        let (count, on_lock) = lock_counter();
-        let state = AppState::new(vaults_in(&dir), clipboard, on_lock);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        let (notifier, count, _) = notifier();
+        let state = AppState::new(vaults_in(&dir), clipboard, notifier);
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         lock_in_background_after(&state, 0);
         state.hide();
         thread::sleep(Duration::from_millis(300));
@@ -724,7 +926,9 @@ mod tests {
     fn default_delay_comes_from_the_configuration() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         thread::sleep(Duration::from_millis(100));
         assert_eq!(state.current(), Some(info("perso", 0)));
         assert_eq!(count.load(Ordering::SeqCst), 0);
@@ -734,7 +938,9 @@ mod tests {
     fn unreadable_configuration_keeps_the_vault_closed() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.lock();
         let config = dir.path().join("config").join("config.toml");
         let text = std::fs::read_to_string(&config).unwrap();
@@ -896,9 +1102,12 @@ mod tests {
     fn reading_after_the_automatic_lock_is_refused() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, Some(Duration::from_millis(100)));
-        open_with_entries(&state);
+        let (github, _, _) = open_with_entries(&state);
         thread::sleep(Duration::from_millis(400));
-        assert_eq!(state.entries("", None).err(), Some(UiError::vault_locked()));
+        let locked = Some(UiError::vault_locked());
+        assert_eq!(state.entries("", None).err(), locked);
+        assert_eq!(state.delete_entry(&github).err(), locked);
+        assert_eq!(state.sync_now().err(), locked);
     }
 
     fn entry_input(value: serde_json::Value) -> EntryInput {
@@ -1089,7 +1298,9 @@ mod tests {
     fn master_password_is_changed_after_checking_the_current_one() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         assert_eq!(
             state
                 .change_password(&secret("faux"), &secret("Nouveau-2026!"))
@@ -1118,7 +1329,9 @@ mod tests {
     fn recovery_key_sets_a_new_password_and_opens_the_vault() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        let (_, key) = state.create("perso", &secret("Oublié-mot-2026!")).unwrap();
+        let (_, key) = state
+            .create("perso", &secret("Oublié-mot-2026!"), false)
+            .unwrap();
         state.lock();
         let other = secret(&key.expose().to_lowercase().replace('-', " "));
         assert_eq!(
@@ -1137,7 +1350,9 @@ mod tests {
     fn recovery_errors_are_reported() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        let (_, key) = state.create("perso", &secret("Maître-2026!")).unwrap();
+        let (_, key) = state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.lock();
         assert_eq!(
             state
@@ -1164,9 +1379,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         state
-            .create("travail", &secret("Travail-mot-2026!"))
+            .create("travail", &secret("Travail-mot-2026!"), false)
             .unwrap();
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         assert_eq!(
             state.delete_vault("perso", "Perso").err(),
             Some(UiError::code("confirmationMismatch"))
@@ -1205,9 +1422,15 @@ mod tests {
     fn vaults_are_backed_up_to_a_file_then_restored() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
-        state.create("travail", &secret("Maître-2026!")).unwrap();
-        state.create("famille", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
+        state
+            .create("travail", &secret("Maître-2026!"), false)
+            .unwrap();
+        state
+            .create("famille", &secret("Maître-2026!"), false)
+            .unwrap();
         assert_eq!(
             state.backup_file_name(),
             "pswd-sauvegarde_1970-01-01_00-00-01.pswd"
@@ -1280,5 +1503,156 @@ mod tests {
         std::fs::write(&config, "couleur = 1").unwrap();
         assert!(state.settings().is_err());
         assert!(state.save_settings(changed).is_err());
+    }
+
+    /// Délai d'attente d'une synchro faite en arrière-plan.
+    const SYNC_WAIT: Duration = Duration::from_secs(30);
+
+    fn next_report(reports: &mpsc::Receiver<SyncReport>) -> SyncReport {
+        reports.recv_timeout(SYNC_WAIT).unwrap()
+    }
+
+    fn report(vault: &str, state: SyncState, changed: bool) -> SyncReport {
+        SyncReport {
+            vault: vault.to_owned(),
+            state,
+            detail: None,
+            changed,
+        }
+    }
+
+    /// Connecte l'état, comme administrateur, à un serveur neuf.
+    fn connect_admin(state: &AppState) -> TestServer {
+        let server = TestServer::start();
+        state
+            .connect(&server.address, &server.admin_key, "PC", "Arthur")
+            .unwrap();
+        server
+    }
+
+    /// Connecte `other` au compte de `connected`, puis télécharge ses coffres.
+    fn connect_same_account(connected: &AppState, other: &AppState) {
+        let address = connected.vaults.server().unwrap().unwrap().local_address;
+        let key = connected.new_device_key().unwrap();
+        other.connect(&address, &key, "Portable", "").unwrap();
+        other.exchange().unwrap();
+    }
+
+    #[test]
+    fn a_vault_of_a_disconnected_device_is_not_synced() {
+        let dir = TempDir::new().unwrap();
+        let (state, _, reports) = build(&dir, None, FakeClipboard::default());
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
+        assert_eq!(
+            next_report(&reports),
+            report("perso", SyncState::NotConnected, false)
+        );
+    }
+
+    #[test]
+    fn opened_and_modified_vaults_are_synced_in_the_background() {
+        let dir = TempDir::new().unwrap();
+        let (pc, _, pc_reports) = build(&dir, None, FakeClipboard::default());
+        connect_admin(&pc);
+        pc.create("perso", &secret("Maître-2026!"), false).unwrap();
+        assert_eq!(
+            next_report(&pc_reports),
+            report("perso", SyncState::Synced, false)
+        );
+
+        let other = TempDir::new().unwrap();
+        let (phone, _, phone_reports) = build(&other, None, FakeClipboard::default());
+        connect_same_account(&pc, &phone);
+        phone.unlock("perso", &secret("Maître-2026!")).unwrap();
+        assert_eq!(
+            next_report(&phone_reports),
+            report("perso", SyncState::Synced, false)
+        );
+
+        pc.add_entry(wifi_input(&json!({ "mode": "set", "value": "box-1234" })))
+            .unwrap();
+        assert_eq!(
+            next_report(&pc_reports),
+            report("perso", SyncState::Synced, false)
+        );
+        assert_eq!(
+            phone.sync_now(),
+            Ok(report("perso", SyncState::Synced, true))
+        );
+        assert_eq!(titles(&phone.entries("", None).unwrap()), ["Box"]);
+        assert_eq!(
+            phone.sync_now(),
+            Ok(report("perso", SyncState::Synced, false))
+        );
+    }
+
+    /// Version du coffre `perso` sur le serveur de `state`.
+    fn published_version(state: &AppState) -> Option<String> {
+        let client = state.vaults.server().unwrap().unwrap().client().unwrap();
+        client.list_vaults().unwrap()[0]
+            .version
+            .clone()
+            .map(|version| version.0)
+    }
+
+    #[test]
+    fn locking_publishes_the_changes_still_waiting() {
+        let dir = TempDir::new().unwrap();
+        let (state, _, reports) = build(&dir, None, FakeClipboard::default());
+        connect_admin(&state);
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
+        next_report(&reports);
+        assert_eq!(published_version(&state).as_deref(), Some("\"1\""));
+
+        let busy = state.exclusive();
+        state
+            .add_entry(wifi_input(&json!({ "mode": "clear" })))
+            .unwrap();
+        state.lock();
+        drop(busy);
+        let start = std::time::Instant::now();
+        while published_version(&state).as_deref() != Some("\"2\"") {
+            assert!(start.elapsed() < SYNC_WAIT, "rien n'a été publié");
+            thread::sleep(Duration::from_millis(20));
+        }
+        // La synchro prévue par la modification trouve le coffre fermé : rien à signaler.
+        assert!(reports.recv_timeout(Duration::from_millis(200)).is_err());
+    }
+
+    #[test]
+    fn a_synced_copy_is_given_back_only_to_an_unchanged_vault() {
+        let dir = TempDir::new().unwrap();
+        let (state, _) = state_in(&dir, None);
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
+        let _no_background_sync = state.exclusive();
+        let (opening, mut copy) = {
+            let open = state.open();
+            let open = open.as_ref().unwrap();
+            (
+                open.opening,
+                open.lock.with(|session| session.clone()).unwrap(),
+            )
+        };
+        copy.edit(|vault| {
+            vault.add(
+                EntryContent::new(EntryKind::Note, "Wi-Fi".to_owned()),
+                test_clock(),
+            )
+        })
+        .unwrap();
+        assert!(!give_back(&state.open, opening + 1, 0, copy.clone()));
+        assert!(!give_back(&state.open, opening, 1, copy.clone()));
+        assert_eq!(state.current(), Some(info("perso", 0)));
+        assert!(give_back(&state.open, opening, 0, copy.clone()));
+        assert_eq!(state.current(), Some(info("perso", 1)));
+        assert!(!give_back(&state.open, opening, 0, copy.clone()));
+        state.lock();
+        assert!(!give_back(&state.open, opening, 0, copy));
     }
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-invitation"
+description = "Enables the delete_invitation command without any pre-configured scope."
+commands.allow = ["delete_invitation"]
+
+[[permission]]
+identifier = "deny-delete-invitation"
+description = "Denies the delete_invitation command without any pre-configured scope."
+commands.deny = ["delete_invitation"]

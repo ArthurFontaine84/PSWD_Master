@@ -14,6 +14,11 @@ export function pickBackupDestination(title: string, defaultPath: string): Promi
   return save({ title, defaultPath, filters: [BACKUP_FILTER] });
 }
 
+/** L'emplacement où enregistrer la sauvegarde du serveur (une base SQLite), ou `null`. */
+export function pickServerBackupDestination(title: string, defaultPath: string): Promise<string | null> {
+  return save({ title, defaultPath, filters: [{ name: "SQLite", extensions: ["db"] }] });
+}
+
 /** Un fichier CSV choisi par l'utilisateur, ou `null` s'il a annulé. */
 export function pickCsvFile(title: string): Promise<string | null> {
   return open({ title, multiple: false, filters: [{ name: "CSV", extensions: ["csv"] }] });

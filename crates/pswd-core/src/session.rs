@@ -25,6 +25,9 @@ pub enum SyncStatus {
     /// Fichier distant inutilisable (altéré, autre coffre, version inconnue) : il n'est jamais
     /// écrasé.
     Rejected(FileError),
+    /// Le distant a retiré le coffre, ou en a retiré l'utilisateur ; le coffre local reste
+    /// utilisable et les modifications restent en attente.
+    Removed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,7 +62,8 @@ impl From<FileError> for SessionError {
 }
 
 /// Coffre ouvert : toute modification est enregistrée localement, la publication se fait par
-/// [`Session::sync`].
+/// [`Session::sync`]. Une copie peut se synchroniser pendant que l'original reste consultable.
+#[derive(Clone)]
 pub struct Session<L> {
     local: L,
     file: VaultFile,
@@ -217,7 +221,7 @@ impl<L: LocalStore> Session<L> {
     fn try_sync(&mut self, remote: &mut impl RemoteStore) -> Result<SyncStatus, SessionError> {
         for _ in 0..MAX_SYNC_ATTEMPTS {
             let expected = match remote.fetch() {
-                Err(error) => return Ok(SyncStatus::Offline(error)),
+                Err(error) => return Ok(unreachable_remote(error)),
                 Ok(None) => None,
                 Ok(Some(RemoteFile { file, version })) => {
                     let merge = match self.file.merge_remote(&self.vault, &file) {
@@ -239,7 +243,7 @@ impl<L: LocalStore> Session<L> {
             match remote.push(&file, expected.as_ref()) {
                 Ok(()) => return Ok(SyncStatus::Synced),
                 Err(PushError::Conflict) => {}
-                Err(PushError::Failed(error)) => return Ok(SyncStatus::Offline(error)),
+                Err(PushError::Failed(error)) => return Ok(unreachable_remote(error)),
             }
         }
         Ok(SyncStatus::Conflict)
@@ -269,6 +273,14 @@ impl<L: LocalStore> Session<L> {
     }
 }
 
+fn unreachable_remote(error: PortError) -> SyncStatus {
+    if error.is_removed() {
+        SyncStatus::Removed
+    } else {
+        SyncStatus::Offline(error)
+    }
+}
+
 fn unlock(file: &[u8], credentials: Credentials<'_>) -> Result<(VaultFile, Vault), FileError> {
     match credentials {
         Credentials::Password(password) => VaultFile::unlock_with_password(file, password),
@@ -291,7 +303,7 @@ mod tests {
     use crate::ports::RemoteVersion;
     use crate::{EntryContent, EntryKind, VaultError};
 
-    #[derive(Default)]
+    #[derive(Default, Clone)]
     struct FakeLocal {
         file: Option<Vec<u8>>,
         saves: usize,
@@ -326,8 +338,16 @@ mod tests {
         pushes: usize,
         offline: bool,
         push_fails: bool,
+        /// Le distant répond « coffre retiré », dès la lecture ou seulement à la publication.
+        removed: Option<Removal>,
         /// Fichiers publiés par un autre appareil juste avant nos prochaines publications.
         concurrent: Vec<Vec<u8>>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Removal {
+        OnFetch,
+        OnPush,
     }
 
     impl FakeRemote {
@@ -350,6 +370,9 @@ mod tests {
             if self.offline {
                 return Err(PortError::new("hors ligne"));
             }
+            if self.removed == Some(Removal::OnFetch) {
+                return Err(PortError::removed("coffre retiré"));
+            }
             Ok(self.file.clone().map(|file| RemoteFile {
                 file,
                 version: RemoteVersion(self.version.to_string()),
@@ -359,6 +382,9 @@ mod tests {
         fn push(&mut self, file: &[u8], expected: Option<&RemoteVersion>) -> Result<(), PushError> {
             if self.push_fails {
                 return Err(PushError::Failed(PortError::new("accès refusé")));
+            }
+            if self.removed == Some(Removal::OnPush) {
+                return Err(PushError::Failed(PortError::removed("coffre retiré")));
             }
             if let Some(other) = self.concurrent.pop() {
                 self.file = Some(other);
@@ -518,6 +544,21 @@ mod tests {
         );
         assert_eq!(titles(session.vault()), ["départ"]);
         assert!(!session.has_pending_changes());
+    }
+
+    #[test]
+    fn a_copy_syncs_without_changing_the_original() {
+        let (mut session, _, file) = synced();
+        session
+            .edit(|vault| vault.add(note("nouvelle"), at(3)))
+            .unwrap();
+        let mut remote = FakeRemote::holding(&changed_elsewhere(&file, "ailleurs"));
+        let mut copy = session.clone();
+        assert_eq!(copy.sync(&mut remote), Ok(SyncStatus::Synced));
+        assert_eq!(titles(copy.vault()), ["ailleurs", "départ", "nouvelle"]);
+        assert!(!copy.has_pending_changes());
+        assert_eq!(titles(session.vault()), ["départ", "nouvelle"]);
+        assert!(session.has_pending_changes());
     }
 
     #[test]
@@ -823,6 +864,21 @@ mod tests {
             SyncStatus::Offline(PortError::new("accès refusé"))
         );
         assert!(session.has_pending_changes());
+    }
+
+    #[test]
+    fn removed_remote_keeps_the_changes_pending() {
+        let (mut session, mut remote, _) = synced();
+        session
+            .edit(|vault| vault.add(note("locale"), at(3)))
+            .unwrap();
+        remote.removed = Some(Removal::OnPush);
+        assert_eq!(session.sync(&mut remote), Ok(SyncStatus::Removed));
+        remote.removed = Some(Removal::OnFetch);
+        assert_eq!(session.sync(&mut remote), Ok(SyncStatus::Removed));
+        assert!(session.has_pending_changes());
+        assert_eq!(remote.pushes, 0);
+        assert_eq!(titles(session.vault()), ["départ", "locale"]);
     }
 
     #[test]

@@ -1,0 +1,56 @@
+[package]
+name = "pswd-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "pswd-server"
+path = "src/main.rs"
+
+[features]
+# Serveur de test pour les crates clientes.
+testing = []
+
+[dependencies]
+pswd-core.workspace = true
+axum.workspace = true
+axum-server.workspace = true
+clap.workspace = true
+getrandom.workspace = true
+rcgen.workspace = true
+rusqlite.workspace = true
+rustls.workspace = true
+serde.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+toml.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+tower.workspace = true
+
+[lints]
+workspace = true
+
+# Paquet Debian/Ubuntu : `cargo deb -p pswd-server`, sur la machine Linux (SPEC §11).
+[package.metadata.deb]
+maintainer = "Arthur Fontaine"
+copyright = "Arthur Fontaine"
+extended-description = """\
+Serveur maison de synchronisation des coffres pswd : il garde des coffres chiffrés et ne détient \
+aucune clé. Il se gère depuis l'application PSWD Master."""
+section = "net"
+priority = "optional"
+depends = "$auto, adduser"
+assets = [
+    ["target/release/pswd-server", "usr/bin/", "755"],
+    ["debian/config.toml", "etc/pswd-server/config.toml", "644"],
+]
+maintainer-scripts = "debian/"
+systemd-units = { unit-name = "pswd-server", enable = true, start = true, restart-after-upgrade = true }

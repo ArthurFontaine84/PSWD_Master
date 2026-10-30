@@ -8,15 +8,23 @@ publish.workspace = true
 [dependencies]
 etcetera.workspace = true
 pswd-core.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 toml.workspace = true
+uuid.workspace = true
 zeroize.workspace = true
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 arboard.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
+futures-util.workspace = true
+pswd-server = { path = "../pswd-server", features = ["testing"] }
 tempfile.workspace = true
+tokio = { workspace = true, features = ["time"] }
 
 [lints]
 workspace = true

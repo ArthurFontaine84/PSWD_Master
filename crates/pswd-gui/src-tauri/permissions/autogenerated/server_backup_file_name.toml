@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-server-backup-file-name"
+description = "Enables the server_backup_file_name command without any pre-configured scope."
+commands.allow = ["server_backup_file_name"]
+
+[[permission]]
+identifier = "deny-server-backup-file-name"
+description = "Denies the server_backup_file_name command without any pre-configured scope."
+commands.deny = ["server_backup_file_name"]

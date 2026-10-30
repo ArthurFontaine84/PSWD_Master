@@ -58,6 +58,19 @@ pub enum Command {
         /// Coffre à restaurer (par défaut : demandé).
         name: Option<String>,
     },
+    /// Connecte cet appareil à un serveur pswd-server (clé de connexion demandée).
+    Connect {
+        /// Adresse du serveur : hôte ou hôte:port (port 8443 par défaut).
+        address: String,
+    },
+    /// Déconnecte cet appareil du serveur.
+    Disconnect,
+    /// Affiche une clé de connexion pour ajouter un appareil à votre compte.
+    AddDevice,
+    /// Affiche le serveur et l'état de chaque coffre.
+    Status,
+    /// Télécharge les nouveaux coffres du compte et publie ceux de cet appareil.
+    Sync,
 }
 
 #[cfg(test)]
@@ -122,6 +135,16 @@ mod tests {
                 name: None
             }
         );
+        assert_eq!(
+            parse(&["connect", "192.168.1.10"]).unwrap(),
+            Command::Connect {
+                address: "192.168.1.10".to_owned()
+            }
+        );
+        assert_eq!(parse(&["disconnect"]).unwrap(), Command::Disconnect);
+        assert_eq!(parse(&["add-device"]).unwrap(), Command::AddDevice);
+        assert_eq!(parse(&["status"]).unwrap(), Command::Status);
+        assert_eq!(parse(&["sync"]).unwrap(), Command::Sync);
     }
 
     #[test]
@@ -135,7 +158,8 @@ mod tests {
             &["import", "a.csv"],
             &["backup"],
             &["restore"],
-            &["sync"],
+            &["connect"],
+            &["sync", "perso"],
         ] {
             assert!(parse(args).is_err(), "{args:?}");
         }

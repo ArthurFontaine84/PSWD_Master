@@ -8,12 +8,26 @@ use pswd_core::ports::{LocalStore, PortError};
 #[derive(Debug, Clone)]
 pub struct FileStore {
     path: PathBuf,
+    /// Lisible par le seul utilisateur (Unix).
+    private: bool,
 }
 
 impl FileStore {
     #[must_use]
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            private: false,
+        }
+    }
+
+    /// Fichier écrit avec les droits `0600` sous Unix.
+    #[must_use]
+    pub fn private(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            private: true,
+        }
     }
 
     #[must_use]
@@ -48,6 +62,7 @@ impl FileStore {
         self.path.parent().map_or(Ok(()), fs::create_dir_all)?;
         let temporary = self.temporary_path();
         let mut output = File::create(&temporary)?;
+        restrict(&output, self.private)?;
         output.write_all(file)?;
         // Les octets sont sur le disque avant le renommage : une coupure de courant ne laisse
         // jamais un `vault.enc` incomplet.
@@ -70,6 +85,24 @@ impl LocalStore for FileStore {
         self.write_then_replace(file)
             .map_err(|error| io_error("écriture", &self.path, &error))
     }
+}
+
+/// Droits `0600`, posés avant d'écrire quoi que ce soit, même sur un fichier temporaire
+/// laissé par une écriture interrompue.
+#[cfg(unix)]
+fn restrict(file: &File, private: bool) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    if private {
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+/// Hors Unix, le fichier hérite des droits du dossier de l'utilisateur.
+#[cfg(not(unix))]
+#[allow(clippy::unnecessary_wraps)]
+fn restrict(_: &File, _: bool) -> io::Result<()> {
+    Ok(())
 }
 
 pub(crate) fn io_error(action: &str, path: &Path, error: &io::Error) -> PortError {
@@ -128,6 +161,25 @@ mod tests {
         let error = store.save_atomic(b"next").unwrap_err();
         assert!(error.to_string().starts_with("écriture de "), "{error}");
         assert_eq!(store.load(), Ok(Some(b"previous".to_vec())));
+    }
+
+    #[test]
+    fn private_file_is_saved_like_any_other() {
+        let dir = TempDir::new().unwrap();
+        let mut store = FileStore::private(dir.path().join("server.toml"));
+        store.save_atomic(b"data").unwrap();
+        assert_eq!(store.load(), Ok(Some(b"data".to_vec())));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_file_is_readable_by_its_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let mut private = FileStore::private(dir.path().join("server.toml"));
+        private.save_atomic(b"data").unwrap();
+        let mode = fs::metadata(private.path()).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]

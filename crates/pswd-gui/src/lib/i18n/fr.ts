@@ -1,5 +1,10 @@
+import type { KeyPurpose } from "../api";
+
 /** Message construit à partir du détail d'une erreur (qui peut être ignoré). */
 type Message = (detail: string) => string;
+
+const day = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" });
+const dateTime = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" });
 
 const errors = {
   configInvalid: (detail: string) => `Configuration invalide : ${detail}`,
@@ -37,6 +42,11 @@ const errors = {
   invalidSettings: () => "Réglages hors des valeurs permises.",
   ioError: (detail: string) => `Erreur de fichier : ${detail}`,
   fileUnwritable: (detail: string) => `Écriture du fichier impossible : ${detail}`,
+  notConnected: () => "Cet appareil n'est connecté à aucun serveur.",
+  alreadyConnected: () => "Cet appareil est déjà connecté à un serveur.",
+  invalidConnectionKey: () => "Clé de connexion mal saisie : 52 caractères, par groupes de 4.",
+  serverError: (detail: string) => `Échange avec le serveur impossible : ${detail}.`,
+  notPublished: (detail: string) => `Le coffre « ${detail} » n'est pas publié sur le serveur de cet appareil.`,
   unexpected: (detail: string) => `Erreur : ${detail}`,
 } satisfies Record<string, Message>;
 
@@ -52,6 +62,9 @@ export const fr = {
   vaultNameHint: "Lettres, chiffres, - et _.",
   masterPassword: "Mot de passe maître",
   confirmation: "Confirmation",
+  sharedVault: "Coffre commun",
+  sharedVaultHint:
+    "À partager avec d'autres comptes du serveur, qui l'ouvriront avec ce mot de passe maître. Ce choix est définitif.",
   create: "Créer",
   creating: "Création…",
   recoveryTitle: "Clé de récupération",
@@ -169,6 +182,161 @@ export const fr = {
   themes: { auto: "Comme le système", light: "Clair", dark: "Sombre" },
   settingsSaved: "Réglages enregistrés.",
   lockedAutomatically: "Coffre verrouillé automatiquement.",
+  server: "Serveur",
+  serverTitle: "Serveur maison",
+  serverExplanation:
+    "Connectez cet appareil à votre serveur pour retrouver vos coffres sur vos autres appareils. Le serveur ne reçoit que des coffres chiffrés.",
+  serverAddress: "Adresse du serveur",
+  serverAddressHint: "Par exemple 192.168.1.10 ; le port 8443 est ajouté s'il manque.",
+  connectionKey: "Clé de connexion",
+  connectionKeyHint: "52 caractères, par groupes de 4.",
+  deviceName: "Nom de cet appareil",
+  deviceNameHint: "Par exemple « PC du salon » : il le distingue de vos autres appareils.",
+  accountName: "Nom du compte",
+  accountNameHint: "Seulement avec la clé administrateur affichée à l'installation du serveur ; sinon, laissez vide.",
+  connect: "Se connecter",
+  connecting: "Connexion…",
+  connected: "Appareil connecté au serveur.",
+  connectedTo: (address: string) => `Connecté au serveur ${address}.`,
+  synchronize: "Synchroniser",
+  synchronizing: "Synchronisation…",
+  exchangeIncomplete: (message: string) =>
+    `Échange avec le serveur incomplet. ${message} Réessayez avec « Synchroniser ».`,
+  nothingToExchange: "Aucun coffre à échanger avec le serveur.",
+  downloaded: (name: string, localName: string) =>
+    name === localName
+      ? `Coffre « ${name} » téléchargé.`
+      : `Coffre « ${name} » téléchargé sous le nom « ${localName} » : ce nom était déjà pris.`,
+  notDownloaded: (name: string, reason: string) => `Coffre « ${name} » du serveur non téléchargé : ${reason}.`,
+  published: (name: string) => `Coffre « ${name} » publié.`,
+  notPublished: (name: string, reason: string) => `Coffre « ${name} » non publié : ${reason}.`,
+  addDevice: "Ajouter un appareil",
+  deviceKeyTitle: "Clé pour un nouvel appareil",
+  deviceKeyExplanation: (address: string) =>
+    `Sur le nouvel appareil, connectez-vous au serveur ${address} avec cette clé. Elle ne sert qu'une fois et expire dans 7 jours.`,
+  close: "Fermer",
+  disconnect: "Se déconnecter",
+  disconnectTitle: "Se déconnecter du serveur",
+  disconnectExplanation:
+    "Cet appareil ne sera plus synchronisé. Vous pourrez vous reconnecter plus tard avec une nouvelle clé de connexion.",
+  keepLocalCopies: "Garder une copie des coffres sur cet appareil",
+  removeExplanation:
+    "Seuls les coffres identiques à leur copie sur le serveur seront retirés de cet appareil ; les autres seront gardés.",
+  disconnecting: "Déconnexion…",
+  disconnected: "Appareil déconnecté du serveur.",
+  tokenNotRevoked: (reason: string) =>
+    `Le serveur n'a pas pu être prévenu (${reason}) : révoquez cet appareil depuis le panneau d'administration.`,
+  removedFromDevice: (name: string) => `Coffre « ${name} » retiré de cet appareil ; il reste sur le serveur.`,
+  keptOnDevice: (name: string, reason: string | null) =>
+    `Coffre « ${name} » gardé : ${reason ?? "des modifications ne sont pas encore sur le serveur"}.`,
+  vaultStates: { toPublish: "à publier", published: "publié", detached: "détaché", removed: "retiré" },
+  shared: "commun",
+  removedByServer: (name: string) =>
+    `Coffre « ${name} » retiré du serveur : gardé sur cet appareil, il n'est plus synchronisé.`,
+  invitations: "Invitations",
+  invitation: (vaultName: string, invitedBy: string) => `${invitedBy} vous invite dans le coffre « ${vaultName} ».`,
+  accept: "Accepter",
+  decline: "Refuser",
+  invitationAccepted: (invitedBy: string) => `Demandez à ${invitedBy} le mot de passe maître du coffre pour l'ouvrir.`,
+  invitationDeclined: (vaultName: string) => `Invitation au coffre « ${vaultName} » refusée.`,
+  members: "Membres",
+  membersTitle: "Membres du coffre",
+  pendingInvitations: "Invitations en attente",
+  cancelInvitation: (name: string) => `Annuler l'invitation de ${name}`,
+  invitationCancelled: (name: string) => `Invitation de ${name} annulée.`,
+  inviteAccount: "Inviter un compte",
+  invite: "Inviter",
+  inviting: "Invitation…",
+  noOneToInvite: "Tous les comptes du serveur sont déjà membres ou invités.",
+  invited: (name: string) =>
+    `Invitation envoyée à ${name}. Transmettez-lui le mot de passe maître du coffre, sans passer par le serveur.`,
+  leaveVault: "Quitter ce coffre",
+  leave: "Quitter",
+  leaveExplanation: (name: string) =>
+    `Le coffre « ${name} » ne sera plus synchronisé avec les autres membres. La copie de cet appareil est gardée. Pour le rejoindre plus tard, il faudra une nouvelle invitation.`,
+  vaultLeft: (name: string) => `Vous avez quitté le coffre « ${name} ».`,
+  deleteWhere: "Supprimer",
+  deleteLocalOnly: "Sur cet appareil seulement",
+  deleteEverywhere: "Sur cet appareil et sur le serveur",
+  deleteEverywhereExplanation:
+    "Le coffre et ses versions seront aussi effacés du serveur. Vos autres appareils garderont leur copie, sans plus la synchroniser.",
+  account: (name: string, isAdmin: boolean) => `Compte : ${name}${isAdmin ? " (administrateur)" : ""}.`,
+  administration: "Administration",
+  adminTitle: "Administration du serveur",
+  adminTabs: { accounts: "Comptes", vaults: "Coffres", keys: "Clés", server: "Serveur" },
+  administrator: "administrateur",
+  devices: "Appareils",
+  noDevice: "Aucun appareil connecté.",
+  deviceAdded: (name: string, millis: number) => `${name}, ajouté le ${day.format(millis)}`,
+  revoke: (name: string) => `Révoquer ${name}`,
+  deviceRevoked: (name: string) => `Appareil « ${name} » révoqué : il ne peut plus joindre le serveur.`,
+  makeAdmin: "Nommer administrateur",
+  removeAdmin: "Retirer le rôle d'administrateur",
+  roleGiven: (name: string) => `${name} est maintenant administrateur.`,
+  roleRemoved: (name: string) => `${name} n'est plus administrateur.`,
+  deleteAccount: "Supprimer le compte",
+  deleteAccountExplanation: (name: string) =>
+    `Le compte « ${name} », ses appareils et ses clés seront supprimés. Ses coffres restent sur le serveur ; ceux dont il était le seul membre n'en auront plus. Pour confirmer, retapez son nom.`,
+  accountNameConfirmation: "Nom du compte",
+  accountDeleted: (name: string) => `Compte « ${name} » supprimé.`,
+  addMember: "Ajouter un membre",
+  memberName: "Nom du nouveau membre",
+  createKey: "Créer sa clé",
+  creatingKey: "Création…",
+  memberKeyTitle: (name: string) => `Clé de connexion de ${name}`,
+  memberKeyExplanation: (address: string) =>
+    `Transmettez à ce membre l'adresse du serveur (${address}) et cette clé. Elle ne sert qu'une fois et expire dans 7 jours.`,
+  noPendingKey: "Aucune clé de connexion en attente.",
+  keyPurpose: (purpose: KeyPurpose, name: string) =>
+    purpose === "admin"
+      ? "Clé administrateur"
+      : purpose === "member"
+        ? `Nouveau membre : ${name}`
+        : `Appareil de plus pour ${name}`,
+  expires: (millis: number) => `expire le ${day.format(millis)}`,
+  cancelKey: "Annuler la clé",
+  keyCancelled: "Clé annulée : elle ne peut plus servir.",
+  noServerVault: "Aucun coffre sur le serveur.",
+  privateVault: "privé",
+  neverPublished: "jamais publié",
+  version: (version: number) => `version ${version}`,
+  noMember: "Aucun membre.",
+  manageVault: (name: string) => `Gérer le coffre ${name}`,
+  allVaults: "Tous les coffres",
+  removeMember: (name: string) => `Retirer ${name}`,
+  memberRemoved: (name: string, vault: string) => `${name} a été retiré du coffre « ${vault} ».`,
+  attachExplanation: "Ce coffre n'a plus de membre : rattachez-y un compte pour qu'il le retrouve.",
+  attachAccount: "Compte à rattacher",
+  attach: "Rattacher",
+  attached: (name: string, vault: string) => `${name} est maintenant membre du coffre « ${vault} ».`,
+  versionsTitle: "Versions conservées",
+  noVersion: "Aucune version publiée.",
+  versionLine: (version: number, millis: number, size: number) =>
+    `Version ${version} — ${dateTime.format(millis)} — ${Math.ceil(size / 1024)} Kio`,
+  restoreVersion: (version: number) => `Restaurer la version ${version}`,
+  versionRestored: (name: string) =>
+    `Version restaurée dans le nouveau coffre « ${name} » ; ses membres le recevront au prochain échange.`,
+  deleteServerVault: "Supprimer du serveur",
+  deleteServerVaultExplanation: (name: string) =>
+    `Le contenu du coffre « ${name} » et ses versions seront effacés du serveur. Les copies des appareils sont gardées, mais ne sont plus synchronisées. Pour confirmer, retapez son nom.`,
+  serverVaultDeleted: (name: string) => `Coffre « ${name} » supprimé du serveur.`,
+  publicAddress: "Adresse publique",
+  publicAddressHint:
+    "Nom DNS ou adresse IP pour joindre le serveur hors de chez vous, par exemple maison.duckdns.org. Laissez vide pour l'effacer.",
+  publicAddressSaved: "Adresse publique enregistrée : les appareils la reçoivent au prochain échange.",
+  serverBackup: "Sauvegarder le serveur",
+  serverBackupExplanation:
+    "Copie complète du serveur : comptes, coffres chiffrés et clé privée de son certificat. Rangez-la en lieu sûr, hors de cette machine.",
+  serverBackupFileTitle: "Enregistrer la sauvegarde du serveur",
+  serverBackedUp: "Sauvegarde du serveur enregistrée.",
+  syncDone: "Coffre à jour.",
+  syncNotConnected: "Cet appareil n'est connecté à aucun serveur.",
+  syncDetached: "Coffre détaché : il est lié à un autre serveur.",
+  syncRemoved: "Coffre retiré du serveur : il reste utilisable sur cet appareil, sans être synchronisé.",
+  syncOffline: (detail: string) => `Synchro impossible : ${detail}. Les modifications seront publiées plus tard.`,
+  syncConflict: "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",
+  syncRejected: (detail: string) => `Copie du serveur refusée (${detail}) : elle n'est pas remplacée.`,
+  syncFailed: (detail: string) => `Synchro impossible : ${detail}.`,
   passwordRule: "Au moins 12 caractères, dont au moins 3 types parmi : minuscules, majuscules, chiffres, symboles.",
   validation: {
     nameRequired: "Le nom du coffre est obligatoire.",
@@ -180,6 +348,10 @@ export const fr = {
     passwordMismatch: "Les deux saisies ne correspondent pas.",
     titleRequired: "Le titre est obligatoire.",
     lengthInvalid: "La longueur doit être un nombre entier entre 8 et 24.",
+    addressRequired: "L'adresse du serveur est obligatoire.",
+    keyRequired: "La clé de connexion est obligatoire.",
+    deviceNameRequired: "Le nom de cet appareil est obligatoire.",
+    memberNameRequired: "Le nom du nouveau membre est obligatoire.",
   },
   errors,
 };

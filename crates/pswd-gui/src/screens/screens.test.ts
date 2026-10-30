@@ -1,6 +1,15 @@
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createVault, deviceKind, listVaults, unlockVault } from "../lib/api";
+import {
+  createVault,
+  deviceKind,
+  listInvitations,
+  listVaults,
+  serverStatus,
+  syncServer,
+  unlockVault,
+} from "../lib/api";
+import Toast from "../components/Toast.svelte";
 import CreateVault from "./CreateVault.svelte";
 import RecoveryKey from "./RecoveryKey.svelte";
 import Unlock from "./Unlock.svelte";
@@ -11,6 +20,9 @@ vi.mock("../lib/api", () => ({
   listVaults: vi.fn(),
   createVault: vi.fn(),
   unlockVault: vi.fn(),
+  serverStatus: vi.fn(),
+  syncServer: vi.fn(),
+  listInvitations: vi.fn(),
 }));
 
 const created = { vault: { name: "perso", entries: 0 }, recoveryKey: "AAAA-BBBB" };
@@ -18,6 +30,8 @@ const created = { vault: { name: "perso", entries: 0 }, recoveryKey: "AAAA-BBBB"
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(deviceKind).mockResolvedValue("desktop");
+  vi.mocked(serverStatus).mockResolvedValue({ address: null, vaults: [] });
+  vi.mocked(listInvitations).mockResolvedValue([]);
 });
 
 function field(label: string): HTMLInputElement {
@@ -60,6 +74,75 @@ describe("VaultList", () => {
     expect(screen.queryByRole("button", { name: "Sauvegarder" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Restaurer" })).toBeInTheDocument();
   });
+
+  it("shows the state of the vaults only once connected, their type always", async () => {
+    vi.mocked(listVaults).mockResolvedValue(["neuf", "perso", "vieux"]);
+    vi.mocked(serverStatus).mockResolvedValue({
+      address: null,
+      vaults: [{ name: "neuf", state: "toPublish", shared: true }],
+    });
+    const { unmount } = render(VaultList, { onOpen: vi.fn(), onBackup: vi.fn(), onRestore: vi.fn() });
+    expect(await screen.findByText("commun")).toBeInTheDocument();
+    expect(screen.queryByText("à publier")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Synchroniser" })).not.toBeInTheDocument();
+    unmount();
+
+    vi.mocked(serverStatus).mockResolvedValue({
+      address: "pswd.local:8443",
+      vaults: [
+        { name: "neuf", state: "toPublish", shared: false },
+        { name: "perso", state: "published", shared: false },
+        { name: "vieux", state: "detached", shared: false },
+      ],
+    });
+    render(VaultList, { onOpen: vi.fn(), onBackup: vi.fn(), onRestore: vi.fn() });
+    expect(await screen.findByText("à publier")).toBeInTheDocument();
+    expect(screen.getByText("détaché")).toBeInTheDocument();
+    expect(screen.queryByText("publié")).not.toBeInTheDocument();
+  });
+
+  it("exchanges vaults with the server, then lists them again", async () => {
+    render(Toast);
+    vi.mocked(listVaults).mockResolvedValue(["perso"]);
+    vi.mocked(serverStatus).mockResolvedValue({ address: "pswd.local:8443", vaults: [] });
+    render(VaultList, { onOpen: vi.fn(), onBackup: vi.fn(), onRestore: vi.fn() });
+    vi.mocked(listVaults).mockResolvedValue(["perso", "travail"]);
+    vi.mocked(syncServer).mockResolvedValue({
+      removed: [],
+      downloaded: [{ name: "travail", localName: "travail" }],
+      notDownloaded: [{ name: "famille", reason: "disque plein" }],
+      published: [],
+      notPublished: [],
+    });
+    await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
+    expect(await screen.findByText("Coffre « travail » téléchargé.")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Coffre « famille » du serveur non téléchargé : disque plein.",
+    );
+    expect(await screen.findByRole("button", { name: "travail" })).toBeInTheDocument();
+
+    vi.mocked(syncServer).mockResolvedValue({
+      removed: [],
+      downloaded: [],
+      notDownloaded: [],
+      published: [],
+      notPublished: [{ name: "perso", reason: "refusé" }],
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Synchroniser" }));
+    expect(await screen.findByText("Coffre « perso » non publié : refusé.")).toBeInTheDocument();
+
+    vi.mocked(syncServer).mockRejectedValue({ code: "serverError", detail: "serveur injoignable" });
+    await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
+    expect(await screen.findByText("Échange avec le serveur impossible : serveur injoignable.")).toBeInTheDocument();
+  });
+
+  it("stays usable without a readable server state", async () => {
+    vi.mocked(listVaults).mockResolvedValue(["perso"]);
+    vi.mocked(serverStatus).mockRejectedValue({ code: "configInvalid", detail: "server.toml" });
+    render(VaultList, { onOpen: vi.fn(), onBackup: vi.fn(), onRestore: vi.fn() });
+    expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Synchroniser" })).not.toBeInTheDocument();
+  });
 });
 
 describe("CreateVault", () => {
@@ -101,7 +184,7 @@ describe("CreateVault", () => {
     await vi.waitFor(() => {
       expect(onCreated).toHaveBeenCalledWith(created);
     });
-    expect(createVault).toHaveBeenCalledWith("perso", "Maître-2026!");
+    expect(createVault).toHaveBeenCalledWith("perso", "Maître-2026!", false);
     expect(field("Mot de passe maître").value).toBe("");
     expect(field("Confirmation").value).toBe("");
   });

@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+#DEBHELPER#
+
+# Seul `apt purge` efface les données : une mise à jour ou `apt remove` les gardent.
+if [ "$1" = "purge" ]; then
+    rm -rf /var/lib/pswd-server
+    if getent passwd pswd-server >/dev/null; then
+        deluser --system pswd-server >/dev/null || true
+    fi
+fi

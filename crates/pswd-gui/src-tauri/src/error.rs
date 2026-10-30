@@ -73,6 +73,9 @@ impl From<AppError> for UiError {
             AppError::BackupFile(error) => Self::new("invalidBackup", error.to_string()),
             AppError::Port(error) => Self::new("ioError", error.to_string()),
             AppError::File(message) => Self::new("ioError", message),
+            AppError::NotConnected => Self::code("notConnected"),
+            AppError::AlreadyConnected => Self::code("alreadyConnected"),
+            AppError::NotPublished(name) => Self::new("notPublished", name),
             // EXTENSION(anglais): les autres erreurs reçoivent leur code au fil des écrans ; en
             // attendant, le message français sert de détail.
             other => Self::new("unexpected", other.to_string()),
@@ -234,6 +237,13 @@ mod tests {
                 AppError::File("coffre introuvable".to_owned()),
                 "ioError",
                 Some("coffre introuvable"),
+            ),
+            (AppError::NotConnected, "notConnected", None),
+            (AppError::AlreadyConnected, "alreadyConnected", None),
+            (
+                AppError::NotPublished("famille".to_owned()),
+                "notPublished",
+                Some("famille"),
             ),
             (
                 AppError::Csv(CsvError::Internal),

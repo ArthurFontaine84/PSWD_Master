@@ -58,6 +58,7 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
             "Mot de passe maître de « {} » changé.",
             unlocked.name
         ));
+        self.sync_quietly(&unlocked.name, &mut unlocked.session);
         Ok(())
     }
 
@@ -80,6 +81,7 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
             "⚠ {} contient vos mots de passe en clair : supprimez-le.",
             file.display()
         ));
+        self.sync_quietly(&unlocked.name, &mut unlocked.session);
         Ok(())
     }
 

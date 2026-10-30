@@ -6,7 +6,7 @@ use pswd_core::ports::LocalStore;
 use pswd_core::{
     BackupFile, Credentials, RecoveryKey, Secret, Session, SessionError, Timestamp, VaultFile,
 };
-use pswd_infra::{Config, ConfigFile, FileStore, Locations, VaultConfig};
+use pswd_infra::{Config, ConfigFile, FileStore, Locations, RemoteLink, VaultConfig};
 
 use crate::password::check_master_password;
 use crate::utc::backup_day;
@@ -15,7 +15,7 @@ use crate::{AppError, VaultSession};
 /// Les coffres de cet appareil, enregistrés dans la configuration.
 #[derive(Debug, Clone)]
 pub struct Vaults {
-    locations: Locations,
+    pub(crate) locations: Locations,
 }
 
 impl Vaults {
@@ -24,7 +24,7 @@ impl Vaults {
         Self { locations }
     }
 
-    fn config_file(&self) -> ConfigFile {
+    pub(crate) fn config_file(&self) -> ConfigFile {
         ConfigFile::new(self.locations.config_file())
     }
 
@@ -59,8 +59,8 @@ impl Vaults {
         Ok(self.config()?.ensure_available(name)?)
     }
 
-    /// Crée un coffre vide et l'enregistre. Renvoie aussi sa clé de récupération, à montrer une
-    /// seule fois. Un essai raté ne laisse rien derrière lui.
+    /// Crée un coffre privé vide et l'enregistre. Renvoie aussi sa clé de récupération, à
+    /// montrer une seule fois. Un essai raté ne laisse rien derrière lui.
     ///
     /// # Errors
     ///
@@ -73,12 +73,41 @@ impl Vaults {
         params: KdfParams,
         now: Timestamp,
     ) -> Result<(VaultSession, RecoveryKey), AppError> {
+        self.create_vault(name, password, params, now, false)
+    }
+
+    /// Comme [`Vaults::create`], pour un coffre commun : il pourra être partagé avec d'autres
+    /// comptes du serveur une fois publié.
+    ///
+    /// # Errors
+    ///
+    /// Comme [`Vaults::create`].
+    pub fn create_shared(
+        &self,
+        name: &str,
+        password: &Secret,
+        params: KdfParams,
+        now: Timestamp,
+    ) -> Result<(VaultSession, RecoveryKey), AppError> {
+        self.create_vault(name, password, params, now, true)
+    }
+
+    fn create_vault(
+        &self,
+        name: &str,
+        password: &Secret,
+        params: KdfParams,
+        now: Timestamp,
+        shared: bool,
+    ) -> Result<(VaultSession, RecoveryKey), AppError> {
         let mut config_file = self.config_file();
         let mut config = config_file.load()?;
         config.ensure_available(name)?;
         check_master_password(password)?;
         let vault = VaultConfig {
             path: self.locations.vault_dir(name),
+            shared,
+            remote: None,
         };
         let created = removing_on_failure(&vault.path, || {
             let local = FileStore::new(vault.vault_file());
@@ -124,16 +153,31 @@ impl Vaults {
     /// Si le fichier n'est pas un coffre, si les deux noms sont pris, ou si l'écriture échoue.
     pub fn restore(&self, name: &str, file: &[u8], date: &str) -> Result<String, AppError> {
         VaultFile::check_format(file).map_err(AppError::InvalidBackup)?;
-        let mut config_file = self.config_file();
-        let mut config = config_file.load()?;
+        let config = self.config()?;
         let target = if config.ensure_available(name).is_ok() {
             name.to_owned()
         } else {
             format!("{name}-sauvegarde-{date}")
         };
-        config.ensure_available(&target)?;
+        self.add_vault_file(&target, file, false, None)?;
+        Ok(target)
+    }
+
+    /// Enregistre `file` comme nouveau coffre `name`, sans jamais remplacer un fichier.
+    pub(crate) fn add_vault_file(
+        &self,
+        name: &str,
+        file: &[u8],
+        shared: bool,
+        remote: Option<RemoteLink>,
+    ) -> Result<(), AppError> {
+        let mut config_file = self.config_file();
+        let mut config = config_file.load()?;
+        config.ensure_available(name)?;
         let vault = VaultConfig {
-            path: self.locations.vault_dir(&target),
+            path: self.locations.vault_dir(name),
+            shared,
+            remote,
         };
         removing_on_failure(&vault.path, || {
             let mut local = FileStore::new(vault.vault_file());
@@ -142,9 +186,9 @@ impl Vaults {
             }
             Ok(local.save_atomic(file)?)
         })?;
-        config.add_vault(&target, vault)?;
+        config.add_vault(name, vault)?;
         config_file.save(&config)?;
-        Ok(target)
+        Ok(())
     }
 }
 
@@ -178,14 +222,7 @@ impl Vaults {
         }
         let mut files = Vec::new();
         for (name, vault) in vaults {
-            let path = vault.vault_file();
-            let file = FileStore::new(&path).load()?.ok_or_else(|| {
-                AppError::File(format!(
-                    "fichier du coffre {name} introuvable : {}",
-                    path.display()
-                ))
-            })?;
-            files.push((name, file));
+            files.push((name, read_vault_file(name, vault)?));
         }
         let mut backup = BackupFile::new(now);
         for (name, file) in &files {
@@ -221,6 +258,17 @@ impl Vaults {
             .ok_or_else(|| AppError::NotInBackup(name.to_owned()))?;
         self.restore(name, file, &backup_day(backup.created_at()))
     }
+}
+
+/// Fichier `vault.enc` du coffre, qui doit exister.
+pub(crate) fn read_vault_file(name: &str, vault: &VaultConfig) -> Result<Vec<u8>, AppError> {
+    let path = vault.vault_file();
+    FileStore::new(&path).load()?.ok_or_else(|| {
+        AppError::File(format!(
+            "fichier du coffre {name} introuvable : {}",
+            path.display()
+        ))
+    })
 }
 
 /// Supprime le dossier du coffre si `create` échoue alors qu'il n'existait pas avant.

@@ -18,11 +18,13 @@
   import { showToast } from "./lib/toast.svelte";
   import Toast from "./components/Toast.svelte";
   import Icon from "./components/Icon.svelte";
+  import Admin from "./screens/Admin.svelte";
   import Backup from "./screens/Backup.svelte";
   import CreateVault from "./screens/CreateVault.svelte";
   import OpenVault from "./screens/OpenVault.svelte";
   import RecoveryKey from "./screens/RecoveryKey.svelte";
   import Restore from "./screens/Restore.svelte";
+  import Server from "./screens/Server.svelte";
   import Settings from "./screens/Settings.svelte";
   import Unlock from "./screens/Unlock.svelte";
   import VaultList from "./screens/VaultList.svelte";
@@ -35,6 +37,8 @@
     | { kind: "open"; vault: VaultInfo }
     | { kind: "backup" }
     | { kind: "restore" }
+    | { kind: "server" }
+    | { kind: "admin"; address: string; publicAddress: string | null }
     | { kind: "settings" };
 
   /** Intervalle minimal entre deux signaux d'activité envoyés au backend. */
@@ -85,6 +89,9 @@
       case "open":
         return false;
       case "recovery":
+        return true;
+      case "admin":
+        screen = { kind: "server" };
         return true;
       default:
         screen = { kind: "list" };
@@ -142,6 +149,15 @@
           <button
             type="button"
             class="icon-button"
+            aria-label={texts.server}
+            title={texts.server}
+            onclick={() => (screen = { kind: "server" })}
+          >
+            <Icon name="server" />
+          </button>
+          <button
+            type="button"
+            class="icon-button"
             aria-label={texts.settings}
             title={texts.settings}
             onclick={() => (screen = { kind: "settings" })}
@@ -190,6 +206,17 @@
             screen = { kind: "list" };
           }}
           onCancel={() => (screen = { kind: "list" })}
+        />
+      {:else if screen.kind === "server"}
+        <Server
+          onClose={() => (screen = { kind: "list" })}
+          onAdmin={(address, publicAddress) => (screen = { kind: "admin", address, publicAddress })}
+        />
+      {:else if screen.kind === "admin"}
+        <Admin
+          address={screen.address}
+          publicAddress={screen.publicAddress}
+          onClose={() => (screen = { kind: "server" })}
         />
       {:else if screen.kind === "settings"}
         <Settings onClose={() => (screen = { kind: "list" })} />

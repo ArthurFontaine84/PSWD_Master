@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newPasswordProblem, newVaultProblem } from "./validation";
+import { connectionProblem, newPasswordProblem, newVaultProblem } from "./validation";
 
 const STRONG = "Maître-2026!";
 const TOO_SHORT = "Le mot de passe maître doit contenir au moins 12 caractères.";
@@ -81,5 +81,14 @@ describe("newPasswordProblem", () => {
   it("checks the confirmation last", () => {
     expect(newPasswordProblem("a", "b")).toBe(TOO_SHORT);
     expect(newPasswordProblem(STRONG, "autre")).toBe("Les deux saisies ne correspondent pas.");
+  });
+});
+
+describe("connectionProblem", () => {
+  it("requires the address, the key and the device name, in that order", () => {
+    expect(connectionProblem(" ", " ", " ")).toBe("L'adresse du serveur est obligatoire.");
+    expect(connectionProblem("pswd.local", "", "")).toBe("La clé de connexion est obligatoire.");
+    expect(connectionProblem("pswd.local", "AAAA", " ")).toBe("Le nom de cet appareil est obligatoire.");
+    expect(connectionProblem("pswd.local", "AAAA", "PC")).toBeNull();
   });
 });

@@ -22,16 +22,3 @@
     <button type="button" class="primary" disabled={!noted} onclick={onDone}>{texts.continue}</button>
   </div>
 </section>
-
-<style>
-  .key {
-    padding: var(--space-m);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    word-break: break-all;
-    font-size: 1.1rem;
-    font-family: ui-monospace, monospace;
-    text-align: center;
-  }
-</style>

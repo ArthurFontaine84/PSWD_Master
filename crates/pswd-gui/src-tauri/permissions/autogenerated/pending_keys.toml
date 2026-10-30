@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pending-keys"
+description = "Enables the pending_keys command without any pre-configured scope."
+commands.allow = ["pending_keys"]
+
+[[permission]]
+identifier = "deny-pending-keys"
+description = "Denies the pending_keys command without any pre-configured scope."
+commands.deny = ["pending_keys"]

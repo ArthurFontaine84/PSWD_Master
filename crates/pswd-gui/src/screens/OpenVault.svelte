@@ -8,15 +8,21 @@
   import EntryList from "../components/EntryList.svelte";
   import Icon from "../components/Icon.svelte";
   import ImportEntries from "../components/ImportEntries.svelte";
+  import LeaveVault from "../components/LeaveVault.svelte";
+  import Members from "../components/Members.svelte";
   import {
     addEntry,
     listEntries,
     listTags,
     lockVault,
+    onVaultSynced,
+    serverStatus,
+    syncVault,
     updateEntry,
     type EntryDetail,
     type EntryInput,
     type EntrySummary,
+    type SyncReport,
     type TagCount,
     type VaultInfo,
   } from "../lib/api";
@@ -27,6 +33,7 @@
   import { verbatim } from "../lib/keyboard";
   import { pageCount, pageOf, pageSizeFor, remSize, watchWide } from "../lib/layout";
   import { motion } from "../lib/motion";
+  import { syncMessage, syncProblem } from "../lib/sync";
   import { showToast } from "../lib/toast.svelte";
 
   interface Props {
@@ -52,8 +59,9 @@
   let revision = $state(0);
   let managing = $state(false);
   let menuAnchor: HTMLElement | undefined = $state();
+  type Panel = "password" | "import" | "delete" | "members" | "leave";
   /** Action de gestion ouverte à la place du détail. */
-  let panel = $state<"password" | "import" | "delete" | null>(null);
+  let panel = $state<Panel | null>(null);
   /** Écran large : les entrées sont paginées pour que liste et détail tiennent sans défiler. */
   let wide = $state(false);
   let windowHeight = $state(0);
@@ -65,9 +73,60 @@
   const visible = $derived(wide ? pageOf(entries, shownPage, pageSize) : entries);
   /** Change dès que le volet de détail montre autre chose : son contenu arrive animé. */
   const paneKey = $derived(`${panel ?? ""}:${editor?.mode ?? ""}:${selected ?? ""}`);
+  /** L'appareil est connecté à un serveur : le bouton « Synchroniser » est proposé. */
+  let connected = $state(false);
+  let syncing = $state(false);
+  /** Dernier problème de synchro, effacé par la synchro suivante réussie. */
+  let syncNotice = $state<string | null>(null);
+  /** Coffre commun publié sur le serveur : ses membres se gèrent ici. */
+  let sharing = $state(false);
+  /** Coffre privé publié sur le serveur : il peut aussi y être supprimé. */
+  let privateOnServer = $state(false);
+
+  // Sans état lisible, le coffre reste utilisable en local, sans bouton de synchro.
+  serverStatus().then(
+    (status) => {
+      connected = status.address !== null;
+      const published = status.vaults.find(({ name, state }) => name === vault.name && state === "published");
+      sharing = connected && published?.shared === true;
+      privateOnServer = connected && published?.shared === false;
+    },
+    () => undefined,
+  );
+
+  function left() {
+    sharing = false;
+    panel = null;
+  }
+
+  /** Fin d'une synchro : les modifications reçues du serveur sont affichées. */
+  function synced(report: SyncReport) {
+    if (report.vault !== vault.name) {
+      return;
+    }
+    syncNotice = syncProblem(report);
+    if (report.changed) {
+      revision += 1;
+    }
+  }
+
+  async function synchronize() {
+    syncing = true;
+    try {
+      const report = await syncVault();
+      synced(report);
+      if (syncNotice === null) {
+        showToast(syncMessage(report));
+      }
+    } catch (error) {
+      fail(error);
+    } finally {
+      syncing = false;
+    }
+  }
 
   /** Une seule chose à la fois à la place du détail. */
-  function show(next: "password" | "import" | "delete") {
+  function show(next: Panel) {
     managing = false;
     editor = null;
     panel = next;
@@ -164,9 +223,13 @@
   onMount(() => {
     const stopBack = onBack(back);
     const stopWide = watchWide((value) => (wide = value));
+    const stopSynced = onVaultSynced(synced);
     return () => {
       stopBack();
       stopWide();
+      void stopSynced.then((stop) => {
+        stop();
+      });
     };
   });
 
@@ -189,6 +252,18 @@
       <button type="button" class="icon-button" aria-label={texts.newEntry} title={texts.newEntry} onclick={startEntry}>
         <Icon name="plus" />
       </button>
+      {#if connected}
+        <button
+          type="button"
+          class="icon-button"
+          aria-label={texts.synchronize}
+          title={texts.synchronize}
+          disabled={syncing}
+          onclick={synchronize}
+        >
+          <Icon name="sync" />
+        </button>
+      {/if}
       <div class="menu-anchor" bind:this={menuAnchor}>
         <button
           type="button"
@@ -210,6 +285,12 @@
           >
             <button type="button" role="menuitem" onclick={() => show("password")}>{texts.changePassword}</button>
             <button type="button" role="menuitem" onclick={() => show("import")}>{texts.importCsv}</button>
+            {#if sharing}
+              <button type="button" role="menuitem" onclick={() => show("members")}>{texts.members}</button>
+              <button type="button" role="menuitem" class="danger-item" onclick={() => show("leave")}>
+                {texts.leaveVault}
+              </button>
+            {/if}
             <button type="button" role="menuitem" class="danger-item" onclick={() => show("delete")}>
               {texts.deleteVault}
             </button>
@@ -241,6 +322,9 @@
           </select>
         {/if}
       </div>
+      {#if syncNotice}
+        <p role="status" class="notice">{syncNotice}</p>
+      {/if}
       {#if problem}
         <p role="alert">{problem}</p>
       {/if}
@@ -283,8 +367,12 @@
             <ChangePassword onClose={() => (panel = null)} {onExpired} />
           {:else if panel === "import"}
             <ImportEntries onImported={() => (revision += 1)} onClose={() => (panel = null)} {onExpired} />
+          {:else if panel === "members"}
+            <Members name={vault.name} onClose={() => (panel = null)} />
+          {:else if panel === "leave"}
+            <LeaveVault name={vault.name} onLeft={left} onClose={() => (panel = null)} />
           {:else if panel === "delete"}
-            <DeleteVault name={vault.name} {onDeleted} onClose={() => (panel = null)} />
+            <DeleteVault name={vault.name} onServer={privateOnServer} {onDeleted} onClose={() => (panel = null)} />
           {:else if editor}
             <h3>{editor.mode === "edit" ? texts.editEntry(editor.detail.title) : texts.newEntry}</h3>
             {#key editor}

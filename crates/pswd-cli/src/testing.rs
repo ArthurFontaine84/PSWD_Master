@@ -1,6 +1,7 @@
 //! Doublures communes aux tests des commandes.
 
 use std::collections::VecDeque;
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -9,7 +10,8 @@ use pswd_app::Vaults;
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::{PortError, SecureClipboard};
 use pswd_core::{Credentials, FileError, Secret, Session, Timestamp, Vault, VaultFile};
-use pswd_infra::{Config, ConfigFile, FileStore, Locations};
+use pswd_infra::{Config, ConfigFile, FileStore, Locations, ServerFile};
+use pswd_server::testing::TestServer;
 use tempfile::TempDir;
 
 use crate::app::{App, CliError};
@@ -155,6 +157,48 @@ impl TestEnv {
             clock: || Timestamp::from_millis(1_000),
             auto_lock: None,
         }
+    }
+
+    pub fn vaults(&self, device: &str) -> Vaults {
+        Vaults::new(self.locations(device))
+    }
+
+    /// Connecte l'appareil comme administrateur d'un serveur neuf ; renvoie ce serveur et ce
+    /// qui a été affiché.
+    pub fn connect_admin(&self, device: &str) -> (TestServer, String) {
+        let server = TestServer::start();
+        let mut app = self.app(device, &[server.admin_key.expose(), "PC", "Arthur"]);
+        app.run(Command::Connect {
+            address: server.address.clone(),
+        })
+        .unwrap();
+        (server, app.terminal.output())
+    }
+
+    /// Connecte `device` au compte de l'appareil `connected` ; renvoie ce qui a été affiché.
+    pub fn connect_same_account(&self, connected: &str, device: &str) -> String {
+        let vaults = self.vaults(connected);
+        let address = vaults.server().unwrap().unwrap().local_address;
+        let key = vaults.new_device_key().unwrap();
+        let mut app = self.app(device, &[key.expose(), "Portable", ""]);
+        app.run(Command::Connect { address }).unwrap();
+        app.terminal.output()
+    }
+
+    /// Fait pointer le serveur de l'appareil vers une adresse qui coupe toute connexion. Un port
+    /// simplement libéré pourrait être repris par le serveur d'un autre test.
+    pub fn go_offline(&self, device: &str) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        std::thread::spawn(move || {
+            for connection in listener.incoming() {
+                drop(connection);
+            }
+        });
+        let file = ServerFile::new(self.locations(device).server_file());
+        let mut server = file.load().unwrap().unwrap();
+        server.local_address = address;
+        file.clone().save(&server).unwrap();
     }
 
     pub fn config(&self, device: &str) -> Config {
