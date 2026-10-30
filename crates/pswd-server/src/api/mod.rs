@@ -1,6 +1,7 @@
 //! Routes HTTP : traduisent les requêtes en appels à [`Storage`].
 
 mod accounts;
+mod admin;
 mod sharing;
 mod vaults;
 
@@ -75,6 +76,7 @@ pub fn router(storage: Storage, fingerprint: [u8; FINGERPRINT_LEN]) -> Router {
         .route("/v1/members", post(accounts::add_member))
         .route("/v1/devices/keys", post(accounts::new_device_key))
         .route("/v1/devices/self", delete(accounts::disconnect))
+        .route("/v1/server", get(accounts::server_info))
         .route("/v1/accounts", get(sharing::accounts))
         .route("/v1/vaults", get(vaults::list).post(vaults::create))
         .route("/v1/vaults/{id}/members", get(sharing::members))
@@ -87,8 +89,10 @@ pub fn router(storage: Storage, fingerprint: [u8; FINGERPRINT_LEN]) -> Router {
             "/v1/vaults/{id}",
             get(vaults::fetch)
                 .put(vaults::publish)
+                .delete(vaults::delete)
                 .layer(DefaultBodyLimit::max(MAX_VAULT_FILE_LEN)),
         )
+        .merge(admin::routes())
         .layer(DefaultBodyLimit::max(MAX_JSON_LEN))
         .with_state(state)
 }
@@ -135,6 +139,21 @@ async fn client_ip(parts: &mut Parts, state: &Shared) -> Result<IpAddr, ApiError
     Ok(address.ip())
 }
 
+/// Appareil d'un compte administrateur ; les autres reçoivent 403.
+pub(super) struct Admin;
+
+impl FromRequestParts<Shared> for Admin {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &Shared) -> Result<Self, ApiError> {
+        if Caller::from_request_parts(parts, state).await?.is_admin {
+            Ok(Self)
+        } else {
+            Err(ApiError::Forbidden)
+        }
+    }
+}
+
 /// Appareil authentifié par `Authorization: Bearer <jeton>`. Un jeton invalide compte comme un
 /// essai raté pour l'adresse IP.
 impl FromRequestParts<Shared> for Caller {
@@ -162,10 +181,10 @@ pub enum ApiError {
     NotFound,
     /// Le compte a quitté le coffre ou en a été retiré.
     Gone,
-    /// Coffre privé, ou compte invité inconnu.
-    InvalidInvitation,
-    /// Compte déjà membre ou déjà invité.
-    AlreadyMember,
+    /// Coffre privé à partager ou à quitter, coffre commun à supprimer, ou compte inconnu.
+    BadRequest,
+    /// Compte déjà membre ou invité, coffre qui a encore des membres, ou dernier administrateur.
+    Conflict,
     PreconditionFailed,
     PreconditionRequired,
     InvalidVault,
@@ -181,8 +200,12 @@ impl From<StorageError> for ApiError {
         match error {
             StorageError::NotFound => Self::NotFound,
             StorageError::Gone => Self::Gone,
-            StorageError::NotShared | StorageError::UnknownAccount => Self::InvalidInvitation,
-            StorageError::AlreadyMember => Self::AlreadyMember,
+            StorageError::NotShared | StorageError::UnknownAccount | StorageError::SharedVault => {
+                Self::BadRequest
+            }
+            StorageError::AlreadyMember | StorageError::HasMembers | StorageError::LastAdmin => {
+                Self::Conflict
+            }
             StorageError::Conflict => Self::PreconditionFailed,
             StorageError::MissingAccountName => Self::InvalidName,
             other => {
@@ -198,12 +221,10 @@ impl IntoResponse for ApiError {
         let status = match self {
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::Gone => StatusCode::GONE,
-            Self::AlreadyMember => StatusCode::CONFLICT,
+            Self::Conflict => StatusCode::CONFLICT,
             Self::PreconditionFailed => StatusCode::PRECONDITION_FAILED,
             Self::PreconditionRequired => StatusCode::PRECONDITION_REQUIRED,
-            Self::InvalidVault | Self::InvalidName | Self::InvalidInvitation => {
-                StatusCode::BAD_REQUEST
-            }
+            Self::InvalidVault | Self::InvalidName | Self::BadRequest => StatusCode::BAD_REQUEST,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::TooManyAttempts => StatusCode::TOO_MANY_REQUESTS,
@@ -215,15 +236,28 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 pub(crate) mod testing {
+    use std::sync::LazyLock;
+
     use axum::body::Body;
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::Request;
     use http_body_util::BodyExt;
+    use pswd_core::crypto::KdfParams;
+    use pswd_core::{Vault, VaultFile};
     use tower::ServiceExt;
 
     use super::*;
 
     pub(crate) const FINGERPRINT: [u8; FINGERPRINT_LEN] = [7; FINGERPRINT_LEN];
+
+    /// Un `vault.enc` valide, vide.
+    pub(crate) static VAULT: LazyLock<Vec<u8>> = LazyLock::new(|| {
+        let params = KdfParams::new(8 * 1024, 1, 1).unwrap();
+        let password = Secret::new("maître".to_owned());
+        let (file, _) =
+            VaultFile::create(&password, params, Timestamp::from_millis(1_000)).unwrap();
+        file.encrypt(&Vault::new()).unwrap()
+    });
 
     fn with_client_address(app: Router) -> Router {
         app.layer(MockConnectInfo(SocketAddr::from((

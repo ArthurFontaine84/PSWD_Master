@@ -1,6 +1,7 @@
 //! Base SQLite du serveur : coffres opaques et leurs versions, comptes, appareils, certificat.
 
 mod accounts;
+mod admin;
 mod sharing;
 mod vaults;
 
@@ -13,6 +14,10 @@ use zeroize::Zeroizing;
 use crate::tls::Identity;
 
 pub use accounts::{Caller, KeyPurpose, NewDevice};
+pub use admin::{
+    AccountDetails, DeviceSummary, PendingKey, PendingPurpose, Restored, ServerVault,
+    VersionSummary,
+};
 pub use sharing::{AccountSummary, Members, ReceivedInvitation, SentInvitation};
 pub use vaults::{KEPT_VERSIONS, StoredFile, VaultSummary};
 
@@ -37,15 +42,19 @@ const SCHEMA: &str = "
     -- membre, aucun des deux pour un administrateur.
     CREATE TABLE connection_keys (
         secret_hash BLOB PRIMARY KEY,
+        id BLOB NOT NULL UNIQUE,
         account_id BLOB REFERENCES accounts(id),
         account_name TEXT,
         expires_at INTEGER NOT NULL
     );
+    -- Un coffre supprimé (`removed`) n'a plus ni contenu, ni versions, ni membres : il ne reste
+    -- que la trace de ses anciens membres, qui reçoivent 410.
     CREATE TABLE vaults (
         id BLOB PRIMARY KEY,
         name TEXT NOT NULL,
         shared INTEGER NOT NULL,
-        current_version INTEGER
+        current_version INTEGER,
+        removed INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE vault_members (
         vault_id BLOB NOT NULL REFERENCES vaults(id),
@@ -78,6 +87,11 @@ const SCHEMA: &str = "
         certificate BLOB NOT NULL,
         private_key BLOB NOT NULL
     );
+    CREATE TABLE settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        public_address TEXT
+    );
+    INSERT INTO settings (id) VALUES (1);
 ";
 
 #[derive(Debug)]
@@ -92,6 +106,12 @@ pub enum StorageError {
     UnknownAccount,
     /// Le compte invité est déjà membre ou déjà invité.
     AlreadyMember,
+    /// Un coffre commun se quitte : il n'est supprimé que par un administrateur.
+    SharedVault,
+    /// Seul un coffre sans membre reçoit un compte rattaché par un administrateur.
+    HasMembers,
+    /// Le dernier administrateur ne perd pas son rôle et n'est pas supprimé.
+    LastAdmin,
     /// Le coffre a changé depuis la version attendue.
     Conflict,
     /// Clé de connexion inconnue, expirée ou déjà utilisée.
@@ -112,6 +132,9 @@ impl fmt::Display for StorageError {
             Self::NotShared => f.write_str("coffre privé"),
             Self::UnknownAccount => f.write_str("compte inconnu"),
             Self::AlreadyMember => f.write_str("déjà membre ou déjà invité"),
+            Self::SharedVault => f.write_str("coffre commun"),
+            Self::HasMembers => f.write_str("le coffre a encore des membres"),
+            Self::LastAdmin => f.write_str("dernier administrateur"),
             Self::Conflict => f.write_str("le coffre a changé depuis la version lue"),
             Self::InvalidKey => f.write_str("clé de connexion invalide ou expirée"),
             Self::MissingAccountName => f.write_str("nom du compte manquant"),
@@ -162,6 +185,8 @@ impl Storage {
 
     fn init(mut conn: Connection) -> Result<Self, StorageError> {
         conn.pragma_update(None, "foreign_keys", true)?;
+        // Un coffre supprimé est effacé du fichier lui-même, et absent des sauvegardes.
+        conn.pragma_update(None, "secure_delete", true)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let version: i64 = tx.pragma_query_value(None, "user_version", |row| row.get(0))?;
         match version {
@@ -290,6 +315,9 @@ mod tests {
             (StorageError::NotShared, "coffre privé"),
             (StorageError::UnknownAccount, "compte inconnu"),
             (StorageError::AlreadyMember, "déjà membre ou déjà invité"),
+            (StorageError::SharedVault, "coffre commun"),
+            (StorageError::HasMembers, "le coffre a encore des membres"),
+            (StorageError::LastAdmin, "dernier administrateur"),
             (
                 StorageError::Conflict,
                 "le coffre a changé depuis la version lue",

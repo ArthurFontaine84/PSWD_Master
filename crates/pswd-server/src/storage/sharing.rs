@@ -8,17 +8,25 @@ use super::vaults::shared_if_member;
 use super::{Storage, StorageError};
 
 const LIST_ACCOUNTS: &str = "SELECT id, name FROM accounts ORDER BY name, id";
-const ACCOUNT_EXISTS: &str = "SELECT EXISTS (SELECT 1 FROM accounts WHERE id = ?1)";
+pub(super) const ACCOUNT_EXISTS: &str = "SELECT EXISTS (SELECT 1 FROM accounts WHERE id = ?1)";
 const MEMBER_OR_INVITED: &str = "SELECT EXISTS (
          SELECT 1 FROM vault_members WHERE vault_id = ?1 AND account_id = ?2
      ) OR EXISTS (SELECT 1 FROM invitations WHERE vault_id = ?1 AND account_id = ?2)";
 const INSERT_INVITATION: &str = "INSERT INTO invitations
      (id, vault_id, account_id, invited_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5)";
 const INVITED_VAULT: &str = "SELECT vault_id FROM invitations WHERE id = ?1 AND account_id = ?2";
-const INSERT_MEMBER: &str = "INSERT INTO vault_members (vault_id, account_id) VALUES (?1, ?2)";
-const DELETE_MEMBER: &str = "DELETE FROM vault_members WHERE vault_id = ?1 AND account_id = ?2";
-const INSERT_FORMER: &str = "INSERT INTO former_members (vault_id, account_id) VALUES (?1, ?2)";
-const DELETE_FORMER: &str = "DELETE FROM former_members WHERE vault_id = ?1 AND account_id = ?2";
+pub(super) const INSERT_MEMBER: &str =
+    "INSERT INTO vault_members (vault_id, account_id) VALUES (?1, ?2)";
+pub(super) const DELETE_MEMBER: &str =
+    "DELETE FROM vault_members WHERE vault_id = ?1 AND account_id = ?2";
+pub(super) const INSERT_FORMER: &str =
+    "INSERT INTO former_members (vault_id, account_id) VALUES (?1, ?2)";
+pub(super) const DELETE_FORMER: &str =
+    "DELETE FROM former_members WHERE vault_id = ?1 AND account_id = ?2";
+/// Membres d'un coffre, triés par nom.
+pub(super) const LIST_MEMBERS: &str = "SELECT a.id, a.name FROM accounts a
+     JOIN vault_members m ON m.account_id = a.id
+     WHERE m.vault_id = ?1 ORDER BY a.name, a.id";
 const DELETE_INVITATION: &str = "DELETE FROM invitations WHERE id = ?1";
 /// Seuls l'invité et les membres du coffre suppriment une invitation.
 const DELETE_INVITATION_OF: &str = "DELETE FROM invitations
@@ -74,11 +82,7 @@ impl Storage {
     /// [`StorageError::NotFound`] ou [`StorageError::Gone`] si `account` n'est pas membre.
     pub fn members(&self, vault: Uuid, account: Uuid) -> Result<Members, StorageError> {
         shared_if_member(&self.conn, vault, account)?;
-        let mut statement = self.conn.prepare(
-            "SELECT a.id, a.name FROM accounts a
-             JOIN vault_members m ON m.account_id = a.id
-             WHERE m.vault_id = ?1 ORDER BY a.name, a.id",
-        )?;
+        let mut statement = self.conn.prepare(LIST_MEMBERS)?;
         let members = statement
             .query_map(params![vault], self::account)?
             .collect::<Result<_, _>>()?;
@@ -211,11 +215,15 @@ impl Storage {
     }
 }
 
-fn exists(conn: &Connection, query: &str, args: impl Params) -> Result<bool, StorageError> {
+pub(super) fn exists(
+    conn: &Connection,
+    query: &str,
+    args: impl Params,
+) -> Result<bool, StorageError> {
     Ok(conn.query_row(query, args, |row| row.get(0))?)
 }
 
-fn account(row: &Row<'_>) -> rusqlite::Result<AccountSummary> {
+pub(super) fn account(row: &Row<'_>) -> rusqlite::Result<AccountSummary> {
     Ok(AccountSummary {
         id: row.get(0)?,
         name: row.get(1)?,

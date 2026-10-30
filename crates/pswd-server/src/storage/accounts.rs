@@ -64,10 +64,11 @@ impl Storage {
             )?;
         }
         tx.execute(
-            "INSERT INTO connection_keys (secret_hash, account_id, account_name, expires_at)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO connection_keys (secret_hash, id, account_id, account_name, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 secret_hash,
+                Uuid::new_v4(),
                 account_id,
                 account_name,
                 expires_at.as_millis()
@@ -172,11 +173,32 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// Si l'écriture dans la base échoue.
+    /// [`StorageError::NotFound`] si l'appareil n'existe pas.
     pub fn revoke_device(&mut self, device: Uuid) -> Result<(), StorageError> {
-        self.conn
+        let deleted = self
+            .conn
             .execute("DELETE FROM devices WHERE id = ?1", params![device])?;
+        if deleted == 0 {
+            return Err(StorageError::NotFound);
+        }
         Ok(())
+    }
+
+    /// Nom du compte.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] si le compte n'existe pas.
+    pub fn account_name(&self, account: Uuid) -> Result<String, StorageError> {
+        let name = self
+            .conn
+            .query_row(
+                "SELECT name FROM accounts WHERE id = ?1",
+                params![account],
+                |row| row.get(0),
+            )
+            .optional()?;
+        name.ok_or(StorageError::NotFound)
     }
 }
 
@@ -302,8 +324,8 @@ mod tests {
         storage
             .conn
             .execute_batch(
-                "CREATE TABLE connection_keys (secret_hash BLOB PRIMARY KEY, account_id BLOB,
-                 account_name TEXT, expires_at INTEGER NOT NULL)",
+                "CREATE TABLE connection_keys (secret_hash BLOB PRIMARY KEY, id BLOB NOT NULL,
+                 account_id BLOB, account_name TEXT, expires_at INTEGER NOT NULL)",
             )
             .unwrap();
         storage.add_connection_key(b"cle", &purpose, LATER).unwrap();
@@ -427,6 +449,32 @@ mod tests {
         storage.revoke_device(caller.device).unwrap();
         assert_eq!(storage.authenticate(b"jeton").unwrap(), None);
         assert_eq!(storage.authenticate(b"inconnu").unwrap(), None);
+        assert!(matches!(
+            storage.revoke_device(caller.device),
+            Err(StorageError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn account_name_is_read() {
+        let mut storage = storage();
+        storage
+            .add_connection_key(b"cle", &KeyPurpose::Admin, LATER)
+            .unwrap();
+        let caller = storage
+            .redeem_connection_key(b"cle", NOW, &device(b"jeton", Some("Arthur")))
+            .unwrap();
+        assert_eq!(storage.account_name(caller.account).unwrap(), "Arthur");
+        assert!(matches!(
+            storage.account_name(Uuid::new_v4()),
+            Err(StorageError::NotFound)
+        ));
+        storage.break_for_tests("devices");
+        storage.break_for_tests("accounts");
+        assert!(matches!(
+            storage.account_name(caller.account),
+            Err(StorageError::Database(_))
+        ));
     }
 
     #[test]

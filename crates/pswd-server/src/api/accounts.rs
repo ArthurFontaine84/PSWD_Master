@@ -10,7 +10,7 @@ use pswd_core::ConnectionKey;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{ApiError, Shared, digest, issue_connection_key, new_token};
+use super::{Admin, ApiError, Shared, digest, issue_connection_key, new_token};
 use crate::clock::now;
 use crate::storage::{Caller, KeyPurpose, NewDevice, StorageError};
 
@@ -43,6 +43,14 @@ pub(super) struct MemberRequest {
 #[derive(Serialize)]
 struct IssuedKey {
     key: String,
+}
+
+#[derive(Serialize)]
+struct ServerInfo {
+    account_id: Uuid,
+    account_name: String,
+    is_admin: bool,
+    public_address: Option<String>,
 }
 
 /// Nom lisible : ni vide, ni espaces en bordure, ni caractère de contrôle.
@@ -100,12 +108,9 @@ pub(super) async fn connect(
 /// Clé de connexion d'un nouveau membre, réservée aux administrateurs.
 pub(super) async fn add_member(
     State(state): State<Shared>,
-    caller: Caller,
+    _: Admin,
     Json(request): Json<MemberRequest>,
 ) -> Result<Response, ApiError> {
-    if !caller.is_admin {
-        return Err(ApiError::Forbidden);
-    }
     if !is_valid_name(&request.name) {
         return Err(ApiError::InvalidName);
     }
@@ -132,6 +137,22 @@ fn issued(state: &Shared, purpose: &KeyPurpose) -> Result<Response, ApiError> {
         key: key.expose().to_owned(),
     };
     Ok((StatusCode::CREATED, Json(issued)).into_response())
+}
+
+/// Compte de l'appareil, son rôle, et l'adresse publique du serveur : l'appareil les reprend à
+/// chaque échange.
+pub(super) async fn server_info(
+    State(state): State<Shared>,
+    caller: Caller,
+) -> Result<Response, ApiError> {
+    let storage = state.storage();
+    let info = ServerInfo {
+        account_id: caller.account,
+        account_name: storage.account_name(caller.account)?,
+        is_admin: caller.is_admin,
+        public_address: storage.public_address()?,
+    };
+    Ok(Json(info).into_response())
 }
 
 /// Déconnexion : le jeton de l'appareil est révoqué.
@@ -308,6 +329,30 @@ mod tests {
         let listed =
             json(send(&app, request("GET", "/v1/vaults", Some(&second), None)).await).await;
         assert_eq!(listed[0]["id"], vault["id"]);
+    }
+
+    #[tokio::test]
+    async fn devices_learn_their_account_and_the_public_address() {
+        let (app, admin) = app_with_admin().await;
+        let member = add_member(&app, &admin, "Camille").await;
+        let response = send(&app, request("GET", "/v1/server", Some(&member), None)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let info = json(response).await;
+        assert_eq!(info["account_name"], "Camille");
+        assert_eq!(info["is_admin"], false);
+        assert_eq!(info["public_address"], serde_json::Value::Null);
+        assert!(info["account_id"].as_str().unwrap().parse::<Uuid>().is_ok());
+
+        let body = Some(json!({ "public_address": "maison.example.org" }));
+        send(
+            &app,
+            request("PUT", "/v1/admin/settings", Some(&admin), body),
+        )
+        .await;
+        let response = send(&app, request("GET", "/v1/server", Some(&admin), None)).await;
+        let info = json(response).await;
+        assert_eq!(info["is_admin"], true);
+        assert_eq!(info["public_address"], "maison.example.org");
     }
 
     #[tokio::test]

@@ -37,7 +37,7 @@ Reste à faire sur le Mac : build iOS, plugin Swift du presse-papiers, écran ne
 4. Synchro dans la CLI : `connect`, `disconnect`, `add-device`, `status`, `sync` (commande et shell), états des coffres (sauf « retiré », ajouté à la sous-étape 6), téléchargement initial.
 5. Synchro dans PSWD Master : connexion, état de synchro, bouton « Synchroniser » (build Android repoussé, à lancer à la demande).
 6. Coffres communs : inviter, accepter ou refuser, annuler une invitation, quitter (serveur et PSWD Master) ; état « retiré » d'un coffre quitté. Trois blocs : serveur, client (`pswd-infra`, `pswd-app`), interface.
-7. Administration : panneau de PSWD Master (membres, appareils, rôles, suppression, rattachement, versions, adresse publique, sauvegarde du serveur).
+7. Administration : panneau de PSWD Master (membres, appareils, rôles, clés en attente, suppression, rattachement, versions, adresse publique, sauvegarde du serveur) ; suppression d'un coffre privé sur le serveur par son propriétaire. Trois blocs : serveur, client (`pswd-infra`, `pswd-app`), interface.
 8. Installation réelle : paquet `.deb`, `backup` / `restore` du serveur, VM puis PC réel, documentation, mutants.
 
 La v1 synchronisait chaque coffre avec un dépôt Git privé (GitHub). Cette synchro a été retirée au profit du serveur maison ; son code reste dans l'historique du dépôt (jusqu'au commit `233f829`).
@@ -306,11 +306,11 @@ Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): �
 
 **Installation** : un paquet `.deb` (`cargo-deb`), installé par `sudo apt install ./pswd-server_<version>_amd64.deb`, sans aucune étape manuelle. Il installe `/usr/bin/pswd-server`, crée l'utilisateur système `pswd-server` (sans connexion ; le serveur ne tourne jamais en `root`) et le dossier `/var/lib/pswd-server/` (base et certificat, accessibles à ce seul utilisateur), installe et démarre le service, puis affiche l'adresse et la clé administrateur. Configuration : `/etc/pswd-server/config.toml` (port, 8443 par défaut). Une mise à jour (nouveau `.deb`) et `apt remove` conservent les données ; seul `apt purge` les efface.
 
-**Stockage** : une base SQLite (`/var/lib/pswd-server/pswd.db`, moteur intégré à l'exécutable par `rusqlite` `bundled`), créée au premier démarrage. Tout y est, contenu des coffres compris (colonne `BLOB`) : une publication (vérification de la version, nouvelle version, retrait de la plus ancienne au-delà de 15) est une seule transaction, qu'une coupure de courant ne peut pas laisser à moitié faite.
+**Stockage** : une base SQLite (`/var/lib/pswd-server/pswd.db`, moteur intégré à l'exécutable par `rusqlite` `bundled`), créée au premier démarrage. Tout y est, contenu des coffres compris (colonne `BLOB`) : une publication (vérification de la version, nouvelle version, retrait de la plus ancienne au-delà de 15) est une seule transaction, qu'une coupure de courant ne peut pas laisser à moitié faite. La base est ouverte avec `secure_delete` : ce qui est supprimé (un coffre, ses versions) est écrasé dans le fichier, et n'apparaît donc pas dans une sauvegarde.
 
 **Sauvegarde du serveur**
 - `sudo pswd-server backup <dossier>` : copie cohérente de la base et du certificat (sans arrêter le serveur) dans un nouveau fichier `pswd-server-sauvegarde_<AAAA-MM-JJ_HH-MM-SS>.db` ; le dossier doit exister, rien n'est écrasé.
-- Le panneau d'administration de PSWD Master propose « Sauvegarder le serveur » : le serveur produit la même copie et l'application l'enregistre par la fenêtre système. Réservé aux administrateurs (la copie contient les coffres chiffrés de tous les comptes).
+- Le panneau d'administration de PSWD Master propose « Sauvegarder le serveur » : le serveur produit une copie équivalente (`GET /v1/admin/backup`, base SQLite complète, cohérente car faite sous le verrou de la base) et l'application l'enregistre par la fenêtre système sous le même nom. Réservé aux administrateurs (la copie contient les coffres chiffrés de tous les comptes).
 - `sudo pswd-server restore <fichier>` : seulement sur un serveur neuf, sans base existante. Le certificat restauré garde la même empreinte : les appareils se reconnectent sans rien refaire.
 - Pas de sauvegarde automatique : une copie sur le même disque ne protège pas de sa panne.
 
@@ -343,6 +343,27 @@ Autres routes (JSON, 16 Kio au plus par requête) :
 | `POST /v1/members` `{name}` | administrateur | `201 {key}` : clé d'un nouveau membre ; `403` pour un non-administrateur |
 | `POST /v1/devices/keys` | appareil | `201 {key}` : clé d'un appareil de plus pour le même compte |
 | `DELETE /v1/devices/self` | appareil | `204` : déconnexion, le jeton est révoqué |
+| `GET /v1/server` | appareil | `200 {account_id, account_name, is_admin, public_address}` : repris à chaque échange (rôle, adresse publique) |
+| `DELETE /v1/vaults/{id}` | membre | `204` : le propriétaire supprime son coffre privé (effet ci-dessous) ; `400` coffre commun, qui se quitte |
+
+Routes d'administration (`403` pour un appareil dont le compte n'est pas administrateur ; dates en millisecondes depuis 1970) :
+
+| Requête | Effet |
+|---|---|
+| `GET /v1/admin/accounts` | `200 [{id, name, is_admin, devices: [{id, name, created_at}]}]`, triés par nom |
+| `DELETE /v1/admin/accounts/{id}` | `204` : compte supprimé avec ses appareils, ses clés et les invitations qu'il a reçues ou envoyées ; ses coffres restent sur le serveur, ceux dont il était le seul membre n'en ont plus ; `404` ; `409` dernier administrateur |
+| `PUT /v1/admin/accounts/{id}/admin` `{is_admin}` | `204` ; `404` ; `409` retirer son rôle au dernier administrateur. Le rôle est relu à chaque requête : le changement vaut aussitôt |
+| `DELETE /v1/admin/devices/{id}` | `204` : appareil révoqué ; `404` |
+| `GET /v1/admin/keys` | `200 [{id, purpose, name, expires_at}]` : clés de connexion inutilisées et valables ; `purpose` = `admin`, `member` (`name` : compte à créer) ou `device` (`name` : compte de l'appareil) |
+| `DELETE /v1/admin/keys/{id}` | `204` : clé annulée ; `404` |
+| `GET /v1/admin/vaults` | `200 [{id, name, shared, version, members: [{id, name}]}]` : tous les coffres non supprimés, triés par nom ; `version` entière ou `null` |
+| `DELETE /v1/admin/vaults/{id}` | `204` : coffre supprimé (contenu, versions et invitations effacés ; ses membres en gardent la trace et reçoivent `410`) ; `404` |
+| `POST /v1/admin/vaults/{id}/members` `{account_id}` | `204` : rattache un compte à un coffre sans membre ; `400` compte inconnu ; `404` ; `409` le coffre a encore des membres |
+| `DELETE /v1/admin/vaults/{id}/members/{account}` | `204` : membre retiré (il reçoit `410`) ; `404` |
+| `GET /v1/admin/vaults/{id}/versions` | `200 [{version, created_at, size}]`, de la plus récente à la plus ancienne ; `404` |
+| `POST /v1/admin/vaults/{id}/versions/{v}/restore` | `201 {id, name}` : nouveau coffre `<nom>-v<v>` (nom raccourci pour tenir en 64 caractères), même type, mêmes membres, publié en version 1 ; les appareils le reçoivent au prochain échange ; `404` |
+| `PUT /v1/admin/settings` `{public_address}` | `204` ; `null` efface l'adresse ; `400` adresse invalide (vide, plus de 255 caractères, espace, caractère de contrôle, ou l'un de `/ ? # @ \`) |
+| `GET /v1/admin/backup` | `200` + octets : sauvegarde du serveur |
 
 Noms de compte et d'appareil : 1 à 64 caractères, ni espace en bordure, ni caractère de contrôle. Jeton : 32 octets aléatoires en hexadécimal, montré une seule fois.
 
@@ -355,12 +376,12 @@ Le serveur identifie les coffres par son propre identifiant (UUID v4), jamais pa
 - Journal (`journalctl -u pswd-server`) : démarrages, erreurs, accès refusés ; jamais de jeton, de clé ni de contenu.
 - Une requête non autorisée reçoit `401` sans détail : le serveur ne révèle pas l'existence d'un coffre à qui n'y a pas droit.
 
-**Accès** : l'application retient une adresse locale et une adresse publique, essayées dans cet ordre (délai max 5 s). L'adresse publique est renseignée par un administrateur dans le panneau ; chaque appareil la reçoit du serveur. L'accès depuis l'extérieur (redirection de port, VPN) est documenté ; il n'y a pas de relais.
+**Accès** : l'application retient une adresse locale et une adresse publique, essayées dans cet ordre (délai max 5 s). L'adresse publique (nom DNS ou adresse IP, port facultatif) est renseignée par un administrateur dans le panneau ; le serveur ne la devine pas (il est derrière la box). Chaque appareil la reçoit à chaque échange réussi (`GET /v1/server`) et met `server.toml` à jour. Un changement d'adresse est sans risque : le certificat est vérifié quelle que soit l'adresse. Un appareil hors de chez soi qui ne joint plus l'ancienne adresse la reçoit dès qu'il repasse par l'adresse locale : un nom DNS dynamique est conseillé plutôt qu'une adresse IP qui change. L'accès depuis l'extérieur (redirection de port, VPN) est documenté ; il n'y a pas de relais.
 
 **Administration**
 - À l'installation, le serveur affiche une fois son adresse et une **clé administrateur** (clé de connexion, ci-dessous). Le premier appareil qui la présente devient administrateur ; personne d'autre ne le peut.
 - Secours : sur la machine, `pswd-server reset-admin` affiche une nouvelle clé administrateur (aussi si la première a expiré) et annule les précédentes. Présentée, elle crée un **nouveau** compte administrateur ; l'ancien compte reste, à supprimer depuis le panneau. Le serveur se lance par `pswd-server serve` ; les deux sous-commandes prennent `--data-dir` (par défaut `/var/lib/pswd-server`).
-- Le panneau d'administration de PSWD Master permet d'ajouter un membre, de supprimer un compte, de révoquer un appareil, de promouvoir un membre administrateur ou de lui retirer ce rôle, de supprimer un coffre, de rattacher quelqu'un à un coffre sans membre, de restaurer une version, de renseigner l'adresse publique et de sauvegarder le serveur. Le dernier administrateur ne peut pas perdre son rôle ni être supprimé.
+- Le panneau d'administration de PSWD Master permet d'ajouter un membre, de supprimer un compte, de révoquer un appareil, de promouvoir un membre administrateur ou de lui retirer ce rôle, de supprimer un coffre, de rattacher quelqu'un à un coffre sans membre, de restaurer une version, de renseigner l'adresse publique et de sauvegarder le serveur. Le dernier administrateur ne peut pas perdre son rôle ni être supprimé. Il voit aussi les clés de connexion en attente (usage, expiration) et peut les annuler. Restaurer une version sert à rattraper une erreur que la fusion a propagée partout (entrée supprimée, mot de passe d'un coffre commun changé puis oublié) : la restauration crée un nouveau coffre, car remplacer le contenu serait aussitôt défait par la fusion avec les copies des appareils.
 
 **Comptes et appareils**
 - Ajouter un membre produit l'adresse du serveur et une **clé de connexion**, à recopier dans l'application (ordinateur ou mobile). Même format que la clé de récupération (§5 : Base32 Crockford, 52 caractères en 13 groupes, mêmes tolérances), portant 32 octets : 16 octets de secret aléatoire, puis les 16 premiers octets de l'empreinte du certificat. L'application vérifie que le certificat présenté commence par ces octets, puis retient l'empreinte complète : le serveur est vérifié dès la première connexion, sans comparaison manuelle.

@@ -98,6 +98,16 @@ pub(super) async fn publish(
     Ok((StatusCode::NO_CONTENT, [(ETAG, etag(version))]).into_response())
 }
 
+/// Un compte supprime son coffre privé ; un coffre commun se quitte.
+pub(super) async fn delete(
+    State(state): State<Shared>,
+    caller: Caller,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    state.storage().delete_private_vault(id, caller.account)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 fn etag(version: i64) -> String {
     format!("\"{version}\"")
 }
@@ -128,24 +138,13 @@ fn parse_etag(value: &HeaderValue) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::LazyLock;
-
     use axum::Router;
     use axum::body::Body;
     use axum::http::{Method, Request};
-    use pswd_core::crypto::KdfParams;
-    use pswd_core::{MAX_VAULT_FILE_LEN, Secret, Timestamp, Vault};
+    use pswd_core::MAX_VAULT_FILE_LEN;
 
     use super::super::testing::*;
     use super::*;
-
-    static VAULT: LazyLock<Vec<u8>> = LazyLock::new(|| {
-        let params = KdfParams::new(8 * 1024, 1, 1).unwrap();
-        let password = Secret::new("maître".to_owned());
-        let (file, _) =
-            VaultFile::create(&password, params, Timestamp::from_millis(1_000)).unwrap();
-        file.encrypt(&Vault::new()).unwrap()
-    });
 
     fn create_request(token: Option<&str>, name: &str) -> Request<Body> {
         let body = serde_json::json!({ "name": name });
@@ -227,6 +226,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_account_deletes_its_private_vault_only() {
+        let (app, token) = app_with_admin().await;
+        let private = create(&app, &token).await;
+        send(&app, put(private, &token, FIRST, VAULT.clone())).await;
+        let body = serde_json::json!({ "name": "famille", "shared": true });
+        let response = send(
+            &app,
+            request("POST", "/v1/vaults", Some(&token), Some(body)),
+        )
+        .await;
+        let shared = json(response).await["id"].as_str().unwrap().to_owned();
+        let delete =
+            |id: String| request("DELETE", &format!("/v1/vaults/{id}"), Some(&token), None);
+
+        let response = send(&app, delete(shared)).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let response = send(&app, delete(private.to_string())).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            send(&app, get(private, &token)).await.status(),
+            StatusCode::GONE
+        );
+        let response = send(&app, delete(Uuid::new_v4().to_string())).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn vaults_require_a_token() {
         let (app, token) = app_with_admin().await;
         let id = create(&app, &token).await;
@@ -235,6 +261,7 @@ mod tests {
             request("GET", "/v1/vaults", None, None),
             request("GET", &format!("/v1/vaults/{id}"), None, None),
             put(id, "faux", FIRST, VAULT.clone()),
+            request("DELETE", &format!("/v1/vaults/{id}"), None, None),
         ] {
             assert_eq!(send(&app, request).await.status(), StatusCode::UNAUTHORIZED);
         }

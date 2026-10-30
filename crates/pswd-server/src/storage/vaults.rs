@@ -127,7 +127,7 @@ impl Storage {
     }
 }
 
-fn summary(row: &Row<'_>) -> rusqlite::Result<VaultSummary> {
+pub(super) fn summary(row: &Row<'_>) -> rusqlite::Result<VaultSummary> {
     Ok(VaultSummary {
         id: row.get(0)?,
         name: row.get(1)?,
