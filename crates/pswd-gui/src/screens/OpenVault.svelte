@@ -8,6 +8,8 @@
   import EntryList from "../components/EntryList.svelte";
   import Icon from "../components/Icon.svelte";
   import ImportEntries from "../components/ImportEntries.svelte";
+  import LeaveVault from "../components/LeaveVault.svelte";
+  import Members from "../components/Members.svelte";
   import {
     addEntry,
     listEntries,
@@ -57,8 +59,9 @@
   let revision = $state(0);
   let managing = $state(false);
   let menuAnchor: HTMLElement | undefined = $state();
+  type Panel = "password" | "import" | "delete" | "members" | "leave";
   /** Action de gestion ouverte à la place du détail. */
-  let panel = $state<"password" | "import" | "delete" | null>(null);
+  let panel = $state<Panel | null>(null);
   /** Écran large : les entrées sont paginées pour que liste et détail tiennent sans défiler. */
   let wide = $state(false);
   let windowHeight = $state(0);
@@ -75,12 +78,23 @@
   let syncing = $state(false);
   /** Dernier problème de synchro, effacé par la synchro suivante réussie. */
   let syncNotice = $state<string | null>(null);
+  /** Coffre commun publié sur le serveur : ses membres se gèrent ici. */
+  let sharing = $state(false);
 
   // Sans état lisible, le coffre reste utilisable en local, sans bouton de synchro.
   serverStatus().then(
-    (status) => (connected = status.address !== null),
+    (status) => {
+      connected = status.address !== null;
+      sharing =
+        connected && status.vaults.some(({ name, shared, state }) => name === vault.name && shared && state === "published");
+    },
     () => undefined,
   );
+
+  function left() {
+    sharing = false;
+    panel = null;
+  }
 
   /** Fin d'une synchro : les modifications reçues du serveur sont affichées. */
   function synced(report: SyncReport) {
@@ -109,7 +123,7 @@
   }
 
   /** Une seule chose à la fois à la place du détail. */
-  function show(next: "password" | "import" | "delete") {
+  function show(next: Panel) {
     managing = false;
     editor = null;
     panel = next;
@@ -268,6 +282,12 @@
           >
             <button type="button" role="menuitem" onclick={() => show("password")}>{texts.changePassword}</button>
             <button type="button" role="menuitem" onclick={() => show("import")}>{texts.importCsv}</button>
+            {#if sharing}
+              <button type="button" role="menuitem" onclick={() => show("members")}>{texts.members}</button>
+              <button type="button" role="menuitem" class="danger-item" onclick={() => show("leave")}>
+                {texts.leaveVault}
+              </button>
+            {/if}
             <button type="button" role="menuitem" class="danger-item" onclick={() => show("delete")}>
               {texts.deleteVault}
             </button>
@@ -344,6 +364,10 @@
             <ChangePassword onClose={() => (panel = null)} {onExpired} />
           {:else if panel === "import"}
             <ImportEntries onImported={() => (revision += 1)} onClose={() => (panel = null)} {onExpired} />
+          {:else if panel === "members"}
+            <Members name={vault.name} onClose={() => (panel = null)} />
+          {:else if panel === "leave"}
+            <LeaveVault name={vault.name} onLeft={left} onClose={() => (panel = null)} />
           {:else if panel === "delete"}
             <DeleteVault name={vault.name} {onDeleted} onClose={() => (panel = null)} />
           {:else if editor}

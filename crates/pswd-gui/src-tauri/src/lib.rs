@@ -14,6 +14,7 @@ mod error;
 mod files;
 mod server;
 mod settings;
+mod sharing;
 mod state;
 mod sync;
 
@@ -77,6 +78,13 @@ pub fn run() {
             commands::sync_server,
             commands::add_device_key,
             commands::disconnect_server,
+            commands::list_accounts,
+            commands::vault_members,
+            commands::invite_member,
+            commands::list_invitations,
+            commands::accept_invitation,
+            commands::delete_invitation,
+            commands::leave_vault,
             commands::sync_vault
         ])
         .run(tauri::generate_context!());

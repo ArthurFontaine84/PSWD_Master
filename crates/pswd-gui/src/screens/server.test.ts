@@ -22,7 +22,7 @@ vi.mock("../lib/api", () => ({
 
 const disconnected: ServerStatus = { address: null, vaults: [] };
 const connected: ServerStatus = { address: "pswd.local:8443", vaults: [] };
-const nothing: Exchange = { downloaded: [], notDownloaded: [], published: [], notPublished: [] };
+const nothing: Exchange = { removed: [], downloaded: [], notDownloaded: [], published: [], notPublished: [] };
 
 beforeEach(() => {
   vi.resetAllMocks();

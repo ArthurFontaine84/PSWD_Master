@@ -20,6 +20,8 @@ export function syncMessage(report: SyncReport): string {
       return texts.syncNotConnected;
     case "detached":
       return texts.syncDetached;
+    case "removed":
+      return texts.syncRemoved;
     case "offline":
       return texts.syncOffline(detail);
     case "conflict":
@@ -38,6 +40,7 @@ export function syncProblem(report: SyncReport): string | null {
 
 export function exchangeOutcome(exchange: Exchange): Outcome {
   const done = [
+    ...exchange.removed.map((name) => texts.removedByServer(name)),
     ...exchange.downloaded.map(({ name, localName }) => texts.downloaded(name, localName)),
     ...exchange.published.map((name) => texts.published(name)),
   ];

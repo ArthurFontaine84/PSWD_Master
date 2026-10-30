@@ -6,7 +6,7 @@ function report(state: SyncState, detail: string | null = null): SyncReport {
   return { vault: "perso", state, detail, changed: false };
 }
 
-const nothing: Exchange = { downloaded: [], notDownloaded: [], published: [], notPublished: [] };
+const nothing: Exchange = { removed: [], downloaded: [], notDownloaded: [], published: [], notPublished: [] };
 
 describe("syncProblem", () => {
   it("is silent when there is nothing to report", () => {
@@ -18,6 +18,9 @@ describe("syncProblem", () => {
   it("explains each problem", () => {
     expect(syncProblem(report("offline", "serveur injoignable"))).toBe(
       "Synchro impossible : serveur injoignable. Les modifications seront publiées plus tard.",
+    );
+    expect(syncProblem(report("removed"))).toBe(
+      "Coffre retiré du serveur : il reste utilisable sur cet appareil, sans être synchronisé.",
     );
     expect(syncProblem(report("conflict"))).toBe(
       "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",
@@ -51,6 +54,7 @@ describe("exchangeOutcome", () => {
 
   it("lists what was exchanged, then what failed", () => {
     const exchange: Exchange = {
+      removed: ["ancien"],
       downloaded: [
         { name: "perso", localName: "perso" },
         { name: "travail", localName: "travail-0123abcd" },
@@ -61,6 +65,7 @@ describe("exchangeOutcome", () => {
     };
     expect(exchangeOutcome(exchange)).toEqual({
       done: [
+        "Coffre « ancien » retiré du serveur : gardé sur cet appareil, il n'est plus synchronisé.",
         "Coffre « perso » téléchargé.",
         "Coffre « travail » téléchargé sous le nom « travail-0123abcd » : ce nom était déjà pris.",
         "Coffre « notes » publié.",

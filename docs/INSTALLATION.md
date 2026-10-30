@@ -195,7 +195,21 @@ Ces emplacements sont communs à `pswd` et à PSWD Master sur un ordinateur ; le
 
 **Venant d'une version précédente** : retirer les lignes `url = …` et `default_vault = …` de `config.toml` (sinon : `configuration invalide`). Les dossiers `repo.git` et les jetons `pswd` du trousseau ne servent plus et peuvent être supprimés.
 
-## 8. En cas de problème
+## 8. Serveur local pour le développement
+
+> ⚠ Réservé au développement : le serveur tourne au premier plan, sur la machine de développement, et n'écoute que sur elle. L'installation réelle (paquet `.deb`, service `systemd`) est décrite dans `docs/SPEC.md` § 11.
+
+Depuis le dossier du projet (`--data-dir` est obligatoire hors Linux : le dossier par défaut est `/var/lib/pswd-server`) :
+
+```sh
+mkdir C:\pswd-test-server
+cargo run -p pswd-server -- --data-dir C:\pswd-test-server reset-admin   # crée la base et le certificat, affiche une clé administrateur
+cargo run -p pswd-server -- --data-dir C:\pswd-test-server serve         # lance le serveur sur 127.0.0.1:8443 ; Ctrl+C pour l'arrêter
+```
+
+La clé administrateur ne sert qu'une fois et expire dans 7 jours ; `reset-admin` en donne une nouvelle. Dans PSWD Master, écran **Serveur** : adresse `127.0.0.1` (le port 8443 est ajouté), puis la clé. À la connexion, tous les coffres de l'appareil sont publiés sur ce serveur : faire d'abord une sauvegarde (§ 6) si des coffres réels s'y trouvent. Pour repartir de zéro, arrêter le serveur et vider le dossier.
+
+## 9. En cas de problème
 
 | Message | Cause et solution |
 |---|---|

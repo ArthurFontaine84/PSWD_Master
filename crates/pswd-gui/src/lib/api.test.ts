@@ -37,6 +37,13 @@ import {
   addDeviceKey,
   disconnectServer,
   syncVault,
+  listAccounts,
+  vaultMembers,
+  inviteMember,
+  listInvitations,
+  acceptInvitation,
+  deleteInvitation,
+  leaveVault,
   type EntryInput,
   type SyncReport,
 } from "./api";
@@ -98,10 +105,17 @@ describe("api", () => {
     await syncServer();
     await addDeviceKey();
     await disconnectServer(false);
+    await listAccounts();
+    await vaultMembers("famille");
+    await inviteMember("famille", "a1");
+    await listInvitations();
+    await acceptInvitation("i1");
+    await deleteInvitation("i1");
+    await leaveVault("famille");
     await syncVault();
     expect(vi.mocked(invoke).mock.calls).toEqual([
       ["list_vaults"],
-      ["create_vault", { name: "perso", password: "maître" }],
+      ["create_vault", { name: "perso", password: "maître", shared: false }],
       ["unlock_vault", { name: "perso", password: "maître" }],
       ["lock_vault"],
       ["current_vault"],
@@ -132,6 +146,13 @@ describe("api", () => {
       ["sync_server"],
       ["add_device_key"],
       ["disconnect_server", { keepLocal: false }],
+      ["list_accounts"],
+      ["vault_members", { vault: "famille" }],
+      ["invite_member", { vault: "famille", account: "a1" }],
+      ["list_invitations"],
+      ["accept_invitation", { id: "i1" }],
+      ["delete_invitation", { id: "i1" }],
+      ["leave_vault", { vault: "famille" }],
       ["sync_vault"],
     ]);
   });

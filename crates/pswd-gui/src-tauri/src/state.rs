@@ -115,11 +115,20 @@ impl AppState {
 
     /// Crée le coffre et le garde ouvert. Renvoie aussi sa clé de récupération, à montrer une
     /// seule fois.
-    pub fn create(&self, name: &str, password: &Secret) -> Result<(VaultInfo, Secret), UiError> {
+    /// `shared` en fait un coffre commun, à partager avec d'autres comptes du serveur.
+    pub fn create(
+        &self,
+        name: &str,
+        password: &Secret,
+        shared: bool,
+    ) -> Result<(VaultInfo, Secret), UiError> {
         let timeout = self.auto_lock()?;
-        let (session, recovery_key) =
-            self.vaults
-                .create(name, password, self.kdf, (self.clock)())?;
+        let now = (self.clock)();
+        let (session, recovery_key) = if shared {
+            self.vaults.create_shared(name, password, self.kdf, now)?
+        } else {
+            self.vaults.create(name, password, self.kdf, now)?
+        };
         let vault = self.keep_open(name, session, timeout);
         Ok((vault, recovery_key.encode()))
     }
@@ -657,7 +666,9 @@ mod tests {
         let state = AppState::new(vaults_in(&dir), clipboard, notifier);
         state.notifier.vault_locked();
         assert_eq!(locks.load(Ordering::SeqCst), 1);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.lock();
         assert_eq!(
             state.unlock("perso", &secret("Maître-2026!")),
@@ -669,7 +680,9 @@ mod tests {
     fn created_vault_stays_open_and_gives_its_recovery_key() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        let (vault, recovery_key) = state.create("perso", &secret("Maître-2026!")).unwrap();
+        let (vault, recovery_key) = state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         assert_eq!(vault, info("perso", 0));
         assert_eq!(recovery_key.expose().split('-').count(), 13);
         assert_eq!(state.current(), Some(info("perso", 0)));
@@ -680,11 +693,13 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         assert_eq!(
-            state.create("perso", &secret("")).err(),
+            state.create("perso", &secret(""), false).err(),
             Some(UiError::code("passwordTooShort"))
         );
         assert_eq!(
-            state.create("perso", &secret("mot de passe maître")).err(),
+            state
+                .create("perso", &secret("mot de passe maître"), false)
+                .err(),
             Some(UiError::code("passwordTooSimple"))
         );
         assert_eq!(state.current(), None);
@@ -725,8 +740,12 @@ mod tests {
     fn only_one_vault_is_open_at_a_time() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
-        state.create("travail", &secret("Autre-mot-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
+        state
+            .create("travail", &secret("Autre-mot-2026!"), false)
+            .unwrap();
         assert_eq!(state.current(), Some(info("travail", 0)));
         state.unlock("perso", &secret("Maître-2026!")).unwrap();
         assert_eq!(state.current(), Some(info("perso", 0)));
@@ -736,7 +755,9 @@ mod tests {
     fn locking_closes_the_vault_without_notification() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, Some(Duration::from_millis(50)));
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.lock();
         state.lock();
         thread::sleep(Duration::from_millis(200));
@@ -748,7 +769,9 @@ mod tests {
     fn idle_vault_locks_itself_and_says_so() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, Some(Duration::from_millis(30)));
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         thread::sleep(Duration::from_millis(300));
         assert_eq!(state.current(), None);
         assert_eq!(count.load(Ordering::SeqCst), 1);
@@ -767,7 +790,9 @@ mod tests {
     fn vault_locks_at_once_in_background_when_the_delay_is_zero() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         lock_in_background_after(&state, 0);
         state.hide();
         thread::sleep(Duration::from_millis(300));
@@ -779,7 +804,9 @@ mod tests {
     fn vault_stays_open_after_a_short_absence() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.hide();
         advance(59_999);
         assert_eq!(state.show(), Some(info("perso", 0)));
@@ -792,7 +819,9 @@ mod tests {
     fn long_absence_locks_the_vault_on_return() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.hide();
         advance(60_000);
         assert_eq!(state.show(), None);
@@ -804,7 +833,9 @@ mod tests {
     fn clock_going_back_locks_the_vault_on_return() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.hide();
         advance(-1);
         assert_eq!(state.show(), None);
@@ -814,7 +845,9 @@ mod tests {
     fn hiding_twice_keeps_the_first_moment() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.hide();
         advance(30_000);
         state.hide();
@@ -828,7 +861,9 @@ mod tests {
         let (state, _) = state_in(&dir, None);
         state.hide();
         assert_eq!(state.show(), None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         advance(3_600_000);
         assert_eq!(state.show(), Some(info("perso", 0)));
     }
@@ -838,7 +873,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         assert_eq!(state.show(), None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         advance(3_600_000);
         assert_eq!(state.show(), Some(info("perso", 0)));
     }
@@ -847,7 +884,9 @@ mod tests {
     fn unreadable_configuration_locks_at_once_in_background() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         std::fs::write(dir.path().join("config").join("config.toml"), "couleur = 1").unwrap();
         state.hide();
         thread::sleep(Duration::from_millis(300));
@@ -862,7 +901,9 @@ mod tests {
         let clipboard = Box::new(FakeClipboard::default());
         let (notifier, count, _) = notifier();
         let state = AppState::new(vaults_in(&dir), clipboard, notifier);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         lock_in_background_after(&state, 0);
         state.hide();
         thread::sleep(Duration::from_millis(300));
@@ -874,7 +915,9 @@ mod tests {
     fn default_delay_comes_from_the_configuration() {
         let dir = TempDir::new().unwrap();
         let (state, count) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         thread::sleep(Duration::from_millis(100));
         assert_eq!(state.current(), Some(info("perso", 0)));
         assert_eq!(count.load(Ordering::SeqCst), 0);
@@ -884,7 +927,9 @@ mod tests {
     fn unreadable_configuration_keeps_the_vault_closed() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.lock();
         let config = dir.path().join("config").join("config.toml");
         let text = std::fs::read_to_string(&config).unwrap();
@@ -1242,7 +1287,9 @@ mod tests {
     fn master_password_is_changed_after_checking_the_current_one() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         assert_eq!(
             state
                 .change_password(&secret("faux"), &secret("Nouveau-2026!"))
@@ -1271,7 +1318,9 @@ mod tests {
     fn recovery_key_sets_a_new_password_and_opens_the_vault() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        let (_, key) = state.create("perso", &secret("Oublié-mot-2026!")).unwrap();
+        let (_, key) = state
+            .create("perso", &secret("Oublié-mot-2026!"), false)
+            .unwrap();
         state.lock();
         let other = secret(&key.expose().to_lowercase().replace('-', " "));
         assert_eq!(
@@ -1290,7 +1339,9 @@ mod tests {
     fn recovery_errors_are_reported() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        let (_, key) = state.create("perso", &secret("Maître-2026!")).unwrap();
+        let (_, key) = state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         state.lock();
         assert_eq!(
             state
@@ -1317,9 +1368,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         state
-            .create("travail", &secret("Travail-mot-2026!"))
+            .create("travail", &secret("Travail-mot-2026!"), false)
             .unwrap();
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         assert_eq!(
             state.delete_vault("perso", "Perso").err(),
             Some(UiError::code("confirmationMismatch"))
@@ -1358,9 +1411,15 @@ mod tests {
     fn vaults_are_backed_up_to_a_file_then_restored() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
-        state.create("travail", &secret("Maître-2026!")).unwrap();
-        state.create("famille", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
+        state
+            .create("travail", &secret("Maître-2026!"), false)
+            .unwrap();
+        state
+            .create("famille", &secret("Maître-2026!"), false)
+            .unwrap();
         assert_eq!(
             state.backup_file_name(),
             "pswd-sauvegarde_1970-01-01_00-00-01.pswd"
@@ -1472,7 +1531,9 @@ mod tests {
     fn a_vault_of_a_disconnected_device_is_not_synced() {
         let dir = TempDir::new().unwrap();
         let (state, _, reports) = build(&dir, None, FakeClipboard::default());
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         assert_eq!(
             next_report(&reports),
             report("perso", SyncState::NotConnected, false)
@@ -1484,7 +1545,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (pc, _, pc_reports) = build(&dir, None, FakeClipboard::default());
         connect_admin(&pc);
-        pc.create("perso", &secret("Maître-2026!")).unwrap();
+        pc.create("perso", &secret("Maître-2026!"), false).unwrap();
         assert_eq!(
             next_report(&pc_reports),
             report("perso", SyncState::Synced, false)
@@ -1530,7 +1591,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _, reports) = build(&dir, None, FakeClipboard::default());
         connect_admin(&state);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         next_report(&reports);
         assert_eq!(published_version(&state).as_deref(), Some("\"1\""));
 
@@ -1553,7 +1616,9 @@ mod tests {
     fn a_synced_copy_is_given_back_only_to_an_unchanged_vault() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
-        state.create("perso", &secret("Maître-2026!")).unwrap();
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
         let _no_background_sync = state.exclusive();
         let (opening, mut copy) = {
             let open = state.open();

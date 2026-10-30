@@ -1,6 +1,6 @@
 //! Connexion de l'appareil à un serveur, depuis l'écran « Serveur » (SPEC §11).
 
-use pswd_app::{AppError, KeptReason, VaultState};
+use pswd_app::{AppError, Downloads, KeptReason, VaultState};
 use pswd_core::{ConnectionKey, Secret};
 use serde::Serialize;
 
@@ -18,6 +18,8 @@ pub struct ServerStatus {
 struct VaultStatus {
     name: String,
     state: &'static str,
+    /// Coffre commun, à partager avec d'autres comptes du serveur.
+    shared: bool,
 }
 
 /// Coffres téléchargés et publiés par un échange avec le serveur.
@@ -69,11 +71,13 @@ impl AppState {
     /// Le serveur de l'appareil et l'état de chaque coffre.
     pub fn server_status(&self) -> Result<ServerStatus, UiError> {
         let address = self.vaults.server()?.map(|server| server.local_address);
+        let config = self.vaults.config()?;
         let vaults = self
             .vaults
             .vault_states()?
             .into_iter()
             .map(|(name, state)| VaultStatus {
+                shared: config.vault(&name).is_ok_and(|vault| vault.shared),
                 name,
                 state: state_name(state),
             })
@@ -104,16 +108,7 @@ impl AppState {
     pub fn exchange(&self) -> Result<Exchange, UiError> {
         let _one_at_a_time = self.exclusive();
         let downloads = self.vaults.download_vaults().map_err(server_error)?;
-        let mut exchange = Exchange {
-            removed: downloads.removed,
-            ..Exchange::default()
-        };
-        for (name, result) in downloads.downloaded {
-            match result {
-                Ok(local_name) => exchange.downloaded.push(Downloaded { name, local_name }),
-                Err(error) => exchange.not_downloaded.push(failure(name, &error)),
-            }
-        }
+        let mut exchange = Exchange::from(downloads);
         for (name, result) in self.vaults.publish_vaults().map_err(server_error)? {
             match result {
                 Ok(()) => exchange.published.push(name),
@@ -153,6 +148,22 @@ impl AppState {
     }
 }
 
+impl From<Downloads> for Exchange {
+    fn from(downloads: Downloads) -> Self {
+        let mut exchange = Self {
+            removed: downloads.removed,
+            ..Self::default()
+        };
+        for (name, result) in downloads.downloaded {
+            match result {
+                Ok(local_name) => exchange.downloaded.push(Downloaded { name, local_name }),
+                Err(error) => exchange.not_downloaded.push(failure(name, &error)),
+            }
+        }
+        exchange
+    }
+}
+
 fn state_name(state: VaultState) -> &'static str {
     match state {
         VaultState::ToPublish => "toPublish",
@@ -170,7 +181,7 @@ fn failure(name: String, error: &AppError) -> Failure {
 }
 
 /// Une erreur de port vient ici du serveur, pas d'un fichier.
-fn server_error(error: AppError) -> UiError {
+pub(crate) fn server_error(error: AppError) -> UiError {
     match error {
         AppError::Port(error) => UiError::new("serverError", error.to_string()),
         other => other.into(),
@@ -234,7 +245,7 @@ mod tests {
     }
 
     fn create(state: &AppState, name: &str) {
-        state.create(name, &secret(PASSWORD)).unwrap();
+        state.create(name, &secret(PASSWORD), false).unwrap();
         state.lock();
     }
 
@@ -288,7 +299,7 @@ mod tests {
             status(&state),
             json!({
                 "address": null,
-                "vaults": [{ "name": "perso", "state": "toPublish" }],
+                "vaults": [{ "name": "perso", "state": "toPublish", "shared": false }],
             })
         );
         let server = connect_admin(&state);

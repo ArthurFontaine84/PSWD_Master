@@ -36,6 +36,13 @@ const COMMANDS: &[&str] = &[
     "sync_server",
     "add_device_key",
     "disconnect_server",
+    "list_accounts",
+    "vault_members",
+    "invite_member",
+    "list_invitations",
+    "accept_invitation",
+    "delete_invitation",
+    "leave_vault",
     "sync_vault",
 ];
 

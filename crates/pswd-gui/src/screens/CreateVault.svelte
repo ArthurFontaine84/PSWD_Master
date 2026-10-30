@@ -16,6 +16,7 @@
   let name = $state("");
   let password = $state("");
   let confirmation = $state("");
+  let shared = $state(false);
   let problem = $state<string | null>(null);
   let busy = $state(false);
 
@@ -31,7 +32,7 @@
     confirmation = "";
     busy = true;
     try {
-      onCreated(await createVault(name, typed));
+      onCreated(await createVault(name, typed, shared));
     } catch (error) {
       problem = errorMessage(error);
     } finally {
@@ -55,6 +56,11 @@
       autocomplete="new-password"
     />
     <PasswordInput bind:value={confirmation} label={texts.confirmation} autocomplete="new-password" />
+    <label class="check">
+      <input type="checkbox" bind:checked={shared} />
+      {texts.sharedVault}
+    </label>
+    <small>{texts.sharedVaultHint}</small>
     {#if problem}
       <p role="alert">{problem}</p>
     {/if}

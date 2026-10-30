@@ -6,6 +6,7 @@
 use pswd_core::Secret;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
+use uuid::Uuid;
 
 use crate::editing::{EntryInput, HistoryItem};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
@@ -13,6 +14,7 @@ use crate::error::UiError;
 use crate::files;
 use crate::server::{Disconnection, Exchange, ServerStatus};
 use crate::settings::Settings;
+use crate::sharing::{Invitation, Member, Members};
 use crate::state::{AppState, Notifier, VaultInfo};
 use crate::sync::SyncReport;
 
@@ -50,9 +52,10 @@ pub fn create_vault(
     state: State<'_, AppState>,
     name: String,
     password: String,
+    shared: bool,
 ) -> Result<CreatedVault, UiError> {
     let password = Secret::new(password);
-    let (vault, recovery_key) = state.create(&name, &password)?;
+    let (vault, recovery_key) = state.create(&name, &password, shared)?;
     Ok(CreatedVault {
         vault,
         recovery_key: recovery_key.expose().to_owned(),
@@ -282,6 +285,57 @@ pub async fn disconnect_server<R: Runtime>(
     in_background(app, move |state| state.disconnect(keep_local)).await
 }
 
+/// Comptes du serveur, pour choisir qui inviter dans un coffre commun.
+#[tauri::command]
+pub async fn list_accounts<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Member>, UiError> {
+    in_background(app, AppState::accounts).await
+}
+
+/// Membres du coffre commun `vault` et invitations en attente.
+#[tauri::command]
+pub async fn vault_members<R: Runtime>(
+    app: AppHandle<R>,
+    vault: String,
+) -> Result<Members, UiError> {
+    in_background(app, move |state| state.members(&vault)).await
+}
+
+#[tauri::command]
+pub async fn invite_member<R: Runtime>(
+    app: AppHandle<R>,
+    vault: String,
+    account: Uuid,
+) -> Result<(), UiError> {
+    in_background(app, move |state| state.invite(&vault, account)).await
+}
+
+/// Invitations reçues par le compte de l'appareil.
+#[tauri::command]
+pub async fn list_invitations<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Invitation>, UiError> {
+    in_background(app, AppState::invitations).await
+}
+
+/// Accepte l'invitation et télécharge le coffre.
+#[tauri::command]
+pub async fn accept_invitation<R: Runtime>(
+    app: AppHandle<R>,
+    id: Uuid,
+) -> Result<Exchange, UiError> {
+    in_background(app, move |state| state.accept_invitation(id)).await
+}
+
+/// Refuse une invitation reçue, ou annule une invitation envoyée.
+#[tauri::command]
+pub async fn delete_invitation<R: Runtime>(app: AppHandle<R>, id: Uuid) -> Result<(), UiError> {
+    in_background(app, move |state| state.delete_invitation(id)).await
+}
+
+/// Quitte le coffre commun `vault` ; la copie locale reste, retirée.
+#[tauri::command]
+pub async fn leave_vault<R: Runtime>(app: AppHandle<R>, vault: String) -> Result<(), UiError> {
+    in_background(app, move |state| state.leave(&vault)).await
+}
+
 /// Synchronise le coffre ouvert (bouton « Synchroniser ») et renvoie le résultat.
 #[tauri::command]
 pub async fn sync_vault<R: Runtime>(app: AppHandle<R>) -> Result<SyncReport, UiError> {
@@ -399,6 +453,13 @@ mod tests {
                     sync_server,
                     add_device_key,
                     disconnect_server,
+                    list_accounts,
+                    vault_members,
+                    invite_member,
+                    list_invitations,
+                    accept_invitation,
+                    delete_invitation,
+                    leave_vault,
                     sync_vault,
                     not_allowed
                 ])
@@ -435,7 +496,7 @@ mod tests {
         fn create(&self, name: &str, password: &str) -> Result<Value, Value> {
             self.call(
                 "create_vault",
-                json!({ "name": name, "password": password }),
+                json!({ "name": name, "password": password, "shared": false }),
             )
         }
 
@@ -806,6 +867,53 @@ mod tests {
         assert_eq!(
             app.call("add_device_key", json!({})),
             Err(json!({ "code": "notConnected", "detail": null }))
+        );
+    }
+
+    #[test]
+    fn shared_vaults_are_managed_through_their_commands() {
+        let app = TestApp::new(None);
+        let server = TestServer::start();
+        let connection = json!({
+            "address": server.address,
+            "key": server.admin_key.expose(),
+            "deviceName": "PC",
+            "accountName": "Arthur",
+        });
+        app.call("connect_server", connection).unwrap();
+        app.call(
+            "create_vault",
+            json!({ "name": "famille", "password": "Maître-2026!", "shared": true }),
+        )
+        .unwrap();
+        app.call("sync_server", json!({})).unwrap();
+        let accounts = app.call("list_accounts", json!({})).unwrap();
+        assert_eq!(accounts[0]["name"], "Arthur");
+        let famille = json!({ "vault": "famille" });
+        let members = app.call("vault_members", famille.clone()).unwrap();
+        assert_eq!(members, json!({ "members": accounts, "invitations": [] }));
+        assert_eq!(app.call("list_invitations", json!({})), Ok(json!([])));
+        let nobody = json!({ "id": Uuid::nil() });
+        let unknown = |result: Result<Value, Value>| result.unwrap_err()["code"].clone();
+        assert_eq!(
+            unknown(app.call(
+                "invite_member",
+                json!({ "vault": "famille", "account": Uuid::nil() })
+            )),
+            "serverError"
+        );
+        assert_eq!(
+            unknown(app.call("accept_invitation", nobody.clone())),
+            "serverError"
+        );
+        assert_eq!(
+            unknown(app.call("delete_invitation", nobody)),
+            "serverError"
+        );
+        assert_eq!(app.call("leave_vault", famille.clone()), Ok(Value::Null));
+        assert_eq!(
+            app.call("vault_members", famille),
+            Err(json!({ "code": "notPublished", "detail": "famille" }))
         );
     }
 

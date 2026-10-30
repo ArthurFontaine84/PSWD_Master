@@ -84,12 +84,19 @@ export interface CreatedVault {
 }
 
 /** État d'un coffre vis-à-vis du serveur de l'appareil. */
-export type VaultServerState = "toPublish" | "published" | "detached";
+export type VaultServerState = "toPublish" | "published" | "detached" | "removed";
+
+export interface VaultStatus {
+  name: string;
+  state: VaultServerState;
+  /** Coffre commun, à partager avec d'autres comptes du serveur. */
+  shared: boolean;
+}
 
 export interface ServerStatus {
   /** `null` si l'appareil n'est connecté à aucun serveur. */
   address: string | null;
-  vaults: { name: string; state: VaultServerState }[];
+  vaults: VaultStatus[];
 }
 
 /** Échec pour un coffre ; `reason` est un message du backend. */
@@ -100,6 +107,8 @@ export interface VaultFailure {
 
 /** Résultat d'un échange avec le serveur. */
 export interface Exchange {
+  /** Coffres que le serveur a retirés ; gardés sur cet appareil. */
+  removed: string[];
   /** `name` sur le serveur, `localName` sur cet appareil (différent si le nom était pris). */
   downloaded: { name: string; localName: string }[];
   notDownloaded: VaultFailure[];
@@ -116,7 +125,34 @@ export interface Disconnection {
   kept: { name: string; reason: string | null }[];
 }
 
-export type SyncState = "synced" | "notConnected" | "detached" | "offline" | "conflict" | "rejected" | "failed";
+export type SyncState =
+  | "synced"
+  | "notConnected"
+  | "detached"
+  | "removed"
+  | "offline"
+  | "conflict"
+  | "rejected"
+  | "failed";
+
+/** Un compte du serveur. */
+export interface Account {
+  id: string;
+  name: string;
+}
+
+/** Membres d'un coffre commun et invitations en attente. */
+export interface Members {
+  members: Account[];
+  invitations: { id: string; account: Account }[];
+}
+
+/** Invitation reçue par le compte de l'appareil. */
+export interface Invitation {
+  id: string;
+  vaultName: string;
+  invitedBy: string;
+}
 
 /** Résultat de la synchro du coffre ouvert. */
 export interface SyncReport {
@@ -131,8 +167,9 @@ export function listVaults(): Promise<string[]> {
   return invoke<string[]>("list_vaults");
 }
 
-export function createVault(name: string, password: string): Promise<CreatedVault> {
-  return invoke<CreatedVault>("create_vault", { name, password });
+/** `shared` en fait un coffre commun, à partager avec d'autres comptes du serveur. */
+export function createVault(name: string, password: string, shared = false): Promise<CreatedVault> {
+  return invoke<CreatedVault>("create_vault", { name, password, shared });
 }
 
 export function unlockVault(name: string, password: string): Promise<VaultInfo> {
@@ -273,6 +310,38 @@ export function addDeviceKey(): Promise<string> {
 
 export function disconnectServer(keepLocal: boolean): Promise<Disconnection> {
   return invoke<Disconnection>("disconnect_server", { keepLocal });
+}
+
+/** Comptes du serveur, pour choisir qui inviter. */
+export function listAccounts(): Promise<Account[]> {
+  return invoke<Account[]>("list_accounts");
+}
+
+export function vaultMembers(vault: string): Promise<Members> {
+  return invoke<Members>("vault_members", { vault });
+}
+
+export async function inviteMember(vault: string, account: string): Promise<void> {
+  await invoke("invite_member", { vault, account });
+}
+
+export function listInvitations(): Promise<Invitation[]> {
+  return invoke<Invitation[]>("list_invitations");
+}
+
+/** Accepte l'invitation ; le coffre est aussitôt téléchargé. */
+export function acceptInvitation(id: string): Promise<Exchange> {
+  return invoke<Exchange>("accept_invitation", { id });
+}
+
+/** Refuse une invitation reçue, ou annule une invitation envoyée. */
+export async function deleteInvitation(id: string): Promise<void> {
+  await invoke("delete_invitation", { id });
+}
+
+/** Quitte le coffre commun ; sa copie locale est gardée. */
+export async function leaveVault(vault: string): Promise<void> {
+  await invoke("leave_vault", { vault });
 }
 
 /** Synchronise le coffre ouvert et renvoie le résultat. */
