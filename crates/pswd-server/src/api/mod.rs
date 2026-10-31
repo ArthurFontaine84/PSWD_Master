@@ -179,8 +179,10 @@ impl FromRequestParts<Shared> for Caller {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ApiError {
     NotFound,
-    /// Le compte a quitté le coffre ou en a été retiré.
+    /// Le compte a quitté le coffre commun ou en a été retiré.
     Gone,
+    /// Le coffre a été supprimé du serveur.
+    Deleted,
     /// Coffre privé à partager ou à quitter, coffre commun à supprimer, ou compte inconnu.
     BadRequest,
     /// Compte déjà membre ou invité, coffre qui a encore des membres, ou dernier administrateur.
@@ -200,6 +202,7 @@ impl From<StorageError> for ApiError {
         match error {
             StorageError::NotFound => Self::NotFound,
             StorageError::Gone => Self::Gone,
+            StorageError::Deleted => Self::Deleted,
             StorageError::NotShared | StorageError::UnknownAccount | StorageError::SharedVault => {
                 Self::BadRequest
             }
@@ -220,7 +223,10 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match self {
             Self::NotFound => StatusCode::NOT_FOUND,
-            Self::Gone => StatusCode::GONE,
+            // Les appareils suppriment leur copie d'un coffre quitté, gardent celle d'un coffre
+            // supprimé : la raison accompagne le 410.
+            Self::Gone => return gone("left"),
+            Self::Deleted => return gone("deleted"),
             Self::Conflict => StatusCode::CONFLICT,
             Self::PreconditionFailed => StatusCode::PRECONDITION_FAILED,
             Self::PreconditionRequired => StatusCode::PRECONDITION_REQUIRED,
@@ -232,6 +238,15 @@ impl IntoResponse for ApiError {
         };
         status.into_response()
     }
+}
+
+fn gone(reason: &'static str) -> Response {
+    #[derive(serde::Serialize)]
+    struct Gone {
+        reason: &'static str,
+    }
+
+    (StatusCode::GONE, axum::Json(Gone { reason })).into_response()
 }
 
 #[cfg(test)]

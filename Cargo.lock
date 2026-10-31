@@ -3152,6 +3152,7 @@ dependencies = [
  "pswd-infra",
  "pswd-server",
  "rand",
+ "sha2 0.11.1",
  "tempfile",
  "uuid",
  "zeroize",

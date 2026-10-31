@@ -287,7 +287,7 @@ mod tests {
             Some("maison.example.org:8443")
         );
         assert_eq!(public_address(&b), None);
-        b.download_vaults().unwrap();
+        b.exchange().unwrap();
         assert_eq!(
             public_address(&b).as_deref(),
             Some("maison.example.org:8443")
@@ -316,9 +316,9 @@ mod tests {
         create(&a, "famille", true);
         create(&a, "brouillon", false);
         let server = connect_admin(&a);
-        a.publish_vaults().unwrap();
+        a.exchange().unwrap();
         connect(&b, &server, &a.new_device_key().unwrap());
-        b.download_vaults().unwrap();
+        b.exchange().unwrap();
         create(&a, "neuf", false);
 
         assert_eq!(
@@ -377,7 +377,7 @@ mod tests {
         create(&b, "famille", true);
         let server = connect_admin(&a);
         connect(&b, &server, &a.add_member("Camille").unwrap());
-        b.publish_vaults().unwrap();
+        b.exchange().unwrap();
         let famille = a.server_vaults().unwrap()[0].id;
         let camille = account_id(&a, "Camille");
         let arthur = account_id(&a, "Arthur");
@@ -385,15 +385,16 @@ mod tests {
         assert_eq!(a.versions(famille).unwrap()[0].version, 1);
         let restored = a.restore_version(famille, 1).unwrap();
         assert_eq!(restored.name, "famille-v1");
-        b.download_vaults().unwrap();
+        b.exchange().unwrap();
         assert!(b.config().unwrap().vault("famille-v1").is_ok());
 
         a.remove_member(famille, camille).unwrap();
         a.attach(famille, arthur).unwrap();
-        b.download_vaults().unwrap();
+        assert_eq!(b.exchange().unwrap().left, [("famille".to_owned(), Ok(()))]);
+        assert!(b.config().unwrap().vault("famille").is_err());
         assert_eq!(
-            b.vault_states().unwrap()[0],
-            ("famille".to_owned(), VaultState::Removed)
+            b.vault_states().unwrap(),
+            [("famille-v1".to_owned(), VaultState::Synced)]
         );
         a.delete_server_vault(famille).unwrap();
         assert_eq!(a.server_vaults().unwrap().len(), 1);

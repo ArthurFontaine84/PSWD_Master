@@ -102,8 +102,10 @@ const SCHEMA: &str = "
 pub enum StorageError {
     /// Coffre ou invitation inconnus, ou dont le compte n'est pas membre.
     NotFound,
-    /// Le compte a quitté le coffre ou en a été retiré.
+    /// Le compte a quitté le coffre commun ou en a été retiré.
     Gone,
+    /// Le coffre a été supprimé du serveur.
+    Deleted,
     /// Un coffre privé ne se partage pas et ne se quitte pas.
     NotShared,
     /// Le compte invité n'existe pas.
@@ -133,6 +135,7 @@ impl fmt::Display for StorageError {
         match self {
             Self::NotFound => f.write_str("coffre inconnu"),
             Self::Gone => f.write_str("coffre retiré"),
+            Self::Deleted => f.write_str("coffre supprimé"),
             Self::NotShared => f.write_str("coffre privé"),
             Self::UnknownAccount => f.write_str("compte inconnu"),
             Self::AlreadyMember => f.write_str("déjà membre ou déjà invité"),
@@ -419,6 +422,7 @@ mod tests {
         let messages = [
             (StorageError::NotFound, "coffre inconnu"),
             (StorageError::Gone, "coffre retiré"),
+            (StorageError::Deleted, "coffre supprimé"),
             (StorageError::NotShared, "coffre privé"),
             (StorageError::UnknownAccount, "compte inconnu"),
             (StorageError::AlreadyMember, "déjà membre ou déjà invité"),

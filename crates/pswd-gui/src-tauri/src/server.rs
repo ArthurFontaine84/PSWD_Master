@@ -1,6 +1,8 @@
 //! Connexion de l'appareil à un serveur, depuis l'écran « Serveur » (SPEC §11).
 
-use pswd_app::{AppError, Downloads, KeptReason, VaultState};
+use std::collections::BTreeMap;
+
+use pswd_app::{AppError, KeptReason, Update, VaultState};
 use pswd_core::{ConnectionKey, Secret};
 use serde::Serialize;
 
@@ -17,21 +19,33 @@ pub struct ServerStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct VaultStatus {
     name: String,
-    state: &'static str,
+    /// État vis-à-vis du serveur ; `None` si l'appareil n'est pas connecté ou si le serveur est
+    /// injoignable.
+    state: Option<&'static str>,
     /// Coffre commun, à partager avec d'autres comptes du serveur.
     shared: bool,
 }
 
-/// Coffres téléchargés et publiés par un échange avec le serveur.
+/// Ce qu'un échange avec le serveur a fait de chaque coffre.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Exchange {
-    /// Coffres que le serveur a retirés ; gardés sur cet appareil.
-    removed: Vec<String>,
     downloaded: Vec<Downloaded>,
     not_downloaded: Vec<Failure>,
     published: Vec<String>,
     not_published: Vec<Failure>,
+    /// Copie locale, plus récente, envoyée au serveur sans mot de passe.
+    sent: Vec<String>,
+    /// Copie du serveur, plus récente, téléchargée sans mot de passe.
+    received: Vec<String>,
+    /// Modifiés ici et sur le serveur : à déverrouiller pour terminer la synchro.
+    needs_unlock: Vec<String>,
+    not_updated: Vec<Failure>,
+    /// Coffres supprimés du serveur ; gardés sur cet appareil.
+    removed: Vec<String>,
+    /// Coffres communs dont le compte n'est plus membre ; supprimés de cet appareil.
+    left: Vec<String>,
+    not_left: Vec<Failure>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -68,18 +82,25 @@ struct Kept {
 }
 
 impl AppState {
-    /// Le serveur de l'appareil et l'état de chaque coffre.
+    /// Le serveur de l'appareil et l'état de chaque coffre, d'après la liste des coffres du
+    /// serveur.
     pub fn server_status(&self) -> Result<ServerStatus, UiError> {
         let address = self.vaults.server()?.map(|server| server.local_address);
         let config = self.vaults.config()?;
-        let vaults = self
+        // Serveur injoignable : les coffres restent utilisables, sans état.
+        let states: BTreeMap<String, VaultState> = match address {
+            Some(_) => self.vaults.vault_states().unwrap_or_default(),
+            None => Vec::new(),
+        }
+        .into_iter()
+        .collect();
+        let vaults = config
             .vaults
-            .vault_states()?
             .into_iter()
-            .map(|(name, state)| VaultStatus {
-                shared: config.vault(&name).is_ok_and(|vault| vault.shared),
+            .map(|(name, vault)| VaultStatus {
+                state: states.get(&name).copied().map(state_name),
                 name,
-                state: state_name(state),
+                shared: vault.shared,
             })
             .collect();
         Ok(ServerStatus { address, vaults })
@@ -103,17 +124,13 @@ impl AppState {
             .map_err(server_error)
     }
 
-    /// Télécharge les coffres du compte que l'appareil n'a pas, puis publie ceux que le serveur
-    /// ne connaît pas.
+    /// Échange avec le serveur, sans mot de passe (bouton « Synchroniser » de la liste) : un
+    /// coffre ouvert dont le compte n'est plus membre est fermé, il vient d'être supprimé.
     pub fn exchange(&self) -> Result<Exchange, UiError> {
         let _one_at_a_time = self.exclusive();
-        let downloads = self.vaults.download_vaults().map_err(server_error)?;
-        let mut exchange = Exchange::from(downloads);
-        for (name, result) in self.vaults.publish_vaults().map_err(server_error)? {
-            match result {
-                Ok(()) => exchange.published.push(name),
-                Err(error) => exchange.not_published.push(failure(name, &error)),
-            }
+        let exchange = Exchange::from(self.vaults.exchange().map_err(server_error)?);
+        for name in &exchange.left {
+            self.close_without_publishing(name);
         }
         Ok(exchange)
     }
@@ -148,16 +165,36 @@ impl AppState {
     }
 }
 
-impl From<Downloads> for Exchange {
-    fn from(downloads: Downloads) -> Self {
+impl From<pswd_app::Exchange> for Exchange {
+    fn from(done: pswd_app::Exchange) -> Self {
         let mut exchange = Self {
-            removed: downloads.removed,
+            removed: done.removed,
             ..Self::default()
         };
-        for (name, result) in downloads.downloaded {
+        for (name, result) in done.downloaded {
             match result {
                 Ok(local_name) => exchange.downloaded.push(Downloaded { name, local_name }),
                 Err(error) => exchange.not_downloaded.push(failure(name, &error)),
+            }
+        }
+        for (name, result) in done.published {
+            match result {
+                Ok(()) => exchange.published.push(name),
+                Err(error) => exchange.not_published.push(failure(name, &error)),
+            }
+        }
+        for (name, result) in done.updated {
+            match result {
+                Ok(Update::Sent) => exchange.sent.push(name),
+                Ok(Update::Received) => exchange.received.push(name),
+                Ok(Update::NeedsUnlock) => exchange.needs_unlock.push(name),
+                Err(error) => exchange.not_updated.push(failure(name, &error)),
+            }
+        }
+        for (name, result) in done.left {
+            match result {
+                Ok(()) => exchange.left.push(name),
+                Err(error) => exchange.not_left.push(failure(name, &error)),
             }
         }
         exchange
@@ -166,9 +203,10 @@ impl From<Downloads> for Exchange {
 
 fn state_name(state: VaultState) -> &'static str {
     match state {
-        VaultState::ToPublish => "toPublish",
-        VaultState::Published => "published",
-        VaultState::Detached => "detached",
+        VaultState::Local => "local",
+        VaultState::Synced => "synced",
+        VaultState::Outdated => "outdated",
+        VaultState::NeedsUnlock => "needsUnlock",
         VaultState::Removed => "removed",
     }
 }
@@ -291,15 +329,16 @@ mod tests {
             status(&state),
             json!({
                 "address": null,
-                "vaults": [{ "name": "perso", "state": "toPublish", "shared": false }],
+                "vaults": [{ "name": "perso", "state": null, "shared": false }],
             })
         );
         let server = connect_admin(&state);
+        assert_eq!(status(&state)["vaults"][0]["state"], "local");
         state.exchange().unwrap();
         assert_eq!(status(&state)["address"], server.address.as_str());
-        assert_eq!(status(&state)["vaults"][0]["state"], "published");
+        assert_eq!(status(&state)["vaults"][0]["state"], "synced");
         assert_eq!(state.disconnect(true), Ok(Disconnection::default()));
-        assert_eq!(status(&state)["vaults"][0]["state"], "detached");
+        assert_eq!(status(&state)["vaults"][0]["state"], Value::Null);
     }
 
     #[test]
@@ -346,11 +385,17 @@ mod tests {
         assert_eq!(
             sent(&pc.exchange().unwrap()),
             json!({
-                "removed": [],
                 "downloaded": [],
                 "notDownloaded": [],
                 "published": ["perso"],
                 "notPublished": [],
+                "sent": [],
+                "received": [],
+                "needsUnlock": [],
+                "notUpdated": [],
+                "removed": [],
+                "left": [],
+                "notLeft": [],
             })
         );
 
@@ -388,15 +433,122 @@ mod tests {
         assert!(exchange["notDownloaded"][0]["reason"].is_string());
     }
 
+    /// Ajoute une note au coffre `perso`, sans synchro.
+    fn add_note(state: &AppState, title: &str) {
+        state
+            .vaults
+            .open("perso", Credentials::Password(&secret(PASSWORD)))
+            .unwrap()
+            .edit(|vault| {
+                vault.add(
+                    EntryContent::new(EntryKind::Note, title.to_owned()),
+                    Timestamp::from_millis(2),
+                )
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn vaults_are_updated_without_their_password() {
+        let dir = TempDir::new().unwrap();
+        let pc = device(&dir);
+        create(&pc, "perso");
+        connect_admin(&pc);
+        pc.exchange().unwrap();
+        let other = TempDir::new().unwrap();
+        let phone = device(&other);
+        connect_same_account(&pc, &phone);
+        phone.exchange().unwrap();
+
+        add_note(&phone, "Banque");
+        assert_eq!(status(&phone)["vaults"][0]["state"], "outdated");
+        assert_eq!(sent(&phone.exchange().unwrap())["sent"], json!(["perso"]));
+        assert_eq!(sent(&pc.exchange().unwrap())["received"], json!(["perso"]));
+
+        add_note(&pc, "Wi-Fi");
+        add_note(&phone, "Cantine");
+        pc.exchange().unwrap();
+        assert_eq!(status(&phone)["vaults"][0]["state"], "needsUnlock");
+        assert_eq!(
+            sent(&phone.exchange().unwrap())["needsUnlock"],
+            json!(["perso"])
+        );
+        fs::remove_file(vault_file(other.path(), "perso")).unwrap();
+        assert_eq!(
+            sent(&phone.exchange().unwrap())["notUpdated"][0]["name"],
+            "perso"
+        );
+    }
+
+    #[test]
+    fn deleted_and_left_vaults_are_reported() {
+        let dir = TempDir::new().unwrap();
+        let pc = device(&dir);
+        create(&pc, "perso");
+        pc.vaults
+            .create_shared(
+                "famille",
+                &secret(PASSWORD),
+                kdf(),
+                Timestamp::from_millis(0),
+            )
+            .unwrap();
+        connect_admin(&pc);
+        pc.exchange().unwrap();
+        let other = TempDir::new().unwrap();
+        let phone = device(&other);
+        connect_same_account(&pc, &phone);
+        phone.exchange().unwrap();
+        phone.unlock("famille", &secret(PASSWORD)).unwrap();
+        pc.vaults.delete_everywhere("perso").unwrap();
+        pc.vaults.leave("famille").unwrap();
+
+        let exchange = sent(&phone.exchange().unwrap());
+        assert_eq!(exchange["removed"], json!(["perso"]));
+        assert_eq!(exchange["left"], json!(["famille"]));
+        assert_eq!(phone.current(), None);
+        assert_eq!(status(&phone)["vaults"][0]["state"], "removed");
+    }
+
+    #[test]
+    fn a_vault_left_but_not_deleted_is_reported() {
+        let dir = TempDir::new().unwrap();
+        let pc = device(&dir);
+        pc.vaults
+            .create_shared(
+                "famille",
+                &secret(PASSWORD),
+                kdf(),
+                Timestamp::from_millis(0),
+            )
+            .unwrap();
+        connect_admin(&pc);
+        pc.exchange().unwrap();
+        let other = TempDir::new().unwrap();
+        let phone = device(&other);
+        connect_same_account(&pc, &phone);
+        phone.exchange().unwrap();
+        pc.vaults.leave("famille").unwrap();
+        let mut temporary = vault_file(other.path(), "famille").into_os_string();
+        temporary.push(".tmp");
+        fs::create_dir(&temporary).unwrap();
+        assert_eq!(
+            sent(&phone.exchange().unwrap())["notLeft"][0]["name"],
+            "famille"
+        );
+    }
+
     #[test]
     fn an_offline_server_is_reported() {
         let dir = TempDir::new().unwrap();
         let state = device(&dir);
+        create(&state, "perso");
         connect_admin(&state);
         go_offline(&dir);
         let offline = Some(UiError::new("serverError", "serveur injoignable"));
         assert_eq!(state.exchange().err(), offline);
         assert_eq!(state.new_device_key().err(), offline);
+        assert_eq!(status(&state)["vaults"][0]["state"], Value::Null);
     }
 
     #[test]

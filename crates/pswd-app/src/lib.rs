@@ -25,7 +25,7 @@ pub use idle_lock::IdleLock;
 pub use password::{MIN_CHARACTER_KINDS, MIN_PASSWORD_LENGTH, check_master_password};
 pub use random::generate;
 pub use server::{
-    DEFAULT_PORT, Disconnected, Downloads, KeptReason, SyncOutcome, VaultResults, VaultState,
+    DEFAULT_PORT, Disconnected, Exchange, KeptReason, SyncOutcome, Update, VaultResults, VaultState,
 };
 pub use utc::{backup_file_name, format_timestamp, now, server_backup_file_name};
 pub use vaults::Vaults;

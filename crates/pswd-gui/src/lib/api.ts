@@ -156,6 +156,8 @@ export interface Invitation {
 
 /** Compte de l'appareil sur le serveur. */
 export interface AccountStatus {
+  /** Adresse locale du serveur, donnée avec les clés de connexion. */
+  address: string;
   accountName: string;
   /** Le panneau d'administration est proposé. */
   isAdmin: boolean;

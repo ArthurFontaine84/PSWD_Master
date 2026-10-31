@@ -3,7 +3,7 @@
 use pswd_infra::{Account, ReceivedInvitation, ServerClient, ServerConfig, VaultMembers};
 use uuid::Uuid;
 
-use crate::{AppError, Downloads, Vaults};
+use crate::{AppError, Exchange, Vaults};
 
 impl Vaults {
     /// Comptes du serveur, pour choisir qui inviter.
@@ -47,15 +47,15 @@ impl Vaults {
         Ok(self.client()?.0.invitations()?)
     }
 
-    /// Accepte l'invitation, puis télécharge le coffre : il s'ouvre avec le mot de passe que
-    /// donne celui qui a invité.
+    /// Accepte l'invitation, puis échange avec le serveur pour télécharger le coffre : il
+    /// s'ouvre avec le mot de passe que donne celui qui a invité.
     ///
     /// # Errors
     ///
     /// Si l'invitation n'existe plus, ou si le serveur est injoignable.
-    pub fn accept_invitation(&self, invitation: Uuid) -> Result<Downloads, AppError> {
+    pub fn accept_invitation(&self, invitation: Uuid) -> Result<Exchange, AppError> {
         self.client()?.0.accept_invitation(invitation)?;
-        self.download_vaults()
+        self.exchange()
     }
 
     /// Refuse l'invitation reçue, ou annule celle d'un coffre dont le compte est membre.
@@ -67,20 +67,21 @@ impl Vaults {
         Ok(self.client()?.0.delete_invitation(invitation)?)
     }
 
-    /// Le compte quitte le coffre commun `name` ; la copie locale est gardée, retirée. Un
-    /// coffre déjà quitté depuis un autre appareil est simplement noté comme retiré.
+    /// Le compte quitte le coffre commun `name`, qui est supprimé de cet appareil ; ses autres
+    /// appareils le suppriment au prochain échange. Un coffre déjà quitté depuis un autre
+    /// appareil est seulement supprimé ici.
     ///
     /// # Errors
     ///
-    /// Si le coffre n'est pas publié ou est privé, ou si le serveur est injoignable.
+    /// Si le coffre n'est pas publié ou est privé, ou si le serveur est injoignable : rien n'est
+    /// alors supprimé.
     pub fn leave(&self, name: &str) -> Result<(), AppError> {
         let (client, server) = self.client()?;
         match client.leave(self.published_id(&server, name)?) {
             Err(error) if !error.is_removed() => return Err(error.into()),
             _ => {}
         }
-        self.set_removed(name, true)?;
-        Ok(())
+        self.delete(name)
     }
 
     pub(crate) fn client(&self) -> Result<(ServerClient, ServerConfig), AppError> {
@@ -102,7 +103,7 @@ mod tests {
     use pswd_core::crypto::KdfParams;
     use pswd_core::ports::PortError;
     use pswd_core::{ConnectionKey, Credentials, Secret, SyncStatus, Timestamp};
-    use pswd_infra::Locations;
+    use pswd_infra::{ConfigError, Locations};
     use pswd_server::testing::TestServer;
     use tempfile::TempDir;
 
@@ -165,7 +166,7 @@ mod tests {
                 Some("Arthur"),
             )
             .unwrap();
-        arthur.publish_vaults().unwrap();
+        arthur.exchange().unwrap();
         let camille = device(dir, "camille");
         let member_key = arthur
             .server()
@@ -192,7 +193,7 @@ mod tests {
     }
 
     /// Arthur invite Camille, qui accepte.
-    fn join(arthur: &Vaults, camille: &Vaults) -> Downloads {
+    fn join(arthur: &Vaults, camille: &Vaults) -> Exchange {
         arthur
             .invite("famille", account(arthur, "Camille"))
             .unwrap();
@@ -218,7 +219,7 @@ mod tests {
             downloads.downloaded,
             [("famille".to_owned(), Ok("famille".to_owned()))]
         );
-        assert_eq!(state(&camille, "famille"), VaultState::Published);
+        assert_eq!(state(&camille, "famille"), VaultState::Synced);
         assert!(camille.config().unwrap().vault("famille").unwrap().shared);
         let mut session = open(&camille, "famille");
         assert_eq!(
@@ -247,27 +248,34 @@ mod tests {
         ));
     }
 
+    fn names(vaults: &Vaults) -> Vec<String> {
+        vaults.config().unwrap().vaults.into_keys().collect()
+    }
+
+    /// Un appareil de plus pour le compte de `connected`, qui a téléchargé ses coffres.
+    fn other_device(dir: &TempDir, connected: &Vaults, server: &TestServer, name: &str) -> Vaults {
+        let other = device(dir, name);
+        let device_key = connected.new_device_key().unwrap();
+        other
+            .connect(&server.address, &key(&device_key), name, None)
+            .unwrap();
+        other.exchange().unwrap();
+        other
+    }
+
     #[test]
-    fn a_member_who_leaves_keeps_a_removed_copy() {
+    fn a_member_who_leaves_loses_the_local_copy() {
         let dir = TempDir::new().unwrap();
         let (arthur, camille, _server) = family(&dir);
         join(&arthur, &camille);
-        let mut session = open(&camille, "famille");
         camille.leave("famille").unwrap();
-        assert_eq!(state(&camille, "famille"), VaultState::Removed);
-        assert_eq!(
-            camille.sync("famille", &mut session),
-            Ok(SyncOutcome::Removed)
-        );
-        assert_eq!(camille.publish_vaults().unwrap(), []);
+        assert_eq!(names(&camille), Vec::<String>::new());
         assert_eq!(arthur.members("famille").unwrap().members.len(), 1);
         assert_eq!(
             camille.leave("famille"),
-            Err(AppError::NotPublished("famille".to_owned()))
+            Err(ConfigError::UnknownVault("famille".to_owned()).into())
         );
-        let report = camille.disconnect(false).unwrap();
-        assert_eq!((report.removed, report.kept), (vec![], vec![]));
-        assert_eq!(state(&camille, "famille"), VaultState::Removed);
+        assert_eq!(camille.exchange().unwrap(), Exchange::default());
     }
 
     #[test]
@@ -287,71 +295,66 @@ mod tests {
     }
 
     #[test]
-    fn other_devices_of_the_account_see_the_vault_removed() {
+    fn other_devices_of_the_account_lose_the_vault() {
         let dir = TempDir::new().unwrap();
         let (arthur, camille, server) = family(&dir);
         join(&arthur, &camille);
-        let laptop = device(&dir, "portable");
-        let device_key = camille.new_device_key().unwrap();
-        laptop
-            .connect(&server.address, &key(&device_key), "Portable", None)
-            .unwrap();
-        laptop.download_vaults().unwrap();
-        let tablet = device(&dir, "tablette");
-        let device_key = camille.new_device_key().unwrap();
-        tablet
-            .connect(&server.address, &key(&device_key), "Tablette", None)
-            .unwrap();
-        tablet.download_vaults().unwrap();
+        let laptop = other_device(&dir, &camille, &server, "portable");
+        let tablet = other_device(&dir, &camille, &server, "tablette");
+        let mut session = open(&tablet, "famille");
         camille.leave("famille").unwrap();
 
-        let downloads = laptop.download_vaults().unwrap();
-        assert_eq!(downloads.removed, ["famille"]);
-        assert_eq!(state(&laptop, "famille"), VaultState::Removed);
-        assert_eq!(laptop.download_vaults().unwrap(), Downloads::default());
+        assert_eq!(
+            laptop.exchange().unwrap().left,
+            [("famille".to_owned(), Ok(()))]
+        );
+        assert_eq!(names(&laptop), Vec::<String>::new());
+        assert_eq!(laptop.exchange().unwrap(), Exchange::default());
 
-        let mut session = open(&tablet, "famille");
-        assert_eq!(
-            tablet.sync("famille", &mut session),
-            Ok(SyncOutcome::Removed)
-        );
-        assert_eq!(state(&tablet, "famille"), VaultState::Removed);
-        assert_eq!(
-            tablet.leave("famille"),
-            Err(AppError::NotPublished("famille".to_owned()))
-        );
+        assert_eq!(tablet.sync("famille", &mut session), Ok(SyncOutcome::Left));
+        assert_eq!(names(&tablet), Vec::<String>::new());
     }
 
     #[test]
-    fn a_vault_left_on_another_device_is_just_marked_removed() {
+    fn a_vault_left_on_another_device_is_just_deleted() {
         let dir = TempDir::new().unwrap();
         let (arthur, camille, server) = family(&dir);
         join(&arthur, &camille);
-        let laptop = device(&dir, "portable");
-        let device_key = camille.new_device_key().unwrap();
-        laptop
-            .connect(&server.address, &key(&device_key), "Portable", None)
-            .unwrap();
-        laptop.download_vaults().unwrap();
+        let laptop = other_device(&dir, &camille, &server, "portable");
         camille.leave("famille").unwrap();
         assert_eq!(laptop.leave("famille"), Ok(()));
-        assert_eq!(state(&laptop, "famille"), VaultState::Removed);
+        assert_eq!(names(&laptop), Vec::<String>::new());
     }
 
     #[test]
-    fn a_member_invited_again_syncs_again() {
+    fn a_member_removed_by_an_administrator_loses_the_vault() {
+        let dir = TempDir::new().unwrap();
+        let (arthur, camille, _server) = family(&dir);
+        join(&arthur, &camille);
+        let famille = arthur.server_vaults().unwrap()[0].id;
+        arthur
+            .remove_member(famille, account(&arthur, "Camille"))
+            .unwrap();
+        assert_eq!(state(&camille, "famille"), VaultState::Removed);
+        assert_eq!(
+            camille.exchange().unwrap().left,
+            [("famille".to_owned(), Ok(()))]
+        );
+        assert_eq!(names(&camille), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_member_invited_again_gets_the_vault_back() {
         let dir = TempDir::new().unwrap();
         let (arthur, camille, _server) = family(&dir);
         join(&arthur, &camille);
         camille.leave("famille").unwrap();
-        let downloads = join(&arthur, &camille);
+        let exchange = join(&arthur, &camille);
         assert_eq!(
-            downloads.downloaded,
+            exchange.downloaded,
             [("famille".to_owned(), Ok("famille".to_owned()))]
         );
-        assert_eq!(state(&camille, "famille"), VaultState::Published);
-        assert!(!camille.set_removed("famille", false).unwrap());
-        assert!(!camille.set_removed("inconnu", true).unwrap());
+        assert_eq!(state(&camille, "famille"), VaultState::Synced);
     }
 
     #[test]
@@ -364,7 +367,7 @@ mod tests {
         assert_eq!(arthur.invite("brouillon", camille_id), unpublished);
         assert_eq!(arthur.members("brouillon").err(), unpublished.err());
         create(&arthur, "perso", false);
-        arthur.publish_vaults().unwrap();
+        arthur.exchange().unwrap();
         assert_eq!(
             arthur.invite("perso", camille_id),
             Err(PortError::new("invitation impossible : coffre privé ou compte inconnu").into())
@@ -373,7 +376,7 @@ mod tests {
             arthur.leave("perso"),
             Err(PortError::new("un coffre privé ne se quitte pas").into())
         );
-        assert_eq!(state(&arthur, "perso"), VaultState::Published);
+        assert_eq!(state(&arthur, "perso"), VaultState::Synced);
     }
 
     #[test]

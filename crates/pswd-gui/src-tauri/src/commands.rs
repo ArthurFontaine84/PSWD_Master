@@ -243,10 +243,10 @@ pub fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<S
     state.save_settings(settings)
 }
 
-/// Le serveur de l'appareil et l'état de chaque coffre ; aucun échange avec le serveur.
+/// Le serveur de l'appareil et l'état de chaque coffre, demandé au serveur.
 #[tauri::command]
-pub fn server_status(state: State<'_, AppState>) -> Result<ServerStatus, UiError> {
-    state.server_status()
+pub async fn server_status<R: Runtime>(app: AppHandle<R>) -> Result<ServerStatus, UiError> {
+    in_background(app, AppState::server_status).await
 }
 
 /// `account_name` reste vide, sauf avec une clé administrateur.
@@ -265,7 +265,7 @@ pub async fn connect_server<R: Runtime>(
     .await
 }
 
-/// Télécharge les nouveaux coffres du compte et publie ceux de l'appareil.
+/// Échange avec le serveur, sans mot de passe : téléchargement, publication, mise à jour.
 #[tauri::command]
 pub async fn sync_server<R: Runtime>(app: AppHandle<R>) -> Result<Exchange, UiError> {
     in_background(app, AppState::exchange).await
@@ -331,13 +331,14 @@ pub async fn delete_invitation<R: Runtime>(app: AppHandle<R>, id: Uuid) -> Resul
     in_background(app, move |state| state.delete_invitation(id)).await
 }
 
-/// Quitte le coffre commun `vault` ; la copie locale reste, retirée.
+/// Quitte le coffre commun `vault`, qui est supprimé de cet appareil.
 #[tauri::command]
 pub async fn leave_vault<R: Runtime>(app: AppHandle<R>, vault: String) -> Result<(), UiError> {
     in_background(app, move |state| state.leave(&vault)).await
 }
 
-/// Synchronise le coffre ouvert (bouton « Synchroniser ») et renvoie le résultat.
+/// Synchronise le coffre ouvert (bouton « Synchroniser ») et renvoie le résultat ; un coffre
+/// supprimé du serveur y est republié.
 #[tauri::command]
 pub async fn sync_vault<R: Runtime>(app: AppHandle<R>) -> Result<SyncReport, UiError> {
     in_background(app, AppState::sync_now).await
@@ -1031,9 +1032,19 @@ mod tests {
         assert_eq!(app.call("sync_vault", json!({})), Ok(synced));
         assert_eq!(
             app.call("sync_server", json!({})),
-            Ok(
-                json!({ "removed": [], "downloaded": [], "notDownloaded": [], "published": [], "notPublished": [] })
-            )
+            Ok(json!({
+                "downloaded": [],
+                "notDownloaded": [],
+                "published": [],
+                "notPublished": [],
+                "sent": [],
+                "received": [],
+                "needsUnlock": [],
+                "notUpdated": [],
+                "removed": [],
+                "left": [],
+                "notLeft": [],
+            }))
         );
         let key = app.call("add_device_key", json!({})).unwrap();
         assert_eq!(key.as_str().unwrap().split('-').count(), 13, "{key}");
@@ -1090,7 +1101,7 @@ mod tests {
         assert_eq!(app.call("leave_vault", famille.clone()), Ok(Value::Null));
         assert_eq!(
             app.call("vault_members", famille),
-            Err(json!({ "code": "notPublished", "detail": "famille" }))
+            Err(json!({ "code": "unknownVault", "detail": "famille" }))
         );
     }
 
@@ -1149,9 +1160,13 @@ mod tests {
             .call("restore_version", json!({ "vault": perso, "version": 1 }))
             .unwrap();
         assert_eq!(restored["name"], "perso-v1");
+        // Un coffre privé garde son propriétaire, et n'a donc pas de place pour un autre.
         let member = json!({ "vault": restored["id"], "account": arthur });
-        assert_eq!(app.call("remove_member", member.clone()), Ok(Value::Null));
-        assert_eq!(app.call("attach_account", member), Ok(Value::Null));
+        assert_eq!(
+            code(app.call("remove_member", member.clone())),
+            "serverError"
+        );
+        assert_eq!(code(app.call("attach_account", member)), "serverError");
         let deletion =
             json!({ "id": restored["id"], "name": "perso-v1", "confirmation": "perso-v1" });
         assert_eq!(app.call("delete_server_vault", deletion), Ok(Value::Null));

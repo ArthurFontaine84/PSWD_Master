@@ -7,6 +7,7 @@ import {
   disconnectServer,
   serverStatus,
   syncServer,
+  type AccountStatus,
   type Exchange,
   type ServerStatus,
 } from "../lib/api";
@@ -28,9 +29,13 @@ const nothing: Exchange = { removed: [], downloaded: [], notDownloaded: [], publ
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(accountStatus).mockResolvedValue({ accountName: "Camille", isAdmin: false, publicAddress: null });
+  vi.mocked(accountStatus).mockResolvedValue(account("Camille", false));
   render(Toast);
 });
+
+function account(accountName: string, isAdmin: boolean): AccountStatus {
+  return { address: "pswd.local:8443", accountName, isAdmin, publicAddress: null };
+}
 
 function field(label: string): HTMLInputElement {
   return screen.getByLabelText(label, { exact: false });
@@ -39,7 +44,7 @@ function field(label: string): HTMLInputElement {
 function show(status: ServerStatus) {
   vi.mocked(serverStatus).mockResolvedValue(status);
   const onClose = vi.fn();
-  render(Server, { onClose, onAdmin: vi.fn() });
+  render(Server, { onClose });
   return onClose;
 }
 
@@ -106,7 +111,7 @@ describe("Server, before connecting", () => {
   it("explains an unreadable state and goes back", async () => {
     vi.mocked(serverStatus).mockRejectedValue({ code: "configInvalid", detail: "ligne 2" });
     const onClose = vi.fn();
-    render(Server, { onClose, onAdmin: vi.fn() });
+    render(Server, { onClose });
     expect(await screen.findByRole("alert")).toHaveTextContent("Configuration invalide : ligne 2");
     await fireEvent.click(screen.getByRole("button", { name: "Retour" }));
     expect(onClose).toHaveBeenCalled();
@@ -195,20 +200,17 @@ describe("Server, once connected", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("offers the administration panel to an administrator only", async () => {
-    vi.mocked(accountStatus).mockResolvedValue({ accountName: "Arthur", isAdmin: true, publicAddress: "maison:8443" });
+  it("shows the account of the device, and its role", async () => {
+    vi.mocked(accountStatus).mockResolvedValue(account("Arthur", true));
     vi.mocked(serverStatus).mockResolvedValue(connected);
-    const onAdmin = vi.fn();
-    const { unmount } = render(Server, { onClose: vi.fn(), onAdmin });
+    const { unmount } = render(Server, { onClose: vi.fn() });
     expect(await screen.findByText("Compte : Arthur (administrateur).")).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole("button", { name: "Administration" }));
-    expect(onAdmin).toHaveBeenCalledWith("pswd.local:8443", "maison:8443");
+    expect(screen.queryByRole("button", { name: "Administration" })).not.toBeInTheDocument();
     unmount();
 
-    vi.mocked(accountStatus).mockResolvedValue({ accountName: "Camille", isAdmin: false, publicAddress: null });
+    vi.mocked(accountStatus).mockResolvedValue(account("Camille", false));
     show(connected);
     expect(await screen.findByText("Compte : Camille.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Administration" })).not.toBeInTheDocument();
   });
 
   it("stays usable when the server does not answer", async () => {

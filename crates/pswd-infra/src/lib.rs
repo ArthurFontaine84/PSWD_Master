@@ -19,8 +19,10 @@ pub use backup::{read_backup, write_backup};
 pub use clipboard::{ClipboardAccess, TimedClipboard};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use clipboard::{LazyClipboard, SystemClipboard};
-pub use config::{Config, ConfigError, ConfigFile, Locations, RemoteLink, Theme, VaultConfig};
+pub use config::{
+    Config, ConfigError, ConfigFile, Locations, RemoteLink, SyncedState, Theme, VaultConfig,
+};
 pub use file_store::FileStore;
-pub use remote::{Connection, RemoteVault, RemoteVaultInfo, ServerClient};
+pub use remote::{Connection, RemoteVault, RemoteVaultInfo, Removal, ServerClient};
 pub use server_file::{ServerConfig, ServerFile};
 pub use sharing::{Account, ReceivedInvitation, SentInvitation, VaultMembers};

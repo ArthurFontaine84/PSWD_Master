@@ -365,6 +365,7 @@ mod tests {
         ] {
             let response = call(&family.app, method, &uri, &family.camille, None).await;
             assert_eq!(response.status(), StatusCode::GONE, "{method} {uri}");
+            assert_eq!(json(response).await, json!({ "reason": "left" }));
         }
         let response = call(&family.app, "GET", "/v1/vaults", &family.camille, None).await;
         assert_eq!(json(response).await, json!([]));

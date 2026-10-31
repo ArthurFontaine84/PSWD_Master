@@ -69,7 +69,7 @@ pub enum Command {
     AddDevice,
     /// Affiche le serveur et l'état de chaque coffre.
     Status,
-    /// Télécharge les nouveaux coffres du compte et publie ceux de cet appareil.
+    /// Échange avec le serveur, sans mot de passe : télécharge, publie et met à jour les coffres.
     Sync,
 }
 

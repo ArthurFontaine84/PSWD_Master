@@ -79,7 +79,8 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// [`StorageError::NotFound`] ou [`StorageError::Gone`] si `account` n'est pas membre.
+    /// [`StorageError::NotFound`], [`StorageError::Gone`] ou [`StorageError::Deleted`] si `account`
+    /// n'est pas membre.
     pub fn members(&self, vault: Uuid, account: Uuid) -> Result<Members, StorageError> {
         shared_if_member(&self.conn, vault, account)?;
         let mut statement = self.conn.prepare(LIST_MEMBERS)?;
@@ -104,7 +105,8 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// [`StorageError::NotFound`] ou [`StorageError::Gone`] si `account` n'est pas membre,
+    /// [`StorageError::NotFound`], [`StorageError::Gone`] ou [`StorageError::Deleted`] si `account`
+    /// n'est pas membre,
     /// [`StorageError::NotShared`] pour un coffre privé, [`StorageError::UnknownAccount`] si
     /// `invitee` n'existe pas, [`StorageError::AlreadyMember`] s'il est déjà membre ou invité.
     pub fn invite(
@@ -201,7 +203,8 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// [`StorageError::NotFound`] ou [`StorageError::Gone`] si `account` n'est pas membre,
+    /// [`StorageError::NotFound`], [`StorageError::Gone`] ou [`StorageError::Deleted`] si `account`
+    /// n'est pas membre,
     /// [`StorageError::NotShared`] pour un coffre privé.
     pub fn leave(&mut self, vault: Uuid, account: Uuid) -> Result<(), StorageError> {
         let tx = self.conn.transaction()?;

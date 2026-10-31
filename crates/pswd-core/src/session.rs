@@ -157,6 +157,13 @@ impl<L: LocalStore> Session<L> {
         self.pending
     }
 
+    /// Copie locale telle que la session l'a lue ou écrite en dernier. Après une synchro réussie,
+    /// elle a le même contenu que le distant.
+    #[must_use]
+    pub fn saved_file(&self) -> &[u8] {
+        &self.saved
+    }
+
     /// Applique `change`. Si le coffre a changé, il est fusionné avec la copie locale, puis
     /// enregistré.
     ///
@@ -495,6 +502,7 @@ mod tests {
         assert_eq!(titles(session.vault()), ["départ"]);
         assert!(!session.has_pending_changes());
         assert_eq!(session.local.saves, 0);
+        assert_eq!(session.saved_file(), file);
     }
 
     #[test]
@@ -519,6 +527,7 @@ mod tests {
         assert!(session.has_pending_changes());
         let saved = session.local.file.as_deref().unwrap();
         assert_eq!(titles(&decrypt(saved, "maître")), ["départ", "nouvelle"]);
+        assert_eq!(session.saved_file(), saved);
     }
 
     #[test]

@@ -9,10 +9,10 @@ use serde::Serialize;
 pub enum SyncState {
     Synced,
     NotConnected,
-    /// Lié à un autre serveur : utilisé en local.
-    Detached,
-    /// Le serveur l'a retiré, ou en a retiré le compte : gardé en local, plus synchronisé.
+    /// Supprimé du serveur : gardé en local, plus synchronisé sauf s'il est republié.
     Removed,
+    /// Le compte n'est plus membre de ce coffre commun : il a été fermé et supprimé.
+    Left,
     Offline,
     /// Le coffre a changé sur le serveur à chaque essai.
     Conflict,
@@ -36,7 +36,7 @@ impl SyncReport {
     pub fn new(vault: String, outcome: Result<SyncOutcome, AppError>, changed: bool) -> Self {
         let (state, detail) = match outcome {
             Ok(SyncOutcome::NotConnected) => (SyncState::NotConnected, None),
-            Ok(SyncOutcome::Detached) => (SyncState::Detached, None),
+            Ok(SyncOutcome::Left) => (SyncState::Left, None),
             Ok(SyncOutcome::Removed | SyncOutcome::Done(SyncStatus::Removed)) => {
                 (SyncState::Removed, None)
             }
@@ -77,7 +77,7 @@ mod tests {
         let offline = PortError::new("serveur injoignable");
         let cases = [
             (Ok(SyncOutcome::NotConnected), report("notConnected", None)),
-            (Ok(SyncOutcome::Detached), report("detached", None)),
+            (Ok(SyncOutcome::Left), report("left", None)),
             (Ok(SyncOutcome::Removed), report("removed", None)),
             (
                 Ok(SyncOutcome::Done(SyncStatus::Removed)),

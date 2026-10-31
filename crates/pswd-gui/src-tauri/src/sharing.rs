@@ -87,14 +87,14 @@ impl AppState {
             .collect())
     }
 
-    /// Accepte l'invitation, puis télécharge le coffre.
+    /// Accepte l'invitation, puis échange avec le serveur pour télécharger le coffre.
     pub fn accept_invitation(&self, invitation: Uuid) -> Result<Exchange, UiError> {
         let _one_at_a_time = self.exclusive();
-        let downloads = self
+        let exchange = self
             .vaults
             .accept_invitation(invitation)
             .map_err(server_error)?;
-        Ok(downloads.into())
+        Ok(exchange.into())
     }
 
     /// Refuse une invitation reçue, ou annule celle d'un coffre dont le compte est membre.
@@ -104,10 +104,12 @@ impl AppState {
             .map_err(server_error)
     }
 
-    /// Quitte le coffre commun `vault` ; sa copie locale est gardée, retirée.
+    /// Quitte le coffre commun `vault`, qui est fermé et supprimé de cet appareil.
     pub fn leave(&self, vault: &str) -> Result<(), UiError> {
         let _one_at_a_time = self.exclusive();
-        self.vaults.leave(vault).map_err(server_error)
+        self.vaults.leave(vault).map_err(server_error)?;
+        self.close_without_publishing(vault);
+        Ok(())
     }
 }
 
@@ -220,27 +222,23 @@ mod tests {
         assert_eq!(invitations[0]["invitedBy"], "Arthur");
         let id = camille.invitations().unwrap()[0].id;
         assert_eq!(
-            sent(&camille.accept_invitation(id).unwrap()),
-            json!({
-                "removed": [],
-                "downloaded": [{ "name": "famille", "localName": "famille" }],
-                "notDownloaded": [],
-                "published": [],
-                "notPublished": [],
-            })
+            sent(&camille.accept_invitation(id).unwrap())["downloaded"],
+            json!([{ "name": "famille", "localName": "famille" }])
         );
         assert_eq!(
             shared_state(&camille, "famille"),
-            json!({ "name": "famille", "state": "published", "shared": true })
+            json!({ "name": "famille", "state": "synced", "shared": true })
         );
         assert_eq!(camille.invitations(), Ok(Vec::new()));
         assert_eq!(arthur.members("famille").unwrap().members.len(), 2);
 
+        camille.unlock("famille", &secret(PASSWORD)).unwrap();
         camille.leave("famille").unwrap();
-        assert_eq!(shared_state(&camille, "famille")["state"], "removed");
+        assert_eq!(camille.current(), None);
+        assert_eq!(sent(&camille.server_status().unwrap())["vaults"], json!([]));
         assert_eq!(
             camille.members("famille").err(),
-            Some(UiError::new("notPublished", "famille"))
+            Some(UiError::new("unknownVault", "famille"))
         );
         assert_eq!(arthur.members("famille").unwrap().members.len(), 1);
     }
@@ -276,12 +274,12 @@ mod tests {
         );
         assert_eq!(
             shared_state(&arthur, "perso"),
-            json!({ "name": "perso", "state": "toPublish", "shared": false })
+            json!({ "name": "perso", "state": "local", "shared": false })
         );
         arthur.leave("famille").unwrap();
         assert_eq!(
             arthur.leave("famille").err(),
-            Some(UiError::new("notPublished", "famille"))
+            Some(UiError::new("unknownVault", "famille"))
         );
 
         let alone = device(&dir, "seul");

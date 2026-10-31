@@ -18,6 +18,8 @@ import {
   serverStatus,
   restoreFromFile,
   saveSettings,
+  accountStatus,
+  type Settings as SettingsValues,
 } from "../lib/api";
 import { pickBackupDestination, pickBackupFile, pickCsvFile } from "../lib/files";
 import Toast from "../components/Toast.svelte";
@@ -46,6 +48,7 @@ vi.mock("../lib/api", () => ({
   restoreFromFile: vi.fn(),
   getSettings: vi.fn(),
   saveSettings: vi.fn(),
+  accountStatus: vi.fn(),
   onVaultSynced: vi.fn(),
   serverStatus: vi.fn(),
 }));
@@ -62,6 +65,7 @@ beforeEach(() => {
   vi.mocked(listEntries).mockResolvedValue([]);
   vi.mocked(listTags).mockResolvedValue([]);
   vi.mocked(serverStatus).mockResolvedValue({ address: null, vaults: [] });
+  vi.mocked(accountStatus).mockRejectedValue({ code: "notConnected", detail: null });
   vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
 });
 
@@ -510,6 +514,31 @@ describe("restoring vaults", () => {
 });
 
 describe("settings", () => {
+  it("open the administration panel for an administrator only", async () => {
+    const settings: SettingsValues = {
+      autoLockMinutes: 10,
+      clipboardClearSeconds: 20,
+      backgroundLockSeconds: 60,
+      theme: "auto",
+    };
+    vi.mocked(getSettings).mockResolvedValue(settings);
+    const onAdmin = vi.fn();
+    const { unmount } = render(Settings, { onClose: vi.fn(), onAdmin });
+    await screen.findByRole("button", { name: "Enregistrer" });
+    expect(screen.queryByRole("button", { name: "Administration" })).not.toBeInTheDocument();
+    unmount();
+
+    vi.mocked(accountStatus).mockResolvedValue({
+      address: "pswd.local:8443",
+      accountName: "Arthur",
+      isAdmin: true,
+      publicAddress: "maison:8443",
+    });
+    render(Settings, { onClose: vi.fn(), onAdmin });
+    await fireEvent.click(await screen.findByRole("button", { name: "Administration" }));
+    expect(onAdmin).toHaveBeenCalledWith("pswd.local:8443", "maison:8443");
+  });
+
   it("reports settings out of bounds, and an unreadable configuration", async () => {
     vi.mocked(getSettings).mockResolvedValueOnce({
       autoLockMinutes: 10,
@@ -519,7 +548,7 @@ describe("settings", () => {
     });
     vi.mocked(saveSettings).mockRejectedValue({ code: "invalidSettings", detail: null });
     const onClose = vi.fn();
-    const { unmount } = render(Settings, { onClose });
+    const { unmount } = render(Settings, { onClose, onAdmin: vi.fn() });
     expect(screen.getByText("Chargement…")).toBeInTheDocument();
     await fireEvent.click(await screen.findByRole("button", { name: "Enregistrer" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -527,7 +556,7 @@ describe("settings", () => {
     );
     unmount();
     vi.mocked(getSettings).mockRejectedValue({ code: "configInvalid", detail: "ligne 2" });
-    render(Settings, { onClose });
+    render(Settings, { onClose, onAdmin: vi.fn() });
     expect(await screen.findByRole("alert")).toHaveTextContent("Configuration invalide : ligne 2");
     await fireEvent.click(screen.getByRole("button", { name: "Retour" }));
     expect(onClose).toHaveBeenCalled();

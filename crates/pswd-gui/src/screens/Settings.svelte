@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { getSettings, saveSettings, type Settings, type Theme } from "../lib/api";
+  import {
+    accountStatus,
+    getSettings,
+    saveSettings,
+    type AccountStatus,
+    type Settings,
+    type Theme,
+  } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { applyTheme } from "../lib/theme";
@@ -7,9 +14,11 @@
 
   interface Props {
     onClose: () => void;
+    /** Ouvre le panneau d'administration du serveur. */
+    onAdmin: (address: string, publicAddress: string | null) => void;
   }
 
-  const { onClose }: Props = $props();
+  const { onClose, onAdmin }: Props = $props();
 
   const themes: Theme[] = ["auto", "light", "dark"];
 
@@ -21,6 +30,13 @@
   getSettings().then(
     (loaded) => (settings = loaded),
     (error: unknown) => (problem = errorMessage(error)),
+  );
+
+  /** Compte de l'appareil ; `null` sans serveur, ou si le serveur ne répond pas. */
+  let account = $state<AccountStatus | null>(null);
+  accountStatus().then(
+    (loaded) => (account = loaded),
+    () => undefined,
   );
 
   async function submit(event: SubmitEvent) {
@@ -66,5 +82,13 @@
     </div>
   {:else}
     <p>{texts.loading}</p>
+  {/if}
+  {#if account?.isAdmin}
+    {@const admin = account}
+    <div class="actions">
+      <button type="button" onclick={() => onAdmin(admin.address, admin.publicAddress)}>
+        {texts.administration}
+      </button>
+    </div>
   {/if}
 </section>

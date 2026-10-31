@@ -681,6 +681,7 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::GONE);
+        assert_eq!(json(response).await, json!({ "reason": "deleted" }));
         assert_eq!(server.get("/v1/admin/vaults").await, json!([]));
         assert_eq!(
             server.status("DELETE", &delete, None).await,
@@ -708,6 +709,18 @@ mod tests {
             server.status("DELETE", &remove, None).await,
             StatusCode::NO_CONTENT
         );
+        let response = send(
+            &server.app,
+            request(
+                "GET",
+                &format!("/v1/vaults/{famille}"),
+                Some(&server.arthur),
+                None,
+            ),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::GONE);
+        assert_eq!(json(response).await, json!({ "reason": "left" }));
         assert_eq!(
             server.status("DELETE", &remove, None).await,
             StatusCode::NOT_FOUND
@@ -732,6 +745,20 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn the_owner_of_a_private_vault_is_not_removed() {
+        let server = server().await;
+        let perso = server
+            .published_vault(&server.camille, "perso", false)
+            .await;
+        let (camille, _) = server.account("Camille").await;
+        let remove = format!("/v1/admin/vaults/{perso}/members/{camille}");
+        assert_eq!(
+            server.status("DELETE", &remove, None).await,
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[tokio::test]

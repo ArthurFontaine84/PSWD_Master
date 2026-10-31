@@ -18,11 +18,9 @@
 
   interface Props {
     onClose: () => void;
-    /** Ouvre le panneau d'administration de ce serveur. */
-    onAdmin: (address: string, publicAddress: string | null) => void;
   }
 
-  const { onClose, onAdmin }: Props = $props();
+  const { onClose }: Props = $props();
 
   type Task = "connect" | "sync" | "key" | "disconnect";
 
@@ -49,7 +47,7 @@
       problem = errorMessage(error);
       return;
     }
-    // Serveur injoignable : l'écran reste utilisable, sans panneau d'administration.
+    // Serveur injoignable : l'écran reste utilisable, sans le compte.
     account = status.address === null ? null : await accountStatus().catch(() => null);
   }
 
@@ -213,13 +211,6 @@
       </button>
       <button type="button" disabled={running !== null} onclick={newDeviceKey}>{texts.addDevice}</button>
     </div>
-    {#if account?.isAdmin}
-      <div class="actions">
-        <button type="button" onclick={() => onAdmin(status?.address ?? "", account?.publicAddress ?? null)}>
-          {texts.administration}
-        </button>
-      </div>
-    {/if}
     <div class="actions">
       <button type="button" onclick={onClose}>{texts.back}</button>
       <button type="button" class="danger" disabled={running !== null} onclick={startDisconnection}>

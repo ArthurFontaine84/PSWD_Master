@@ -91,7 +91,7 @@
       case "recovery":
         return true;
       case "admin":
-        screen = { kind: "server" };
+        screen = { kind: "settings" };
         return true;
       default:
         screen = { kind: "list" };
@@ -208,18 +208,18 @@
           onCancel={() => (screen = { kind: "list" })}
         />
       {:else if screen.kind === "server"}
-        <Server
-          onClose={() => (screen = { kind: "list" })}
-          onAdmin={(address, publicAddress) => (screen = { kind: "admin", address, publicAddress })}
-        />
+        <Server onClose={() => (screen = { kind: "list" })} />
       {:else if screen.kind === "admin"}
         <Admin
           address={screen.address}
           publicAddress={screen.publicAddress}
-          onClose={() => (screen = { kind: "server" })}
+          onClose={() => (screen = { kind: "settings" })}
         />
       {:else if screen.kind === "settings"}
-        <Settings onClose={() => (screen = { kind: "list" })} />
+        <Settings
+          onClose={() => (screen = { kind: "list" })}
+          onAdmin={(address, publicAddress) => (screen = { kind: "admin", address, publicAddress })}
+        />
       {:else}
         {@const name = screen.vault.name}
         <OpenVault

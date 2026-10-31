@@ -114,9 +114,23 @@ pub struct RemoteLink {
     /// reconnexion.
     pub server: String,
     pub id: Uuid,
-    /// Le serveur a retiré le coffre, ou en a retiré le compte : il n'est plus synchronisé.
+    /// Le coffre a été supprimé du serveur : il n'est plus synchronisé, sauf s'il est republié.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub removed: bool,
+    /// Dernier état commun avec le serveur ; `None` tant qu'il n'est pas connu.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synced: Option<SyncedState>,
+}
+
+/// État où la copie locale et celle du serveur avaient le même contenu : il dit, sans
+/// déchiffrer le coffre, lequel des deux a changé depuis.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncedState {
+    /// Version du serveur (`ETag`).
+    pub version: String,
+    /// Empreinte SHA-256 de la copie locale, en hexadécimal.
+    pub file_hash: String,
 }
 
 impl VaultConfig {
@@ -312,6 +326,7 @@ mod tests {
             server: "ab".repeat(32),
             id,
             removed: false,
+            synced: None,
         }
     }
 
@@ -420,10 +435,34 @@ theme = \"dark\"
         assert!(!text.contains("[vaults.perso.remote]"), "{text}");
         assert!(!text.contains("shared"), "{text}");
         assert!(!text.contains("removed"), "{text}");
+        assert!(!text.contains("synced"), "{text}");
         assert_eq!(
             config.link_vault("inconnu", link(id)),
             Err(ConfigError::UnknownVault("inconnu".to_owned()))
         );
+    }
+
+    #[test]
+    fn the_last_common_state_is_saved() {
+        let dir = TempDir::new().unwrap();
+        let mut file = config_file_in(&dir);
+        let mut config = Config::default();
+        let synced = SyncedState {
+            version: "\"3\"".to_owned(),
+            file_hash: "cd".repeat(32),
+        };
+        let perso = VaultConfig {
+            remote: Some(RemoteLink {
+                synced: Some(synced),
+                ..link(Uuid::new_v4())
+            }),
+            ..vault("perso")
+        };
+        config.add_vault("perso", perso).unwrap();
+        file.save(&config).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(text.contains("[vaults.perso.remote.synced]"), "{text}");
+        assert_eq!(file.load().unwrap(), config);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Serveur : `connect`, `disconnect`, `add-device`, `status`, `sync`, et la synchro d'un coffre
 //! ouvert.
 
-use pswd_app::{AppError, KeptReason, SyncOutcome, VaultSession, VaultState};
+use pswd_app::{AppError, KeptReason, SyncOutcome, Update, VaultSession, VaultState};
 use pswd_core::{ConnectionKey, SyncStatus};
 
 use crate::app::{App, CliError};
@@ -30,59 +30,65 @@ impl<T: Terminal, C> App<T, C> {
         Ok(())
     }
 
-    /// `pswd sync` : télécharge les nouveaux coffres du compte et publie ceux de l'appareil.
+    /// `pswd sync` : échange avec le serveur, sans mot de passe.
     pub(crate) fn sync_vaults(&mut self) -> Result<(), CliError> {
         if !self.exchange()? {
-            self.terminal.print(
-                "Aucun coffre à échanger avec le serveur. Le contenu d'un coffre se \
-                 synchronise à son ouverture.",
-            );
+            self.terminal.print("Coffres à jour.");
         }
         Ok(())
     }
 
-    /// Renvoie `true` si un coffre a été téléchargé ou publié.
+    /// Renvoie `true` si l'échange a changé quelque chose ou rencontré un problème.
     fn exchange(&mut self) -> Result<bool, CliError> {
-        let mut exchanged = false;
-        let downloads = self.vaults.download_vaults()?;
-        for name in downloads.removed {
-            exchanged = true;
-            self.terminal.print(&format!(
-                "Coffre « {name} » retiré du serveur : gardé sur cet appareil, il n'est plus \
-                 synchronisé."
+        let exchange = self.vaults.exchange()?;
+        let mut lines = Vec::new();
+        for (server_name, result) in exchange.downloaded {
+            lines.push(match result {
+                Ok(name) if name == server_name => format!("Coffre « {name} » téléchargé."),
+                Ok(name) => format!(
+                    "Coffre « {server_name} » téléchargé sous le nom « {name} » (nom déjà pris \
+                     sur cet appareil)."
+                ),
+                Err(error) => {
+                    format!("⚠ Coffre « {server_name} » du serveur non téléchargé : {error}")
+                }
+            });
+        }
+        for (name, result) in exchange.published {
+            lines.push(match result {
+                Ok(()) => format!("Coffre « {name} » publié."),
+                Err(error) => format!("⚠ Coffre « {name} » non publié : {error}"),
+            });
+        }
+        for (name, result) in exchange.updated {
+            lines.push(match result {
+                Ok(Update::Sent) => format!("Coffre « {name} » envoyé au serveur."),
+                Ok(Update::Received) => format!("Coffre « {name} » mis à jour depuis le serveur."),
+                Ok(Update::NeedsUnlock) => format!(
+                    "⚠ Coffre « {name} » modifié ici et sur le serveur : l'ouvrir pour terminer \
+                     la synchro."
+                ),
+                Err(error) => format!("⚠ Coffre « {name} » non synchronisé : {error}"),
+            });
+        }
+        for name in exchange.removed {
+            lines.push(format!(
+                "Coffre « {name} » supprimé du serveur : gardé sur cet appareil. Pour le \
+                 republier, l'ouvrir puis taper sync."
             ));
         }
-        for (server_name, result) in downloads.downloaded {
-            match result {
-                Ok(name) if name == server_name => {
-                    exchanged = true;
-                    self.terminal
-                        .print(&format!("Coffre « {name} » téléchargé."));
-                }
-                Ok(name) => {
-                    exchanged = true;
-                    self.terminal.print(&format!(
-                        "Coffre « {server_name} » téléchargé sous le nom « {name} » (nom déjà \
-                         pris sur cet appareil)."
-                    ));
-                }
-                Err(error) => self.terminal.print(&format!(
-                    "⚠ Coffre « {server_name} » du serveur non téléchargé : {error}"
-                )),
-            }
+        for (name, result) in exchange.left {
+            lines.push(match result {
+                Ok(()) => format!(
+                    "Coffre « {name} » supprimé de cet appareil : ce compte n'en est plus membre."
+                ),
+                Err(error) => format!("⚠ Coffre « {name} » quitté mais pas supprimé : {error}"),
+            });
         }
-        for (name, result) in self.vaults.publish_vaults()? {
-            match result {
-                Ok(()) => {
-                    exchanged = true;
-                    self.terminal.print(&format!("Coffre « {name} » publié."));
-                }
-                Err(error) => self
-                    .terminal
-                    .print(&format!("⚠ Coffre « {name} » non publié : {error}")),
-            }
+        for line in &lines {
+            self.terminal.print(line);
         }
-        Ok(exchanged)
+        Ok(!lines.is_empty())
     }
 
     pub(crate) fn disconnect(&mut self) -> Result<(), CliError> {
@@ -132,55 +138,74 @@ impl<T: Terminal, C> App<T, C> {
     }
 
     pub(crate) fn status(&mut self) -> Result<(), CliError> {
-        match self.vaults.server()? {
-            Some(server) => self
-                .terminal
-                .print(&format!("Serveur : {}", server.local_address)),
-            None => self
-                .terminal
-                .print("Aucun serveur (pswd connect <adresse> pour s'y connecter)."),
-        }
-        let states = self.vaults.vault_states()?;
-        if states.is_empty() {
+        let names: Vec<String> = self.vaults.config()?.vaults.into_keys().collect();
+        let states = if let Some(server) = self.vaults.server()? {
+            self.terminal
+                .print(&format!("Serveur : {}", server.local_address));
+            self.vaults
+                .vault_states()
+                .inspect_err(|error| self.terminal.print(&format!("⚠ {error}")))
+                .ok()
+        } else {
+            self.terminal
+                .print("Aucun serveur (pswd connect <adresse> pour s'y connecter).");
+            None
+        };
+        if names.is_empty() {
             self.terminal.print("Aucun coffre.");
         }
-        for (name, state) in states {
-            let state = match state {
-                VaultState::ToPublish => "à publier",
-                VaultState::Published => "publié",
-                VaultState::Detached => "détaché",
-                VaultState::Removed => "retiré",
-            };
-            self.terminal.print(&format!("  {name} : {state}"));
+        let lines: Vec<String> = states.map_or_else(
+            || names.iter().map(|name| format!("  {name}")).collect(),
+            |states| {
+                states
+                    .into_iter()
+                    .map(|(name, state)| format!("  {name} : {}", state_label(state)))
+                    .collect()
+            },
+        );
+        for line in &lines {
+            self.terminal.print(line);
         }
         Ok(())
     }
 
-    /// Synchro automatique : rien n'est affiché si tout va bien.
-    pub(crate) fn sync_quietly(&mut self, name: &str, session: &mut VaultSession) {
+    /// Synchro automatique : rien n'est affiché si tout va bien. Renvoie `false` si le coffre a
+    /// été supprimé de l'appareil.
+    pub(crate) fn sync_quietly(&mut self, name: &str, session: &mut VaultSession) -> bool {
         match self.vaults.sync(name, session) {
-            Ok(
-                SyncOutcome::Done(SyncStatus::Synced)
-                | SyncOutcome::NotConnected
-                | SyncOutcome::Detached,
-            ) => {}
-            Ok(outcome) => self
-                .terminal
-                .print(&format!("⚠ Synchro : {}.", describe(&outcome))),
-            Err(error) => self.terminal.print(&format!("⚠ Synchro : {error}.")),
+            Ok(SyncOutcome::Done(SyncStatus::Synced) | SyncOutcome::NotConnected) => true,
+            Ok(outcome) => {
+                self.terminal
+                    .print(&format!("⚠ Synchro : {}.", describe(&outcome)));
+                outcome != SyncOutcome::Left
+            }
+            Err(error) => {
+                self.terminal.print(&format!("⚠ Synchro : {error}."));
+                true
+            }
         }
     }
 
-    /// Commande `sync` du shell.
+    /// Commande `sync` du shell : un coffre supprimé du serveur y est republié.
     pub(crate) fn sync_open_vault(
         &mut self,
         name: &str,
         session: &mut VaultSession,
     ) -> Result<(), CliError> {
-        let outcome = self.vaults.sync(name, session)?;
+        let outcome = self.vaults.republish(name, session)?;
         self.terminal
             .print(&format!("Synchro : {}.", describe(&outcome)));
         Ok(())
+    }
+}
+
+fn state_label(state: VaultState) -> &'static str {
+    match state {
+        VaultState::Local => "local, publié au prochain pswd sync",
+        VaultState::Synced => "à jour",
+        VaultState::Outdated => "mis à jour au prochain pswd sync",
+        VaultState::NeedsUnlock => "modifié ici et sur le serveur : l'ouvrir pour le synchroniser",
+        VaultState::Removed => "supprimé du serveur : l'ouvrir puis taper sync pour le republier",
     }
 }
 
@@ -189,10 +214,12 @@ fn describe(outcome: &SyncOutcome) -> String {
         SyncOutcome::NotConnected => {
             "cet appareil n'est connecté à aucun serveur (pswd connect)".to_owned()
         }
-        SyncOutcome::Detached => "coffre détaché, lié à un autre serveur".to_owned(),
         SyncOutcome::Removed | SyncOutcome::Done(SyncStatus::Removed) => {
-            "coffre retiré du serveur : gardé sur cet appareil, il n'est plus synchronisé"
+            "coffre supprimé du serveur : gardé sur cet appareil ; taper sync pour le republier"
                 .to_owned()
+        }
+        SyncOutcome::Left => {
+            "ce compte n'est plus membre du coffre : il a été supprimé de cet appareil".to_owned()
         }
         SyncOutcome::Done(SyncStatus::Synced) => "coffre à jour".to_owned(),
         SyncOutcome::Done(SyncStatus::Offline(error)) => {
@@ -260,7 +287,7 @@ mod tests {
             shown,
             "Appareil connecté au serveur.\nCoffre « perso » publié."
         );
-        assert!(status(&env, "a").ends_with("\n  perso : publié"));
+        assert!(status(&env, "a").ends_with("\n  perso : à jour"));
     }
 
     #[test]
@@ -360,11 +387,7 @@ mod tests {
         let env = TestEnv::new();
         env.connect_admin("a");
         env.connect_same_account("a", "b");
-        assert_eq!(
-            output(&env, "a", &[], Command::Sync),
-            "Aucun coffre à échanger avec le serveur. Le contenu d'un coffre se synchronise à \
-             son ouverture."
-        );
+        assert_eq!(output(&env, "a", &[], Command::Sync), "Coffres à jour.");
         output(&env, "a", &[PASSWORD, PASSWORD], init());
         assert_eq!(
             output(&env, "a", &[], Command::Sync),
@@ -385,26 +408,140 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_vault_left_on_another_device_is_kept_as_removed() {
-        let env = TestEnv::new();
-        env.connect_admin("a");
+    fn shared_vault(env: &TestEnv, device: &str) {
         let params = pswd_core::crypto::KdfParams::new(8 * 1024, 1, 1).unwrap();
         let password = pswd_core::Secret::new(PASSWORD.to_owned());
-        env.vaults("a")
+        env.vaults(device)
             .create_shared("famille", &password, params, Timestamp::from_millis(0))
             .unwrap();
+    }
+
+    fn open_famille() -> Command {
+        Command::Open {
+            name: "famille".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_vault_left_on_another_device_is_deleted() {
+        let env = TestEnv::new();
+        env.connect_admin("a");
+        shared_vault(&env, "a");
         output(&env, "a", &[], Command::Sync);
         env.connect_same_account("a", "b");
         env.vaults("a").leave("famille").unwrap();
 
-        let shown = output(&env, "b", &[], Command::Sync);
         assert_eq!(
-            shown,
-            "Coffre « famille » retiré du serveur : gardé sur cet appareil, il n'est plus \
-             synchronisé."
+            output(&env, "b", &[], Command::Sync),
+            "Coffre « famille » supprimé de cet appareil : ce compte n'en est plus membre."
         );
-        assert!(status(&env, "b").ends_with("  famille : retiré"));
+        assert!(status(&env, "b").ends_with("\nAucun coffre."));
+    }
+
+    #[test]
+    fn opening_a_vault_left_elsewhere_deletes_it() {
+        let env = TestEnv::new();
+        env.connect_admin("a");
+        shared_vault(&env, "a");
+        output(&env, "a", &[], Command::Sync);
+        env.connect_same_account("a", "b");
+        env.vaults("a").leave("famille").unwrap();
+
+        let shown = output(&env, "b", &[PASSWORD], open_famille());
+        assert!(
+            shown.ends_with(
+                "⚠ Synchro : ce compte n'est plus membre du coffre : il a été supprimé de cet \
+                 appareil."
+            ),
+            "{shown}"
+        );
+        assert!(env.config("b").vaults.is_empty());
+    }
+
+    #[test]
+    fn a_vault_left_but_not_deleted_is_reported() {
+        let env = TestEnv::new();
+        env.connect_admin("a");
+        shared_vault(&env, "a");
+        output(&env, "a", &[], Command::Sync);
+        env.connect_same_account("a", "b");
+        env.vaults("a").leave("famille").unwrap();
+        let file = env.config("b").vault("famille").unwrap().vault_file();
+        let mut temporary = file.into_os_string();
+        temporary.push(".tmp");
+        fs::create_dir(&temporary).unwrap();
+        let shown = output(&env, "b", &[], Command::Sync);
+        assert!(
+            shown.starts_with("⚠ Coffre « famille » quitté mais pas supprimé : "),
+            "{shown}"
+        );
+    }
+
+    #[test]
+    fn a_vault_deleted_from_the_server_is_kept_until_republished() {
+        let env = TestEnv::with_vault();
+        env.connect_admin("a");
+        env.connect_same_account("a", "b");
+        env.vaults("a").delete_everywhere("perso").unwrap();
+
+        assert_eq!(
+            output(&env, "b", &[], Command::Sync),
+            "Coffre « perso » supprimé du serveur : gardé sur cet appareil. Pour le republier, \
+             l'ouvrir puis taper sync."
+        );
+        assert!(status(&env, "b").ends_with(
+            "  perso : supprimé du serveur : l'ouvrir puis taper sync pour le republier"
+        ));
+        let shown = output(&env, "b", &[PASSWORD, "sync"], open());
+        assert!(shown.ends_with("Synchro : coffre à jour."), "{shown}");
+        assert!(status(&env, "b").ends_with("  perso : à jour"));
+    }
+
+    #[test]
+    fn sync_updates_vaults_without_their_password() {
+        let env = TestEnv::with_vault();
+        env.connect_admin("a");
+        env.connect_same_account("a", "b");
+        let note = |title: &str| {
+            let title = title.to_owned();
+            move |vault: &mut pswd_core::Vault| {
+                vault.add(
+                    EntryContent::new(EntryKind::Note, title),
+                    Timestamp::from_millis(1),
+                );
+            }
+        };
+        env.edit_vault("b", note("Banque"));
+        assert!(status(&env, "b").ends_with("  perso : mis à jour au prochain pswd sync"));
+        assert_eq!(
+            output(&env, "b", &[], Command::Sync),
+            "Coffre « perso » envoyé au serveur."
+        );
+        assert_eq!(
+            output(&env, "a", &[], Command::Sync),
+            "Coffre « perso » mis à jour depuis le serveur."
+        );
+        assert_eq!(titles(&env, "a"), ["Banque"]);
+
+        env.edit_vault("a", note("Wi-Fi"));
+        env.edit_vault("b", note("Cantine"));
+        output(&env, "a", &[], Command::Sync);
+        assert!(
+            status(&env, "b").ends_with(
+                "  perso : modifié ici et sur le serveur : l'ouvrir pour le synchroniser"
+            )
+        );
+        assert_eq!(
+            output(&env, "b", &[], Command::Sync),
+            "⚠ Coffre « perso » modifié ici et sur le serveur : l'ouvrir pour terminer la synchro."
+        );
+
+        fs::remove_file(env.config("b").vault("perso").unwrap().vault_file()).unwrap();
+        let shown = output(&env, "b", &[], Command::Sync);
+        assert!(
+            shown.starts_with("⚠ Coffre « perso » non synchronisé : "),
+            "{shown}"
+        );
     }
 
     #[test]
@@ -416,14 +553,24 @@ mod tests {
         output(&env, "a", &[PASSWORD, PASSWORD], init());
         assert_eq!(
             status(&env, "a"),
-            format!("Serveur : {}\n  perso : à publier", server.address)
+            format!(
+                "Serveur : {}\n  perso : local, publié au prochain pswd sync",
+                server.address
+            )
         );
         output(&env, "a", &[], Command::Sync);
-        output(&env, "a", &[""], Command::Disconnect);
         assert_eq!(
             status(&env, "a"),
-            format!("{disconnected}\n  perso : détaché")
+            format!("Serveur : {}\n  perso : à jour", server.address)
         );
+        env.go_offline("a");
+        let shown = status(&env, "a");
+        assert!(
+            shown.ends_with("\n⚠ serveur injoignable\n  perso"),
+            "{shown}"
+        );
+        output(&env, "a", &[""], Command::Disconnect);
+        assert_eq!(status(&env, "a"), format!("{disconnected}\n  perso"));
     }
 
     #[test]
@@ -532,7 +679,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_sync_explains_why_nothing_happens() {
+    fn shell_sync_explains_why_nothing_happens_then_publishes() {
         let env = TestEnv::with_vault();
         let shown = output(&env, "a", &[PASSWORD, "sync"], open());
         assert!(
@@ -544,10 +691,7 @@ mod tests {
         output(&env, "a", &[""], Command::Disconnect);
         env.connect_admin("a");
         let shown = output(&env, "a", &[PASSWORD, "sync"], open());
-        assert!(
-            shown.ends_with("Synchro : coffre détaché, lié à un autre serveur."),
-            "{shown}"
-        );
+        assert!(shown.ends_with("Synchro : coffre à jour."), "{shown}");
     }
 
     #[test]
@@ -607,7 +751,8 @@ mod tests {
         for removed in [SyncOutcome::Removed, SyncOutcome::Done(SyncStatus::Removed)] {
             assert_eq!(
                 describe(&removed),
-                "coffre retiré du serveur : gardé sur cet appareil, il n'est plus synchronisé"
+                "coffre supprimé du serveur : gardé sur cet appareil ; taper sync pour le \
+                 republier"
             );
         }
     }

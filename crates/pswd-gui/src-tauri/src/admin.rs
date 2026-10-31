@@ -16,6 +16,8 @@ use crate::state::{AppState, confirm};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountStatus {
+    /// Adresse locale du serveur, donnée avec les clés de connexion.
+    address: String,
     account_name: String,
     /// Le panneau d'administration est proposé.
     is_admin: bool,
@@ -136,7 +138,9 @@ impl AppState {
     pub fn account_status(&self) -> Result<AccountStatus, UiError> {
         let _one_at_a_time = self.exclusive();
         let info = self.vaults.server_info().map_err(server_error)?;
+        let address = self.vaults.server()?.map(|server| server.local_address);
         Ok(AccountStatus {
+            address: address.unwrap_or_default(),
             account_name: info.account_name,
             is_admin: info.is_admin,
             public_address: info.public_address,
@@ -319,11 +323,16 @@ mod tests {
     #[test]
     fn the_device_learns_its_account_and_role() {
         let dir = TempDir::new().unwrap();
-        let (arthur, camille, _server) = server(&dir);
+        let (arthur, camille, test_server) = server(&dir);
         arthur.set_public_address("maison").unwrap();
         assert_eq!(
             sent(&camille.account_status().unwrap()),
-            json!({ "accountName": "Camille", "isAdmin": false, "publicAddress": "maison" })
+            json!({
+                "address": test_server.address,
+                "accountName": "Camille",
+                "isAdmin": false,
+                "publicAddress": "maison",
+            })
         );
         assert_eq!(
             arthur.vaults.server().unwrap().unwrap().public_address,

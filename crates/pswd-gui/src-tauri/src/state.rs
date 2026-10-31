@@ -4,8 +4,8 @@ use std::thread;
 use std::time::Duration;
 
 use pswd_app::{
-    AppError, IdleLock, VaultSession, Vaults, add_entries, backup_file_name, check_master_password,
-    live_count, search, tag_counts,
+    AppError, IdleLock, SyncOutcome, VaultSession, Vaults, add_entries, backup_file_name,
+    check_master_password, live_count, search, tag_counts,
 };
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::SecureClipboard;
@@ -206,15 +206,17 @@ impl AppState {
         let syncing = Arc::clone(&self.syncing);
         let notifier = Arc::clone(&self.notifier);
         thread::spawn(move || {
-            if let Some(report) = sync_open(&vaults, &open, &syncing) {
+            if let Some(report) = sync_open(&vaults, &open, &syncing, Trigger::Automatic) {
                 notifier.vault_synced(&report);
             }
         });
     }
 
-    /// Synchronise le coffre ouvert et attend le résultat (bouton « Synchroniser »).
+    /// Synchronise le coffre ouvert et attend le résultat (bouton « Synchroniser ») ; supprimé
+    /// du serveur, il y est republié.
     pub fn sync_now(&self) -> Result<SyncReport, UiError> {
-        sync_open(&self.vaults, &self.open, &self.syncing).ok_or_else(UiError::vault_locked)
+        sync_open(&self.vaults, &self.open, &self.syncing, Trigger::Requested)
+            .ok_or_else(UiError::vault_locked)
     }
 
     /// L'application passe en arrière-plan : le coffre ouvert se verrouillera après
@@ -466,12 +468,22 @@ impl AppState {
     }
 }
 
+/// Synchro automatique, ou demandée par l'utilisateur : seule la seconde republie un coffre
+/// supprimé du serveur.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Trigger {
+    Automatic,
+    Requested,
+}
+
 /// Synchronise une copie de la session ouverte : l'interface continue de lire et de modifier le
-/// coffre pendant l'échange avec le serveur. `None` si aucun coffre n'est ouvert.
+/// coffre pendant l'échange avec le serveur. `None` si aucun coffre n'est ouvert. Un coffre dont
+/// le compte n'est plus membre vient d'être supprimé : il est fermé.
 fn sync_open(
     vaults: &Vaults,
     open: &Mutex<Option<OpenVault>>,
     syncing: &Mutex<()>,
+    trigger: Trigger,
 ) -> Option<SyncReport> {
     let _one_at_a_time = lock(syncing);
     let (name, opening, edits, mut session) = {
@@ -480,8 +492,17 @@ fn sync_open(
         let session = open.lock.with(|session| session.clone())?;
         (open.name.clone(), open.opening, open.edits, session)
     };
-    let outcome = vaults.sync(&name, &mut session);
-    let changed = give_back(open, opening, edits, session);
+    let outcome = match trigger {
+        Trigger::Automatic => vaults.sync(&name, &mut session),
+        Trigger::Requested => vaults.republish(&name, &mut session),
+    };
+    let changed = if outcome == Ok(SyncOutcome::Left) {
+        let left = lock(open).take_if(|open| open.opening == opening);
+        drop(left.and_then(|open| open.lock.close()));
+        false
+    } else {
+        give_back(open, opening, edits, session)
+    };
     Some(SyncReport::new(name, outcome, changed))
 }
 
@@ -1536,6 +1557,58 @@ mod tests {
         let key = connected.new_device_key().unwrap();
         other.connect(&address, &key, "Portable", "").unwrap();
         other.exchange().unwrap();
+    }
+
+    #[test]
+    fn a_vault_left_from_another_device_is_closed_and_deleted() {
+        let dir = TempDir::new().unwrap();
+        let (pc, _, pc_reports) = build(&dir, None, FakeClipboard::default());
+        connect_admin(&pc);
+        pc.create("famille", &secret("Maître-2026!"), true).unwrap();
+        next_report(&pc_reports);
+        pc.lock();
+
+        let other = TempDir::new().unwrap();
+        let (phone, _, phone_reports) = build(&other, None, FakeClipboard::default());
+        connect_same_account(&pc, &phone);
+        phone.unlock("famille", &secret("Maître-2026!")).unwrap();
+        next_report(&phone_reports);
+        pc.vaults.leave("famille").unwrap();
+
+        assert_eq!(
+            phone.sync_now(),
+            Ok(report("famille", SyncState::Left, false))
+        );
+        assert_eq!(phone.current(), None);
+        assert!(phone.vaults.config().unwrap().vaults.is_empty());
+    }
+
+    #[test]
+    fn a_vault_deleted_from_the_server_is_republished_on_request() {
+        let dir = TempDir::new().unwrap();
+        let (pc, _, pc_reports) = build(&dir, None, FakeClipboard::default());
+        connect_admin(&pc);
+        pc.create("perso", &secret("Maître-2026!"), false).unwrap();
+        next_report(&pc_reports);
+        pc.lock();
+
+        let other = TempDir::new().unwrap();
+        let (phone, _, phone_reports) = build(&other, None, FakeClipboard::default());
+        connect_same_account(&pc, &phone);
+        phone.unlock("perso", &secret("Maître-2026!")).unwrap();
+        next_report(&phone_reports);
+        pc.vaults.delete_everywhere("perso").unwrap();
+        phone
+            .add_entry(wifi_input(&json!({ "mode": "set", "value": "box-1234" })))
+            .unwrap();
+        assert_eq!(
+            next_report(&phone_reports),
+            report("perso", SyncState::Removed, false)
+        );
+        assert_eq!(
+            phone.sync_now(),
+            Ok(report("perso", SyncState::Synced, false))
+        );
     }
 
     #[test]

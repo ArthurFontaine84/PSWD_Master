@@ -79,7 +79,8 @@ impl Storage {
     /// # Errors
     ///
     /// [`StorageError::NotFound`] si le coffre n'existe pas ou si `account` n'en est pas membre,
-    /// [`StorageError::Gone`] si `account` l'a quitté.
+    /// [`StorageError::Gone`] s'il l'a quitté ou en a été retiré, [`StorageError::Deleted`] si le
+    /// coffre a été supprimé.
     pub fn fetch(&self, id: Uuid, account: Uuid) -> Result<Option<StoredFile>, StorageError> {
         let Some(version) = current_version(&self.conn, id, account)? else {
             return Ok(None);
@@ -99,8 +100,8 @@ impl Storage {
     /// # Errors
     ///
     /// [`StorageError::NotFound`] si le coffre n'existe pas ou si `account` n'en est pas membre,
-    /// [`StorageError::Gone`] si `account` l'a quitté, [`StorageError::Conflict`] s'il a changé
-    /// depuis `expected`.
+    /// [`StorageError::Gone`] s'il l'a quitté ou en a été retiré, [`StorageError::Deleted`] si le
+    /// coffre a été supprimé, [`StorageError::Conflict`] s'il a changé depuis `expected`.
     pub fn publish(
         &mut self,
         id: Uuid,
@@ -172,17 +173,22 @@ pub(super) fn shared_if_member(
     shared.ok_or_else(|| absence(conn, id, account))
 }
 
-/// Pourquoi `account` n'accède pas au coffre : il l'a quitté ([`StorageError::Gone`]), ou ne l'a
-/// jamais eu ([`StorageError::NotFound`]).
+/// Pourquoi `account` n'accède pas au coffre : le coffre a été supprimé
+/// ([`StorageError::Deleted`]), il l'a quitté ou en a été retiré ([`StorageError::Gone`]), ou ne
+/// l'a jamais eu ([`StorageError::NotFound`]).
 fn absence(conn: &Connection, id: Uuid, account: Uuid) -> StorageError {
-    let former = conn.query_row(
-        "SELECT EXISTS (SELECT 1 FROM former_members WHERE vault_id = ?1 AND account_id = ?2)",
-        params![id, account],
-        |row| row.get(0),
-    );
-    match former {
-        Ok(true) => StorageError::Gone,
-        Ok(false) => StorageError::NotFound,
+    let deleted = conn
+        .query_row(
+            "SELECT v.removed FROM former_members f JOIN vaults v ON v.id = f.vault_id
+             WHERE f.vault_id = ?1 AND f.account_id = ?2",
+            params![id, account],
+            |row| row.get(0),
+        )
+        .optional();
+    match deleted {
+        Ok(Some(true)) => StorageError::Deleted,
+        Ok(Some(false)) => StorageError::Gone,
+        Ok(None) => StorageError::NotFound,
         Err(error) => error.into(),
     }
 }

@@ -114,7 +114,9 @@ impl<T: Terminal, C: SecureClipboard> App<T, C> {
         self.terminal.print(&format!(
             "Coffre « {name} » ouvert. Tapez help pour l'aide."
         ));
-        self.sync_quietly(&name, &mut session);
+        if !self.sync_quietly(&name, &mut session) {
+            return Ok(());
+        }
         let timeout = self.auto_lock.unwrap_or_else(|| config.auto_lock());
         let guarded = IdleLock::new(session, timeout);
         self.shell(&name, &guarded, config.clipboard_clear())?;

@@ -252,6 +252,8 @@ impl ServerClient {
         RemoteVault {
             client: self.clone(),
             id,
+            version: None,
+            removal: None,
         }
     }
 
@@ -281,15 +283,57 @@ impl ServerClient {
     }
 }
 
+/// Pourquoi le serveur ne donne plus un coffre (`410`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Removal {
+    /// Le compte a quitté le coffre commun, ou en a été retiré.
+    Left,
+    /// Le coffre a été supprimé du serveur.
+    Deleted,
+}
+
 /// Un coffre sur le serveur.
 pub struct RemoteVault {
     client: ServerClient,
     id: Uuid,
+    version: Option<RemoteVersion>,
+    removal: Option<Removal>,
 }
 
 impl RemoteVault {
+    /// Version vue au dernier échange réussi : lue, ou créée par une publication. `None` si le
+    /// coffre n'a pas encore été lu, ou s'il est vide.
+    #[must_use]
+    pub fn version(&self) -> Option<&RemoteVersion> {
+        self.version.as_ref()
+    }
+
+    /// Raison du dernier refus `410`.
+    #[must_use]
+    pub fn removal(&self) -> Option<Removal> {
+        self.removal
+    }
+
     fn url(&self, base: &str) -> String {
         format!("{base}/v1/vaults/{}", self.id)
+    }
+
+    /// Retient la raison d'un `410`. Sans raison lisible, le coffre est réputé supprimé : sa copie
+    /// locale est alors gardée.
+    fn gone(&mut self, response: Response) -> PortError {
+        #[derive(Deserialize)]
+        struct Gone {
+            reason: String,
+        }
+
+        let left = parse::<Gone>(response).is_ok_and(|gone| gone.reason == "left");
+        let (removal, message) = if left {
+            (Removal::Left, "ce compte n'est plus membre du coffre")
+        } else {
+            (Removal::Deleted, "coffre supprimé du serveur")
+        };
+        self.removal = Some(removal);
+        PortError::removed(message)
     }
 }
 
@@ -299,17 +343,17 @@ impl RemoteStore for RemoteVault {
         let response = client.send(&|base| client.authorized(client.http.get(self.url(base))))?;
         match response.status() {
             StatusCode::OK => {
-                let version = response
-                    .headers()
-                    .get(ETAG)
-                    .and_then(|value| value.to_str().ok())
-                    .map(|value| RemoteVersion(value.to_owned()))
-                    .ok_or_else(invalid_response)?;
+                let version = etag(&response).ok_or_else(invalid_response)?;
                 let file = body(response)?;
+                self.version = Some(version.clone());
                 Ok(Some(RemoteFile { file, version }))
             }
-            StatusCode::NO_CONTENT => Ok(None),
+            StatusCode::NO_CONTENT => {
+                self.version = None;
+                Ok(None)
+            }
             StatusCode::NOT_FOUND => Err(unknown_vault()),
+            StatusCode::GONE => Err(self.gone(response)),
             status => Err(status_error(status)),
         }
     }
@@ -329,12 +373,25 @@ impl RemoteStore for RemoteVault {
             })
             .map_err(PushError::Failed)?;
         match response.status() {
-            StatusCode::NO_CONTENT => Ok(()),
+            StatusCode::NO_CONTENT => {
+                self.version = etag(&response);
+                Ok(())
+            }
             StatusCode::PRECONDITION_FAILED => Err(PushError::Conflict),
             StatusCode::NOT_FOUND => Err(PushError::Failed(unknown_vault())),
+            StatusCode::GONE => Err(PushError::Failed(self.gone(response))),
             status => Err(PushError::Failed(status_error(status))),
         }
     }
+}
+
+/// Version donnée par l'en-tête `ETag`.
+fn etag(response: &Response) -> Option<RemoteVersion> {
+    response
+        .headers()
+        .get(ETAG)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| RemoteVersion(value.to_owned()))
 }
 
 /// Identifiant renvoyé par une création (`201`).
@@ -666,6 +723,63 @@ mod tests {
             vault.fetch().unwrap().unwrap().version,
             RemoteVersion("\"2\"".to_owned())
         );
+    }
+
+    #[test]
+    fn the_last_version_seen_is_remembered() {
+        let (client, _) = admin();
+        let mut vault = client.vault(client.create_vault("perso", false).unwrap());
+        assert_eq!(vault.version(), None);
+        assert_eq!(vault.fetch().unwrap(), None);
+        assert_eq!(vault.version(), None);
+        vault.push(&VAULT, None).unwrap();
+        assert_eq!(vault.version(), Some(&RemoteVersion("\"1\"".to_owned())));
+
+        let mut other = client.vault(vault.id);
+        other.push(&VAULT, vault.version()).unwrap();
+        assert_eq!(vault.fetch().unwrap().unwrap().version.0, "\"2\"");
+        assert_eq!(vault.version(), Some(&RemoteVersion("\"2\"".to_owned())));
+    }
+
+    #[test]
+    fn a_vault_left_is_told_apart_from_a_deleted_one() {
+        let (client, _) = admin();
+        let shared = client.create_vault("famille", true).unwrap();
+        client.vault(shared).push(&VAULT, None).unwrap();
+        client.leave(shared).unwrap();
+        let mut left = client.vault(shared);
+        assert_eq!(left.removal(), None);
+        let error = left.fetch().unwrap_err();
+        assert!(error.is_removed());
+        assert_eq!(error.to_string(), "ce compte n'est plus membre du coffre");
+        assert_eq!(left.removal(), Some(Removal::Left));
+
+        let private = client.create_vault("perso", false).unwrap();
+        client.delete_own_vault(private).unwrap();
+        let mut deleted = client.vault(private);
+        assert_eq!(
+            deleted.push(&VAULT, None),
+            Err(PushError::Failed(PortError::removed(
+                "coffre supprimé du serveur"
+            )))
+        );
+        assert_eq!(deleted.removal(), Some(Removal::Deleted));
+    }
+
+    #[test]
+    fn a_removal_without_reason_keeps_the_local_copy() {
+        let client = fake_server(|| async { StatusCode::GONE });
+        let mut vault = client.vault(Uuid::new_v4());
+        assert!(vault.fetch().unwrap_err().is_removed());
+        assert_eq!(vault.removal(), Some(Removal::Deleted));
+    }
+
+    #[test]
+    fn a_publication_without_version_leaves_it_unknown() {
+        let client = fake_server(|| async { StatusCode::NO_CONTENT });
+        let mut vault = client.vault(Uuid::new_v4());
+        assert_eq!(vault.push(&VAULT, None), Ok(()));
+        assert_eq!(vault.version(), None);
     }
 
     #[test]
