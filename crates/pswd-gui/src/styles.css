@@ -16,6 +16,7 @@
   --danger-soft: rgb(224 49 49 / 10%);
   --success: #2b8a3e;
   --on-success: #ffffff;
+  --warning: #e8590c;
   --glow-1: rgb(91 91 214 / 38%);
   --glow-2: rgb(157 78 221 / 32%);
   --glow-3: rgb(34 184 207 / 28%);
@@ -57,6 +58,7 @@
   --danger-soft: rgb(255 107 107 / 14%);
   --success: #40c057;
   --on-success: #06210d;
+  --warning: #ff922b;
   --glow-1: rgb(91 91 214 / 45%);
   --glow-2: rgb(157 78 221 / 38%);
   --glow-3: rgb(34 184 207 / 24%);
@@ -88,6 +90,7 @@
     --danger-soft: rgb(255 107 107 / 14%);
     --success: #40c057;
     --on-success: #06210d;
+    --warning: #ff922b;
     --glow-1: rgb(91 91 214 / 45%);
     --glow-2: rgb(157 78 221 / 38%);
     --glow-3: rgb(34 184 207 / 24%);

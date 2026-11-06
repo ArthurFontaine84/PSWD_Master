@@ -6,13 +6,24 @@ function report(state: SyncState, detail: string | null = null): SyncReport {
   return { vault: "perso", state, detail, changed: false };
 }
 
-const nothing: Exchange = { removed: [], downloaded: [], notDownloaded: [], published: [], notPublished: [] };
+const nothing: Exchange = {
+  downloaded: [],
+  notDownloaded: [],
+  published: [],
+  notPublished: [],
+  sent: [],
+  received: [],
+  needsUnlock: [],
+  notUpdated: [],
+  removed: [],
+  left: [],
+  notLeft: [],
+};
 
 describe("syncProblem", () => {
   it("is silent when there is nothing to report", () => {
     expect(syncProblem(report("synced"))).toBeNull();
     expect(syncProblem(report("notConnected"))).toBeNull();
-    expect(syncProblem(report("detached"))).toBeNull();
   });
 
   it("explains each problem", () => {
@@ -20,7 +31,10 @@ describe("syncProblem", () => {
       "Synchro impossible : serveur injoignable. Les modifications seront publiées plus tard.",
     );
     expect(syncProblem(report("removed"))).toBe(
-      "Coffre retiré du serveur : il reste utilisable sur cet appareil, sans être synchronisé.",
+      "Coffre supprimé du serveur : il n'existe plus que sur cet appareil. Pour le republier, appuyez sur « Synchroniser ».",
+    );
+    expect(syncProblem(report("left"))).toBe(
+      "Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil.",
     );
     expect(syncProblem(report("conflict"))).toBe(
       "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",
@@ -37,7 +51,6 @@ describe("syncMessage", () => {
   it("always says what happened", () => {
     expect(syncMessage(report("synced"))).toBe("Coffre à jour.");
     expect(syncMessage(report("notConnected"))).toBe("Cet appareil n'est connecté à aucun serveur.");
-    expect(syncMessage(report("detached"))).toBe("Coffre détaché : il est lié à un autre serveur.");
     expect(syncMessage(report("conflict"))).toBe(
       "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",
     );
@@ -47,14 +60,13 @@ describe("syncMessage", () => {
 describe("exchangeOutcome", () => {
   it("says when there was nothing to exchange", () => {
     expect(exchangeOutcome(nothing)).toEqual({
-      done: ["Aucun coffre à échanger avec le serveur."],
+      done: ["Coffres à jour."],
       problems: [],
     });
   });
 
   it("lists what was exchanged, then what failed", () => {
     const exchange: Exchange = {
-      removed: ["ancien"],
       downloaded: [
         { name: "perso", localName: "perso" },
         { name: "travail", localName: "travail-0123abcd" },
@@ -62,17 +74,30 @@ describe("exchangeOutcome", () => {
       notDownloaded: [{ name: "famille", reason: "disque plein" }],
       published: ["notes"],
       notPublished: [{ name: "abime", reason: "réponse inattendue du serveur (400)" }],
+      sent: ["banque"],
+      received: ["maison"],
+      needsUnlock: ["voiture"],
+      notUpdated: [{ name: "jeux", reason: "fichier introuvable" }],
+      removed: ["ancien"],
+      left: ["club"],
+      notLeft: [{ name: "asso", reason: "accès refusé" }],
     };
     expect(exchangeOutcome(exchange)).toEqual({
       done: [
-        "Coffre « ancien » retiré du serveur : gardé sur cet appareil, il n'est plus synchronisé.",
         "Coffre « perso » téléchargé.",
         "Coffre « travail » téléchargé sous le nom « travail-0123abcd » : ce nom était déjà pris.",
         "Coffre « notes » publié.",
+        "Coffre « banque » envoyé au serveur.",
+        "Coffre « maison » mis à jour depuis le serveur.",
+        "Coffre « ancien » supprimé du serveur : gardé sur cet appareil. Pour le republier, ouvrez-le puis appuyez sur « Synchroniser ».",
+        "Coffre « club » supprimé de cet appareil : vous n'êtes plus membre de ce coffre.",
       ],
       problems: [
         "Coffre « famille » du serveur non téléchargé : disque plein.",
         "Coffre « abime » non publié : réponse inattendue du serveur (400).",
+        "Le coffre « voiture » a été modifié ici et sur le serveur : déverrouillez-le pour terminer la synchro.",
+        "Coffre « jeux » non synchronisé : fichier introuvable.",
+        "Vous n'êtes plus membre du coffre « asso », mais il n'a pas pu être supprimé de cet appareil : accès refusé.",
       ],
     });
   });

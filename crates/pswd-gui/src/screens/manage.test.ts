@@ -192,7 +192,7 @@ describe("deleting the vault", () => {
 
   it("offers to delete a private vault from the server too", async () => {
     vi.mocked(deleteVaultEverywhere).mockResolvedValue();
-    const shared = { address: "pswd.local:8443", vaults: [{ name: "perso", state: "published" as const, shared: true }] };
+    const shared = { address: "pswd.local:8443", vaults: [{ name: "perso", state: "synced" as const, shared: true }] };
     vi.mocked(serverStatus).mockResolvedValueOnce(shared);
     const { unmount } = render(OpenVault, {
       vault: { name: "perso", entries: 0 },
@@ -210,7 +210,7 @@ describe("deleting the vault", () => {
 
     vi.mocked(serverStatus).mockResolvedValue({
       address: "pswd.local:8443",
-      vaults: [{ name: "perso", state: "published", shared: false }],
+      vaults: [{ name: "perso", state: "outdated", shared: false }],
     });
     const { onDeleted } = await manage();
     await fireEvent.click(screen.getByRole("menuitem", { name: "Supprimer ce coffre" }));

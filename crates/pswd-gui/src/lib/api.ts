@@ -83,12 +83,17 @@ export interface CreatedVault {
   recoveryKey: string;
 }
 
-/** État d'un coffre vis-à-vis du serveur de l'appareil. */
-export type VaultServerState = "toPublish" | "published" | "detached" | "removed";
+/**
+ * État d'un coffre vis-à-vis du serveur de l'appareil : `local` (pas sur ce serveur), `synced`
+ * (même contenu), `outdated` (un seul côté a changé), `needsUnlock` (à fusionner), `removed`
+ * (supprimé du serveur).
+ */
+export type VaultServerState = "local" | "synced" | "outdated" | "needsUnlock" | "removed";
 
 export interface VaultStatus {
   name: string;
-  state: VaultServerState;
+  /** `null` si l'appareil n'est pas connecté, ou si le serveur est injoignable. */
+  state: VaultServerState | null;
   /** Coffre commun, à partager avec d'autres comptes du serveur. */
   shared: boolean;
 }
@@ -105,15 +110,25 @@ export interface VaultFailure {
   reason: string;
 }
 
-/** Résultat d'un échange avec le serveur. */
+/** Résultat d'un échange avec le serveur, sans mot de passe. */
 export interface Exchange {
-  /** Coffres que le serveur a retirés ; gardés sur cet appareil. */
-  removed: string[];
   /** `name` sur le serveur, `localName` sur cet appareil (différent si le nom était pris). */
   downloaded: { name: string; localName: string }[];
   notDownloaded: VaultFailure[];
   published: string[];
   notPublished: VaultFailure[];
+  /** Copie locale, plus récente, envoyée au serveur. */
+  sent: string[];
+  /** Copie du serveur, plus récente, téléchargée. */
+  received: string[];
+  /** Modifiés ici et sur le serveur : à déverrouiller pour terminer la synchro. */
+  needsUnlock: string[];
+  notUpdated: VaultFailure[];
+  /** Coffres supprimés du serveur ; gardés sur cet appareil. */
+  removed: string[];
+  /** Coffres communs dont le compte n'est plus membre ; supprimés de cet appareil. */
+  left: string[];
+  notLeft: VaultFailure[];
 }
 
 export interface Disconnection {
@@ -128,8 +143,8 @@ export interface Disconnection {
 export type SyncState =
   | "synced"
   | "notConnected"
-  | "detached"
   | "removed"
+  | "left"
   | "offline"
   | "conflict"
   | "rejected"
@@ -383,7 +398,7 @@ export async function deleteInvitation(id: string): Promise<void> {
   await invoke("delete_invitation", { id });
 }
 
-/** Quitte le coffre commun ; sa copie locale est gardée. */
+/** Quitte le coffre commun, qui est fermé et supprimé de cet appareil. */
 export async function leaveVault(vault: string): Promise<void> {
   await invoke("leave_vault", { vault });
 }

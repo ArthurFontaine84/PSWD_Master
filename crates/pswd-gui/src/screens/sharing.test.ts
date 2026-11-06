@@ -45,13 +45,25 @@ const arthur = { id: "a1", name: "Arthur" };
 const camille = { id: "a2", name: "Camille" };
 const dominique = { id: "a3", name: "Dominique" };
 const invitation: Invitation = { id: "i1", vaultName: "famille", invitedBy: "Arthur" };
-const nothing: Exchange = { removed: [], downloaded: [], notDownloaded: [], published: [], notPublished: [] };
+const nothing: Exchange = {
+  downloaded: [],
+  notDownloaded: [],
+  published: [],
+  notPublished: [],
+  sent: [],
+  received: [],
+  needsUnlock: [],
+  notUpdated: [],
+  removed: [],
+  left: [],
+  notLeft: [],
+};
 const shared: ServerStatus = {
   address: "pswd.local:8443",
   vaults: [
-    { name: "famille", state: "published", shared: true },
+    { name: "famille", state: "synced", shared: true },
     { name: "ancien", state: "removed", shared: true },
-    { name: "perso", state: "published", shared: false },
+    { name: "perso", state: "synced", shared: false },
   ],
 };
 
@@ -92,7 +104,7 @@ describe("the vault list", () => {
     await vi.waitFor(() => {
       expect(card("famille").getByText("commun")).toBeInTheDocument();
     });
-    expect(card("ancien").getByText("retiré")).toBeInTheDocument();
+    expect(card("ancien").getByRole("img")).toHaveAccessibleName("Supprimé du serveur : gardé sur cet appareil");
     expect(card("perso").queryByText("commun")).not.toBeInTheDocument();
   });
 
@@ -238,19 +250,23 @@ describe("the members of a shared vault", () => {
 });
 
 describe("leaving a shared vault", () => {
-  it("keeps the local copy and hides the members", async () => {
+  it("deletes the vault from the device and goes back to the list", async () => {
     vi.mocked(leaveVault).mockRejectedValueOnce({ code: "serverError", detail: "serveur injoignable" }).mockResolvedValue();
-    await manage("famille");
+    const onLocked = vi.fn();
+    render(OpenVault, { vault: { name: "famille", entries: 0 }, onLocked, onExpired: vi.fn(), onDeleted: vi.fn() });
+    await vi.waitFor(() => {
+      expect(serverStatus).toHaveBeenCalled();
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Gérer le coffre" }));
     await fireEvent.click(screen.getByRole("menuitem", { name: "Quitter ce coffre" }));
-    expect(screen.getByText(/La copie de cet appareil est gardée\./)).toBeInTheDocument();
+    expect(screen.getByText(/sera supprimé de cet appareil et de vos autres appareils/)).toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Quitter" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("serveur injoignable");
+    expect(onLocked).not.toHaveBeenCalled();
     await fireEvent.click(screen.getByRole("button", { name: "Quitter" }));
     expect(await screen.findByText("Vous avez quitté le coffre « famille ».")).toBeInTheDocument();
     expect(leaveVault).toHaveBeenCalledWith("famille");
-    expect(screen.getByText("Choisissez une entrée dans la liste.")).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole("button", { name: "Gérer le coffre" }));
-    expect(screen.queryByRole("menuitem", { name: "Membres" })).not.toBeInTheDocument();
+    expect(onLocked).toHaveBeenCalled();
   });
 
   it("can be cancelled", async () => {

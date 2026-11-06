@@ -202,7 +202,7 @@ export const fr = {
   synchronizing: "Synchronisation…",
   exchangeIncomplete: (message: string) =>
     `Échange avec le serveur incomplet. ${message} Réessayez avec « Synchroniser ».`,
-  nothingToExchange: "Aucun coffre à échanger avec le serveur.",
+  nothingToExchange: "Coffres à jour.",
   downloaded: (name: string, localName: string) =>
     name === localName
       ? `Coffre « ${name} » téléchargé.`
@@ -210,6 +210,15 @@ export const fr = {
   notDownloaded: (name: string, reason: string) => `Coffre « ${name} » du serveur non téléchargé : ${reason}.`,
   published: (name: string) => `Coffre « ${name} » publié.`,
   notPublished: (name: string, reason: string) => `Coffre « ${name} » non publié : ${reason}.`,
+  sent: (name: string) => `Coffre « ${name} » envoyé au serveur.`,
+  received: (name: string) => `Coffre « ${name} » mis à jour depuis le serveur.`,
+  needsUnlock: (name: string) =>
+    `Le coffre « ${name} » a été modifié ici et sur le serveur : déverrouillez-le pour terminer la synchro.`,
+  notUpdated: (name: string, reason: string) => `Coffre « ${name} » non synchronisé : ${reason}.`,
+  leftElsewhere: (name: string) =>
+    `Coffre « ${name} » supprimé de cet appareil : vous n'êtes plus membre de ce coffre.`,
+  notLeft: (name: string, reason: string) =>
+    `Vous n'êtes plus membre du coffre « ${name} », mais il n'a pas pu être supprimé de cet appareil : ${reason}.`,
   addDevice: "Ajouter un appareil",
   deviceKeyTitle: "Clé pour un nouvel appareil",
   deviceKeyExplanation: (address: string) =>
@@ -229,10 +238,18 @@ export const fr = {
   removedFromDevice: (name: string) => `Coffre « ${name} » retiré de cet appareil ; il reste sur le serveur.`,
   keptOnDevice: (name: string, reason: string | null) =>
     `Coffre « ${name} » gardé : ${reason ?? "des modifications ne sont pas encore sur le serveur"}.`,
-  vaultStates: { toPublish: "à publier", published: "publié", detached: "détaché", removed: "retiré" },
+  vaultStates: {
+    local: "Pas encore sur le serveur : publié au prochain « Synchroniser »",
+    synced: "Synchronisé",
+    outdated: "À synchroniser : « Synchroniser » le met à jour",
+    needsUnlock: "Modifié ici et sur le serveur : à déverrouiller pour finir la synchro",
+    removed: "Supprimé du serveur : gardé sur cet appareil",
+  },
+  removedNotice:
+    "Ce coffre a été supprimé du serveur : il n'existe plus que sur cet appareil. Pour le republier, déverrouillez-le puis appuyez sur « Synchroniser ».",
   shared: "commun",
   removedByServer: (name: string) =>
-    `Coffre « ${name} » retiré du serveur : gardé sur cet appareil, il n'est plus synchronisé.`,
+    `Coffre « ${name} » supprimé du serveur : gardé sur cet appareil. Pour le republier, ouvrez-le puis appuyez sur « Synchroniser ».`,
   invitations: "Invitations",
   invitation: (vaultName: string, invitedBy: string) => `${invitedBy} vous invite dans le coffre « ${vaultName} ».`,
   accept: "Accepter",
@@ -253,13 +270,13 @@ export const fr = {
   leaveVault: "Quitter ce coffre",
   leave: "Quitter",
   leaveExplanation: (name: string) =>
-    `Le coffre « ${name} » ne sera plus synchronisé avec les autres membres. La copie de cet appareil est gardée. Pour le rejoindre plus tard, il faudra une nouvelle invitation.`,
+    `Le coffre « ${name} » sera supprimé de cet appareil et de vos autres appareils ; les autres membres le gardent. Pour le rejoindre plus tard, il faudra une nouvelle invitation.`,
   vaultLeft: (name: string) => `Vous avez quitté le coffre « ${name} ».`,
   deleteWhere: "Supprimer",
   deleteLocalOnly: "Sur cet appareil seulement",
   deleteEverywhere: "Sur cet appareil et sur le serveur",
   deleteEverywhereExplanation:
-    "Le coffre et ses versions seront aussi effacés du serveur. Vos autres appareils garderont leur copie, sans plus la synchroniser.",
+    "Le coffre et ses versions seront aussi effacés du serveur. Vos autres appareils garderont leur copie, qu'ils pourront republier.",
   account: (name: string, isAdmin: boolean) => `Compte : ${name}${isAdmin ? " (administrateur)" : ""}.`,
   administration: "Administration",
   adminTitle: "Administration du serveur",
@@ -318,7 +335,7 @@ export const fr = {
     `Version restaurée dans le nouveau coffre « ${name} » ; ses membres le recevront au prochain échange.`,
   deleteServerVault: "Supprimer du serveur",
   deleteServerVaultExplanation: (name: string) =>
-    `Le contenu du coffre « ${name} » et ses versions seront effacés du serveur. Les copies des appareils sont gardées, mais ne sont plus synchronisées. Pour confirmer, retapez son nom.`,
+    `Le contenu du coffre « ${name} » et ses versions seront effacés du serveur. Les copies des appareils sont gardées : un membre pourra republier la sienne. Pour confirmer, retapez son nom.`,
   serverVaultDeleted: (name: string) => `Coffre « ${name} » supprimé du serveur.`,
   publicAddress: "Adresse publique",
   publicAddressHint:
@@ -331,8 +348,9 @@ export const fr = {
   serverBackedUp: "Sauvegarde du serveur enregistrée.",
   syncDone: "Coffre à jour.",
   syncNotConnected: "Cet appareil n'est connecté à aucun serveur.",
-  syncDetached: "Coffre détaché : il est lié à un autre serveur.",
-  syncRemoved: "Coffre retiré du serveur : il reste utilisable sur cet appareil, sans être synchronisé.",
+  syncRemoved:
+    "Coffre supprimé du serveur : il n'existe plus que sur cet appareil. Pour le republier, appuyez sur « Synchroniser ».",
+  syncLeft: "Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil.",
   syncOffline: (detail: string) => `Synchro impossible : ${detail}. Les modifications seront publiées plus tard.`,
   syncConflict: "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",
   syncRejected: (detail: string) => `Copie du serveur refusée (${detail}) : elle n'est pas remplacée.`,

@@ -9,6 +9,7 @@
     serverStatus,
     syncServer,
     type Invitation,
+    type VaultServerState,
     type VaultStatus,
   } from "../lib/api";
   import { errorMessage } from "../lib/errors";
@@ -19,7 +20,8 @@
 
   interface Props {
     notice?: string;
-    onOpen: (name: string) => void;
+    /** `removed` : le coffre a été supprimé du serveur. */
+    onOpen: (name: string, removed: boolean) => void;
     onBackup: () => void;
     onRestore: () => void;
   }
@@ -34,13 +36,21 @@
     ),
   );
   let connected = $state(false);
-  /** Type de chaque coffre, et son état vis-à-vis du serveur, affiché seulement si l'appareil est connecté. */
+  /** Type de chaque coffre, et son état vis-à-vis du serveur, inconnu sans serveur joignable. */
   let states = $state(new Map<string, VaultStatus>());
   let invitations = $state<Invitation[]>([]);
   /** Une invitation traitée à la fois : son identifiant. */
   let answering = $state<string | null>(null);
   let syncing = $state(false);
   let problems = $state<string[]>([]);
+  /** Vert : à jour ; orange : à synchroniser ou supprimé du serveur ; rouge : pas sur le serveur. */
+  const dotColor: Record<VaultServerState, string> = {
+    synced: "green",
+    outdated: "orange",
+    needsUnlock: "orange",
+    removed: "orange",
+    local: "red",
+  };
 
   // Sans état lisible, la liste reste celle d'un appareil non connecté.
   async function loadStatus() {
@@ -97,7 +107,7 @@
     }
   }
 
-  /** Télécharge les nouveaux coffres du compte et publie ceux de l'appareil. */
+  /** Échange avec le serveur, sans mot de passe : téléchargement, publication, mise à jour. */
   async function synchronize() {
     syncing = true;
     problems = [];
@@ -166,14 +176,15 @@
         {#each names as name, index (name)}
           {@const status = states.get(name)}
           <li in:fly={{ y: 12, duration: motion(300), delay: motion(Math.min(index, 8) * 40) }}>
-            <button type="button" class="vault" onclick={() => onOpen(name)}>
+            <button type="button" class="vault" onclick={() => onOpen(name, status?.state === "removed")}>
               <span class="badge"><Icon name="lock" /></span>
               <span class="name" title={name}>{name}</span>
               {#if status?.shared}
                 <span class="state">{texts.shared}</span>
               {/if}
-              {#if connected && status !== undefined && status.state !== "published"}
-                <span class="state">{texts.vaultStates[status.state]}</span>
+              {#if status?.state}
+                {@const label = texts.vaultStates[status.state]}
+                <span class="dot {dotColor[status.state]}" role="img" aria-label={label} title={label}></span>
               {/if}
               <Icon name="chevron" />
             </button>
@@ -263,6 +274,25 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .dot {
+    flex: none;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+  }
+
+  .dot.green {
+    background: var(--success);
+  }
+
+  .dot.orange {
+    background: var(--warning);
+  }
+
+  .dot.red {
+    background: var(--danger);
   }
 
   .state {

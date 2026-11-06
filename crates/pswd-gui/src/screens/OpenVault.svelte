@@ -87,21 +87,27 @@
   serverStatus().then(
     (status) => {
       connected = status.address !== null;
-      const published = status.vaults.find(({ name, state }) => name === vault.name && state === "published");
+      const onServer: (string | null)[] = ["synced", "outdated", "needsUnlock"];
+      const published = status.vaults.find(({ name, state }) => name === vault.name && onServer.includes(state));
       sharing = connected && published?.shared === true;
       privateOnServer = connected && published?.shared === false;
     },
     () => undefined,
   );
 
+  /** Le coffre quitté vient d'être fermé et supprimé de l'appareil. */
   function left() {
-    sharing = false;
-    panel = null;
+    onLocked();
   }
 
   /** Fin d'une synchro : les modifications reçues du serveur sont affichées. */
   function synced(report: SyncReport) {
     if (report.vault !== vault.name) {
+      return;
+    }
+    if (report.state === "left") {
+      showToast(syncMessage(report));
+      onLocked();
       return;
     }
     syncNotice = syncProblem(report);

@@ -25,7 +25,19 @@ vi.mock("../lib/api", () => ({
 
 const disconnected: ServerStatus = { address: null, vaults: [] };
 const connected: ServerStatus = { address: "pswd.local:8443", vaults: [] };
-const nothing: Exchange = { removed: [], downloaded: [], notDownloaded: [], published: [], notPublished: [] };
+const nothing: Exchange = {
+  downloaded: [],
+  notDownloaded: [],
+  published: [],
+  notPublished: [],
+  sent: [],
+  received: [],
+  needsUnlock: [],
+  notUpdated: [],
+  removed: [],
+  left: [],
+  notLeft: [],
+};
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -133,7 +145,7 @@ describe("Server, once connected", () => {
     show(connected);
     vi.mocked(syncServer).mockResolvedValue(nothing);
     await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
-    expect(await screen.findByText("Aucun coffre à échanger avec le serveur.")).toBeInTheDocument();
+    expect(await screen.findByText("Coffres à jour.")).toBeInTheDocument();
     vi.mocked(syncServer).mockRejectedValue({ code: "serverError", detail: "serveur injoignable" });
     await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(

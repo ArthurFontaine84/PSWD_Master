@@ -8,7 +8,7 @@ export interface Outcome {
 }
 
 /** Synchros dont l'issue n'est signalée que si l'utilisateur l'a demandée. */
-const QUIET: SyncState[] = ["synced", "notConnected", "detached"];
+const QUIET: SyncState[] = ["synced", "notConnected"];
 
 /** Résultat d'une synchro demandée par l'utilisateur : toujours un message. */
 export function syncMessage(report: SyncReport): string {
@@ -18,10 +18,10 @@ export function syncMessage(report: SyncReport): string {
       return texts.syncDone;
     case "notConnected":
       return texts.syncNotConnected;
-    case "detached":
-      return texts.syncDetached;
     case "removed":
       return texts.syncRemoved;
+    case "left":
+      return texts.syncLeft;
     case "offline":
       return texts.syncOffline(detail);
     case "conflict":
@@ -40,13 +40,19 @@ export function syncProblem(report: SyncReport): string | null {
 
 export function exchangeOutcome(exchange: Exchange): Outcome {
   const done = [
-    ...exchange.removed.map((name) => texts.removedByServer(name)),
     ...exchange.downloaded.map(({ name, localName }) => texts.downloaded(name, localName)),
     ...exchange.published.map((name) => texts.published(name)),
+    ...exchange.sent.map((name) => texts.sent(name)),
+    ...exchange.received.map((name) => texts.received(name)),
+    ...exchange.removed.map((name) => texts.removedByServer(name)),
+    ...exchange.left.map((name) => texts.leftElsewhere(name)),
   ];
   const problems = [
     ...exchange.notDownloaded.map(({ name, reason }) => texts.notDownloaded(name, reason)),
     ...exchange.notPublished.map(({ name, reason }) => texts.notPublished(name, reason)),
+    ...exchange.needsUnlock.map((name) => texts.needsUnlock(name)),
+    ...exchange.notUpdated.map(({ name, reason }) => texts.notUpdated(name, reason)),
+    ...exchange.notLeft.map(({ name, reason }) => texts.notLeft(name, reason)),
   ];
   if (done.length === 0 && problems.length === 0) {
     done.push(texts.nothingToExchange);

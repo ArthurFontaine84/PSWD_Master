@@ -404,6 +404,17 @@ describe("OpenVault and the server", () => {
     });
   });
 
+  it("returns to the list once the account is no longer a member", async () => {
+    vi.mocked(serverStatus).mockResolvedValue(connected);
+    vi.mocked(syncVault).mockResolvedValue(report("left"));
+    const { onLocked } = show();
+    await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
+    expect(
+      await screen.findByText("Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil."),
+    ).toBeInTheDocument();
+    expect(onLocked).toHaveBeenCalled();
+  });
+
   it("returns to the list when the vault locked itself during the sync", async () => {
     vi.mocked(serverStatus).mockResolvedValue(connected);
     vi.mocked(syncVault).mockRejectedValue({ code: "vaultLocked", detail: null });

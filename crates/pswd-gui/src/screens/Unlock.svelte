@@ -8,11 +8,13 @@
 
   interface Props {
     name: string;
+    /** Le coffre a été supprimé du serveur : l'utilisateur est prévenu. */
+    removed?: boolean;
     onUnlocked: (vault: VaultInfo) => void;
     onCancel: () => void;
   }
 
-  const { name, onUnlocked, onCancel }: Props = $props();
+  const { name, removed = false, onUnlocked, onCancel }: Props = $props();
 
   /** `true` : mot de passe oublié, la clé de récupération en fixe un nouveau. */
   let recovering = $state(false);
@@ -65,6 +67,9 @@
 
 <section class="panel" aria-labelledby="unlock-title">
   <h2 id="unlock-title">{recovering ? texts.recoverTitle(name) : texts.unlockTitle(name)}</h2>
+  {#if removed}
+    <p role="status" class="notice">{texts.removedNotice}</p>
+  {/if}
   <form onsubmit={submit} novalidate>
     {#if recovering}
       <label>
