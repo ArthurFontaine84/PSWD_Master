@@ -230,7 +230,7 @@ export const fr = {
     "Cet appareil ne sera plus synchronisé. Vous pourrez vous reconnecter plus tard avec une nouvelle clé de connexion.",
   keepLocalCopies: "Garder une copie des coffres sur cet appareil",
   removeExplanation:
-    "Seuls les coffres identiques à leur copie sur le serveur seront retirés de cet appareil ; les autres seront gardés.",
+    "Seuls les coffres déjà à jour sur le serveur seront retirés de cet appareil ; ceux qui ont des modifications non publiées seront gardés.",
   disconnecting: "Déconnexion…",
   disconnected: "Appareil déconnecté du serveur.",
   tokenNotRevoked: (reason: string) =>

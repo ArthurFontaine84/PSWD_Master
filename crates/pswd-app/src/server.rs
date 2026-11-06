@@ -80,7 +80,7 @@ pub struct Exchange {
 /// Pourquoi un coffre n'a pas été retiré de l'appareil à la déconnexion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeptReason {
-    /// La copie locale diffère de celle du serveur.
+    /// La copie locale a des modifications que le serveur n'a pas, ou le coffre n'y est pas.
     Unpublished,
     Error(AppError),
 }
@@ -493,8 +493,8 @@ impl Vaults {
     }
 
     /// Déconnecte l'appareil : son jeton est révoqué et le serveur oublié. Sans `keep_local`, les
-    /// coffres dont la copie locale est identique à celle du serveur sont retirés de l'appareil ;
-    /// les autres sont gardés. Un serveur injoignable n'empêche pas la déconnexion.
+    /// coffres dont l'appareil n'a rien que le serveur n'ait déjà sont retirés de l'appareil ; les
+    /// autres sont gardés. Un serveur injoignable n'empêche pas la déconnexion.
     ///
     /// # Errors
     ///
@@ -505,12 +505,17 @@ impl Vaults {
         let mut report = Disconnected::default();
         let mut to_remove = Vec::new();
         if !keep_local {
+            let listed = client.list_vaults().map_err(AppError::from);
             for (name, vault) in &self.config()?.vaults {
                 let Some(link) = &vault.remote else { continue };
                 if link.server != server.server_id() || link.removed {
                     continue;
                 }
-                match same_as_server(&client, link.id, vault) {
+                let known = listed
+                    .as_ref()
+                    .map_err(Clone::clone)
+                    .and_then(|listed| nothing_only_here(vault, link, listed));
+                match known {
                     Ok(true) => to_remove.push(name.clone()),
                     Ok(false) => report.kept.push((name.clone(), KeptReason::Unpublished)),
                     Err(error) => report.kept.push((name.clone(), KeptReason::Error(error))),
@@ -567,8 +572,11 @@ fn state(vault: &VaultConfig, server_id: &str, listed: &[RemoteVaultInfo]) -> Va
 /// Ce qui a changé depuis le dernier état commun : la copie locale (absente, elle compte comme
 /// changée), puis celle du serveur, à la `version` donnée.
 fn changes(synced: &SyncedState, version: &RemoteVersion, local: Option<&[u8]>) -> (bool, bool) {
-    let local_changed = local.is_none_or(|file| file_hash(file) != synced.file_hash);
-    (local_changed, synced.version != version.0)
+    (local_changed(synced, local), synced.version != version.0)
+}
+
+fn local_changed(synced: &SyncedState, local: Option<&[u8]>) -> bool {
+    local.is_none_or(|file| file_hash(file) != synced.file_hash)
 }
 
 fn synced_state(version: Option<&RemoteVersion>, file: &[u8]) -> Option<SyncedState> {
@@ -604,10 +612,22 @@ fn local_name(config: &Config, name: &str, id: Uuid) -> Result<String, AppError>
     Ok(alternative)
 }
 
-fn same_as_server(client: &ServerClient, id: Uuid, vault: &VaultConfig) -> Result<bool, AppError> {
+/// L'appareil n'a rien que le serveur n'ait déjà : le coffre y est publié, et la copie locale
+/// n'a pas changé depuis le dernier état commun. Le serveur a pu avancer depuis : il ne fait
+/// qu'ajouter à cet état.
+fn nothing_only_here(
+    vault: &VaultConfig,
+    link: &RemoteLink,
+    listed: &[RemoteVaultInfo],
+) -> Result<bool, AppError> {
+    let published = listed
+        .iter()
+        .any(|remote| remote.id == link.id && remote.version.is_some());
+    let Some(synced) = link.synced.as_ref().filter(|_| published) else {
+        return Ok(false);
+    };
     let local = FileStore::new(vault.vault_file()).load()?;
-    let remote = client.vault(id).fetch()?;
-    Ok(matches!((local, remote), (Some(local), Some(remote)) if local == remote.file))
+    Ok(!local_changed(synced, local.as_deref()))
 }
 
 /// Un envoi sans mot de passe est refusé si le serveur a bougé depuis sa liste : il faudra
@@ -1394,6 +1414,29 @@ mod tests {
         );
         assert!(!removed_dir.exists());
         assert_eq!(names(&a), ["local", "modifie", "nouveau"]);
+    }
+
+    #[test]
+    fn disconnection_removes_a_copy_that_is_only_behind_the_server() {
+        let dir = TempDir::new().unwrap();
+        let (a, b, _server) = two_devices(&dir);
+        add_note(&mut open(&b, "perso"), "depuis b");
+        b.exchange().unwrap();
+        let report = a.disconnect(false).unwrap();
+        assert_eq!(report.removed, ["perso"]);
+        assert_eq!(report.kept, []);
+        assert_eq!(names(&a), Vec::<String>::new());
+    }
+
+    #[test]
+    fn disconnection_keeps_a_vault_the_server_no_longer_lists() {
+        let dir = TempDir::new().unwrap();
+        let (a, b, _server) = two_devices(&dir);
+        b.delete_everywhere("perso").unwrap();
+        let report = a.disconnect(false).unwrap();
+        assert_eq!(report.removed, Vec::<String>::new());
+        assert_eq!(report.kept, [("perso".to_owned(), KeptReason::Unpublished)]);
+        assert_eq!(names(&a), ["perso"]);
     }
 
     #[test]

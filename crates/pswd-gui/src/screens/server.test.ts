@@ -178,7 +178,7 @@ describe("Server, once connected", () => {
     show(connected);
     await fireEvent.click(await screen.findByRole("button", { name: "Se déconnecter" }));
     await fireEvent.click(screen.getByRole("checkbox"));
-    expect(screen.getByText(/Seuls les coffres identiques/)).toBeInTheDocument();
+    expect(screen.getByText(/Seuls les coffres déjà à jour sur le serveur/)).toBeInTheDocument();
     vi.mocked(serverStatus).mockResolvedValue(disconnected);
     vi.mocked(disconnectServer).mockResolvedValue({
       revokeError: null,
