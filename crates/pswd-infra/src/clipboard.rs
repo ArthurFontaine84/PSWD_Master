@@ -91,11 +91,15 @@ impl<A: ClipboardAccess> SecureClipboard for TimedClipboard<A> {
         });
         Ok(())
     }
+
+    fn clear_now(&mut self) {
+        lock(&self.state).clear_if_still_copied();
+    }
 }
 
 impl<A: ClipboardAccess> Drop for TimedClipboard<A> {
     fn drop(&mut self) {
-        lock(&self.state).clear_if_still_copied();
+        self.clear_now();
     }
 }
 
@@ -208,6 +212,28 @@ mod tests {
         clipboard.copy_secret(&secret("hunter2"), LONG).unwrap();
         drop(clipboard);
         assert_eq!(fake.content(), None);
+    }
+
+    #[test]
+    fn clear_now_clears_the_secret_and_disarms_its_timer() {
+        let fake = Fake::default();
+        let mut clipboard = TimedClipboard::new(fake.clone());
+        clipboard.copy_secret(&secret("hunter2"), SHORT).unwrap();
+        clipboard.clear_now();
+        assert_eq!(fake.content(), None);
+        fake.data().content = Some("texte de l'utilisateur".to_owned());
+        thread::sleep(SHORT * 5);
+        assert_eq!(fake.content().as_deref(), Some("texte de l'utilisateur"));
+    }
+
+    #[test]
+    fn clear_now_leaves_content_copied_since() {
+        let fake = Fake::default();
+        let mut clipboard = TimedClipboard::new(fake.clone());
+        clipboard.copy_secret(&secret("hunter2"), LONG).unwrap();
+        fake.data().content = Some("autre".to_owned());
+        clipboard.clear_now();
+        assert_eq!(fake.content().as_deref(), Some("autre"));
     }
 
     #[test]

@@ -53,4 +53,8 @@ impl<R: Runtime> SecureClipboard for AndroidClipboard<R> {
             .map(drop)
             .map_err(|error| PortError::new(format!("copie impossible : {error}")))
     }
+
+    /// Rien à faire : Android arrête l'application sans prévenir, et l'effacement au lancement
+    /// suivant couvre ce cas (SPEC §12).
+    fn clear_now(&mut self) {}
 }

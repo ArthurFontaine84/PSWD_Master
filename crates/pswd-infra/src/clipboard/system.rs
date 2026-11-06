@@ -74,4 +74,10 @@ impl SecureClipboard for LazyClipboard {
             None => Ok(()),
         }
     }
+
+    fn clear_now(&mut self) {
+        if let Some(clipboard) = &mut self.0 {
+            clipboard.clear_now();
+        }
+    }
 }

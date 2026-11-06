@@ -87,6 +87,11 @@ impl SecureClipboard for FakeClipboard {
         data.copies.push((value.expose().to_owned(), ttl));
         Ok(())
     }
+
+    // Exclu de la couverture : la CLI ne l'appelle pas ; son presse-papiers s'efface en étant
+    // libéré à la fin de `main`.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn clear_now(&mut self) {}
 }
 
 pub type TestApp = App<ScriptedTerminal, FakeClipboard>;

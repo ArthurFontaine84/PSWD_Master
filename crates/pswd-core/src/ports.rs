@@ -111,6 +111,11 @@ pub trait SecureClipboard {
     ///
     /// Si le presse-papiers est inaccessible.
     fn copy_secret(&mut self, value: &Secret, ttl: Duration) -> Result<(), PortError>;
+
+    /// Efface tout de suite la dernière copie si le presse-papiers la contient encore : à la
+    /// fermeture du programme, qui ne laisse pas toujours le temps aux destructeurs de
+    /// s'exécuter. Au mieux : un échec ne peut être signalé à personne.
+    fn clear_now(&mut self);
 }
 
 #[cfg(test)]

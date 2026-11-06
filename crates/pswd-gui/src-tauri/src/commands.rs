@@ -533,7 +533,6 @@ mod tests {
 
     use pswd_app::Vaults;
     use pswd_core::crypto::KdfParams;
-    use pswd_core::ports::{PortError, SecureClipboard};
     use pswd_core::{EntryContent, EntryKind, Tags, Timestamp};
     use pswd_infra::Locations;
     use pswd_server::testing::TestServer;
@@ -645,7 +644,7 @@ mod tests {
                 .unwrap();
             app.manage(AppState::with_settings(
                 vaults,
-                Box::new(FakeClipboard),
+                Box::new(crate::testing::FakeClipboard::default()),
                 kdf,
                 || Timestamp::from_millis(1_000),
                 auto_lock,
@@ -789,15 +788,6 @@ mod tests {
         app.call("app_hidden", json!({})).unwrap();
         assert_eq!(receiver.recv_timeout(Duration::from_secs(5)), Ok(()));
         assert_eq!(app.call("app_shown", json!({})), Ok(Value::Null));
-    }
-
-    /// Presse-papiers qui accepte tout, sans rien garder.
-    struct FakeClipboard;
-
-    impl SecureClipboard for FakeClipboard {
-        fn copy_secret(&mut self, _: &Secret, _: Duration) -> Result<(), PortError> {
-            Ok(())
-        }
     }
 
     #[test]

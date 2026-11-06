@@ -25,7 +25,7 @@ use std::error::Error;
 
 use pswd_app::Vaults;
 use pswd_infra::Locations;
-use tauri::Manager;
+use tauri::{AppHandle, Manager, RunEvent, Runtime};
 
 use crate::state::{AppState, Clipboard};
 
@@ -40,7 +40,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init());
     #[cfg(target_os = "android")]
     let builder = builder.plugin(android_clipboard::plugin());
-    let result = builder
+    let app = builder
         .setup(|app| {
             let locations = locations(app.handle())?;
             let events = commands::Events(app.handle().clone());
@@ -108,10 +108,23 @@ pub fn run() {
             commands::server_backup_file_name,
             commands::backup_server_to_file
         ])
-        .run(tauri::generate_context!());
-    if let Err(error) = result {
-        eprintln!("PSWD Master : {error}");
-        std::process::exit(1);
+        .build(tauri::generate_context!());
+    match app {
+        Ok(app) => app.run(|app, event| on_run_event(app, &event)),
+        Err(error) => {
+            eprintln!("PSWD Master : {error}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// À la fermeture, efface le mot de passe copié : Tauri termine le programme sans libérer son
+/// état, donc sans exécuter le `Drop` du presse-papiers. Un programme tué n'efface rien.
+fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
+    if let RunEvent::Exit = event
+        && let Some(state) = app.try_state::<AppState>()
+    {
+        state.clear_clipboard();
     }
 }
 
@@ -170,5 +183,51 @@ impl pswd_core::ports::SecureClipboard for UnavailableClipboard {
         Err(pswd_core::ports::PortError::new(
             "copie pas encore disponible sur mobile",
         ))
+    }
+
+    fn clear_now(&mut self) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use pswd_app::Vaults;
+    use pswd_infra::Locations;
+    use tauri::test::{MockRuntime, mock_builder};
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::testing::{FakeClipboard, Silent};
+
+    /// Application factice dont le presse-papiers compte les effacements immédiats.
+    fn app_with_clipboard(dir: &TempDir) -> (tauri::App<MockRuntime>, Arc<AtomicUsize>) {
+        let app = mock_builder().build(tauri::generate_context!()).unwrap();
+        let clipboard = FakeClipboard::default();
+        let clears = Arc::clone(&clipboard.clears);
+        let vaults = Vaults::new(Locations::new(
+            &dir.path().join("config"),
+            &dir.path().join("data"),
+        ));
+        app.manage(AppState::new(vaults, Box::new(clipboard), Silent));
+        (app, clears)
+    }
+
+    #[test]
+    fn exit_clears_the_clipboard() {
+        let dir = TempDir::new().unwrap();
+        let (app, clears) = app_with_clipboard(&dir);
+        on_run_event(app.handle(), &RunEvent::Exit);
+        assert_eq!(clears.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn other_events_leave_the_clipboard_alone() {
+        let dir = TempDir::new().unwrap();
+        let (app, clears) = app_with_clipboard(&dir);
+        on_run_event(app.handle(), &RunEvent::Ready);
+        on_run_event(app.handle(), &RunEvent::MainEventsCleared);
+        assert_eq!(clears.load(Ordering::SeqCst), 0);
     }
 }

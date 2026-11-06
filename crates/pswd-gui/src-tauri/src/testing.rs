@@ -1,5 +1,7 @@
 //! Doublures communes aux tests des modules.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pswd_core::Secret;
@@ -23,5 +25,35 @@ impl Notifier for Silent {
 impl SecureClipboard for Silent {
     fn copy_secret(&mut self, _: &Secret, _: Duration) -> Result<(), PortError> {
         Ok(())
+    }
+
+    fn clear_now(&mut self) {}
+}
+
+/// Copies reçues par un presse-papiers factice.
+pub type Copies = Arc<Mutex<Vec<(String, Duration)>>>;
+
+/// Presse-papiers qui note les copies et les effacements immédiats, partagés avec le test.
+#[derive(Default)]
+pub struct FakeClipboard {
+    pub copies: Copies,
+    pub clears: Arc<AtomicUsize>,
+    pub broken: bool,
+}
+
+impl SecureClipboard for FakeClipboard {
+    fn copy_secret(&mut self, value: &Secret, ttl: Duration) -> Result<(), PortError> {
+        if self.broken {
+            return Err(PortError::new("presse-papiers indisponible"));
+        }
+        self.copies
+            .lock()
+            .unwrap()
+            .push((value.expose().to_owned(), ttl));
+        Ok(())
+    }
+
+    fn clear_now(&mut self) {
+        self.clears.fetch_add(1, Ordering::SeqCst);
     }
 }

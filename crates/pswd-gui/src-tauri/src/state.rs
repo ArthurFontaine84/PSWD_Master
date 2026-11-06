@@ -305,6 +305,14 @@ impl AppState {
         Ok(ttl)
     }
 
+    /// Efface tout de suite le mot de passe copié, s'il est encore dans le presse-papiers.
+    pub fn clear_clipboard(&self) {
+        self.clipboard
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear_now();
+    }
+
     /// Ajoute l'entrée et l'enregistre aussitôt.
     pub fn add_entry(&self, input: EntryInput) -> Result<EntryDetail, UiError> {
         let content = input.into_content(None)?;
@@ -567,7 +575,6 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc;
 
-    use pswd_core::ports::PortError;
     use pswd_core::{EntryContent, EntryKind, Tags};
     use pswd_infra::Locations;
     use pswd_server::testing::TestServer;
@@ -576,31 +583,10 @@ mod tests {
 
     use super::*;
     use crate::sync::SyncState;
+    use crate::testing::FakeClipboard;
 
     fn secret(value: &str) -> Secret {
         Secret::new(value.to_owned())
-    }
-
-    /// Copies reçues par un presse-papiers factice.
-    type Copies = Arc<Mutex<Vec<(String, Duration)>>>;
-
-    #[derive(Default)]
-    struct FakeClipboard {
-        copies: Copies,
-        broken: bool,
-    }
-
-    impl SecureClipboard for FakeClipboard {
-        fn copy_secret(&mut self, value: &Secret, ttl: Duration) -> Result<(), PortError> {
-            if self.broken {
-                return Err(PortError::new("presse-papiers indisponible"));
-            }
-            self.copies
-                .lock()
-                .unwrap()
-                .push((value.expose().to_owned(), ttl));
-            Ok(())
-        }
     }
 
     fn vaults_in(dir: &TempDir) -> Vaults {
