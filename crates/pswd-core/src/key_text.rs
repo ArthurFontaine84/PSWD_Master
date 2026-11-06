@@ -8,20 +8,24 @@ use crate::crypto::KEY_LEN;
 
 /// Base32 Crockford : sans I, L, O ni U, pour éviter les confusions à la recopie.
 const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-pub(crate) const SYMBOLS: usize = (KEY_LEN * 8).div_ceil(5);
-const GROUP_LEN: usize = 4;
+const SYMBOLS: usize = (KEY_LEN * 8).div_ceil(5);
+pub(crate) const GROUP_LEN: usize = 4;
+pub(crate) const GROUPS: usize = SYMBOLS.div_ceil(GROUP_LEN);
 const SEPARATOR: char = '-';
+/// Longueur de l'écriture complète, tirets compris.
+const TEXT_LEN: usize = SYMBOLS + (SYMBOLS - 1) / GROUP_LEN;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KeyTextError {
-    InvalidCharacter,
-    WrongLength,
+    /// Pas sous la forme `XXXX-XXXX-…` avec les caractères de l'alphabet.
+    Malformed,
+    /// Bien formée, mais aucune clé ne s'écrit ainsi.
     InvalidLastCharacter,
 }
 
 /// Texte à montrer à l'utilisateur.
 pub(crate) fn encode(bytes: &[u8; KEY_LEN]) -> Secret {
-    let mut text = String::with_capacity(SYMBOLS + (SYMBOLS - 1) / GROUP_LEN);
+    let mut text = String::with_capacity(TEXT_LEN);
     let mut buffer: u16 = 0;
     let mut bits = 0;
     let mut written = 0;
@@ -46,17 +50,23 @@ pub(crate) fn encode(bytes: &[u8; KEY_LEN]) -> Secret {
     Secret::new(text)
 }
 
-/// Lit une clé saisie par l'utilisateur : tirets et espaces ignorés, majuscules ou minuscules,
-/// `O` lu `0`, `I` et `L` lus `1`.
+/// Lit une clé saisie par l'utilisateur : exactement l'écriture montrée, tirets compris,
+/// en majuscules ou en minuscules. Seuls les espaces autour, qu'un copier-coller ajoute
+/// souvent, sont ignorés.
 pub(crate) fn decode(text: &str) -> Result<Zeroizing<[u8; KEY_LEN]>, KeyTextError> {
-    let mut values = Zeroizing::new(Vec::with_capacity(text.len()));
-    for c in text.chars() {
-        if c != SEPARATOR && !c.is_whitespace() {
-            values.push(symbol_value(c).ok_or(KeyTextError::InvalidCharacter)?);
-        }
+    let text = text.trim();
+    if text.chars().count() != TEXT_LEN {
+        return Err(KeyTextError::Malformed);
     }
-    if values.len() != SYMBOLS {
-        return Err(KeyTextError::WrongLength);
+    let mut values = Zeroizing::new(Vec::with_capacity(SYMBOLS));
+    for (position, c) in text.chars().enumerate() {
+        if position % (GROUP_LEN + 1) == GROUP_LEN {
+            if c != SEPARATOR {
+                return Err(KeyTextError::Malformed);
+            }
+        } else {
+            values.push(symbol_value(c).ok_or(KeyTextError::Malformed)?);
+        }
     }
     let mut bytes = Zeroizing::new([0; KEY_LEN]);
     let mut buffer: u16 = 0;
@@ -83,11 +93,7 @@ pub(crate) fn decode(text: &str) -> Result<Zeroizing<[u8; KEY_LEN]>, KeyTextErro
 }
 
 fn symbol_value(c: char) -> Option<u8> {
-    let c = match c.to_ascii_uppercase() {
-        'O' => '0',
-        'I' | 'L' => '1',
-        other => other,
-    };
+    let c = c.to_ascii_uppercase();
     let position = ALPHABET
         .iter()
         .position(|&symbol| char::from(symbol) == c)?;
@@ -100,6 +106,9 @@ mod tests {
 
     use super::*;
 
+    /// Écriture de [`counting`].
+    const COUNTING: &str = "000G-40R4-0M30-E209-185G-R38E-1W81-24GK-2GAH-C5RR-34D1-P70X-3RFG";
+
     fn counting() -> [u8; KEY_LEN] {
         std::array::from_fn(|i| u8::try_from(i).unwrap())
     }
@@ -107,10 +116,7 @@ mod tests {
     // Valeurs de référence : module `base64` de Python, alphabet transposé en Crockford.
     #[test]
     fn encoding_matches_reference() {
-        assert_eq!(
-            encode(&counting()).expose(),
-            "000G-40R4-0M30-E209-185G-R38E-1W81-24GK-2GAH-C5RR-34D1-P70X-3RFG"
-        );
+        assert_eq!(encode(&counting()).expose(), COUNTING);
         assert_eq!(
             encode(&[0xFF; KEY_LEN]).expose(),
             "ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZG"
@@ -118,38 +124,46 @@ mod tests {
     }
 
     #[test]
-    fn decode_tolerates_case_spaces_and_lookalikes() {
-        let text = "ooog 40r4 om3o e2o9 l85g r38e iw8l 24gk 2gah c5rr 34d1 p7ox 3rfg";
-        assert_eq!(*decode(text).unwrap(), counting());
-    }
-
-    #[test]
-    fn decode_accepts_unseparated_text() {
-        let text = "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFG";
-        assert_eq!(*decode(text).unwrap(), counting());
-    }
-
-    #[test]
-    fn invalid_characters_are_rejected() {
-        for text in ["U", "*", "é", "000G_40R4"] {
-            assert_eq!(
-                decode(text).err(),
-                Some(KeyTextError::InvalidCharacter),
-                "{text}"
-            );
+    fn decode_accepts_both_cases_and_surrounding_spaces() {
+        let upper = COUNTING;
+        for text in [
+            upper.to_owned(),
+            upper.to_lowercase(),
+            "000g-40R4-0m30-E209-185g-r38e-1w81-24GK-2gah-C5RR-34d1-P70X-3rfg".to_owned(),
+            format!(
+                "  {upper}	
+"
+            ),
+        ] {
+            assert_eq!(*decode(&text).unwrap(), counting(), "{text}");
         }
     }
 
     #[test]
-    fn wrong_length_is_rejected() {
-        let valid = encode(&counting());
-        let text = valid.expose();
-        for wrong in [&text[..text.len() - 1], &format!("{text}0"), ""] {
-            assert_eq!(
-                decode(wrong).err(),
-                Some(KeyTextError::WrongLength),
-                "{wrong}"
-            );
+    fn decode_requires_the_exact_layout() {
+        let upper = COUNTING;
+        let cases = [
+            "000G40R40M30E209185GR38E1W8124GK2GAHC5RR34D1P70X3RFG".to_owned(),
+            upper.replace('-', " "),
+            upper.replace('-', "_"),
+            upper.replacen('-', "", 1) + "-",
+            format!("-{}", &upper[..upper.len() - 1]),
+            upper.replacen('E', " ", 1),
+            String::new(),
+            "000G".to_owned(),
+            format!("{upper}-0000"),
+        ];
+        for text in &cases {
+            assert_eq!(decode(text).err(), Some(KeyTextError::Malformed), "{text}");
+        }
+    }
+
+    #[test]
+    fn lookalikes_and_foreign_characters_are_refused() {
+        let upper = COUNTING;
+        for replacement in ["O", "o", "I", "L", "l", "U", "*", "é"] {
+            let text = upper.replacen('0', replacement, 1);
+            assert_eq!(decode(&text).err(), Some(KeyTextError::Malformed), "{text}");
         }
     }
 

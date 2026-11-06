@@ -368,9 +368,7 @@ mod tests {
             app.run(Command::Connect {
                 address: "127.0.0.1".to_owned()
             }),
-            Err(CliError::ConnectionKey(
-                ConnectionKeyError::InvalidCharacter
-            ))
+            Err(CliError::ConnectionKey(ConnectionKeyError::Malformed))
         );
         let (server, _) = env.connect_admin("a");
         let mut app = env.app("a", &[]);

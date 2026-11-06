@@ -167,12 +167,12 @@ mod tests {
                 "entrée introuvable : 00000000-0000-0000-0000-000000000000",
             ),
             (
-                CliError::RecoveryKey(RecoveryKeyError::WrongLength),
-                "la clé de récupération doit compter 52 caractères",
+                CliError::RecoveryKey(RecoveryKeyError::Malformed),
+                "clé de récupération mal saisie : 13 groupes de 4 caractères séparés par des tirets",
             ),
             (
-                CliError::ConnectionKey(ConnectionKeyError::WrongLength),
-                "la clé de connexion doit compter 52 caractères",
+                CliError::ConnectionKey(ConnectionKeyError::Malformed),
+                "clé de connexion mal saisie : 13 groupes de 4 caractères séparés par des tirets",
             ),
         ];
         for (error, message) in messages {

@@ -41,7 +41,7 @@ describe("errorMessage", () => {
       [
         "invalidRecoveryKey",
         null,
-        "Clé de récupération mal saisie : 52 caractères, par groupes de 4.",
+        "Clé de récupération mal saisie : 13 groupes de 4 caractères séparés par des tirets.",
       ],
       ["confirmationMismatch", null, "Le nom retapé ne correspond pas."],
       ["fileUnreadable", "introuvable", "Fichier illisible : introuvable"],
@@ -61,7 +61,7 @@ describe("errorMessage", () => {
       ["ioError", "disque absent", "Erreur de fichier : disque absent"],
       ["notConnected", null, "Cet appareil n'est connecté à aucun serveur."],
       ["alreadyConnected", null, "Cet appareil est déjà connecté à un serveur."],
-      ["invalidConnectionKey", null, "Clé de connexion mal saisie : 52 caractères, par groupes de 4."],
+      ["invalidConnectionKey", null, "Clé de connexion mal saisie : 13 groupes de 4 caractères séparés par des tirets."],
       [
         "serverError",
         "serveur injoignable",

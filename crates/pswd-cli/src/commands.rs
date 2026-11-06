@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn recover_sets_a_new_password_with_the_recovery_key() {
         let (env, recovery_key) = TestEnv::with_vault_and_recovery_key();
-        let typed = recovery_key.to_lowercase().replace('-', " ");
+        let typed = recovery_key.to_lowercase();
         let mut app = env.app("a", &[&typed, "Retrouvé-2026!", "Retrouvé-2026!"]);
         app.run(Command::Recover {
             name: "perso".to_owned(),
@@ -178,7 +178,7 @@ mod tests {
             app.run(Command::Recover {
                 name: "perso".to_owned()
             }),
-            Err(CliError::RecoveryKey(RecoveryKeyError::InvalidCharacter))
+            Err(CliError::RecoveryKey(RecoveryKeyError::Malformed))
         );
         let other_key = RecoveryKey::generate().unwrap().encode();
         let mut app = env.app("a", &[other_key.expose()]);

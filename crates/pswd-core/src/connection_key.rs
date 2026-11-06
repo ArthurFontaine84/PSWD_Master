@@ -4,7 +4,7 @@ use zeroize::Zeroizing;
 
 use crate::Secret;
 use crate::crypto::{CryptoError, FINGERPRINT_LEN, KEY_LEN, fill_random};
-use crate::key_text::{self, KeyTextError, SYMBOLS};
+use crate::key_text::{self, GROUP_LEN, GROUPS, KeyTextError};
 
 /// Partie secrète d'une clé de connexion, à usage unique.
 pub const CONNECTION_SECRET_LEN: usize = 16;
@@ -13,16 +13,19 @@ pub const FINGERPRINT_PREFIX_LEN: usize = KEY_LEN - CONNECTION_SECRET_LEN;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectionKeyError {
-    InvalidCharacter,
-    WrongLength,
+    /// Pas sous la forme `XXXX-XXXX-…` (13 groupes de 4 caractères séparés par des tirets).
+    Malformed,
+    /// Bien formée, mais aucune clé ne s'écrit ainsi.
     InvalidLastCharacter,
 }
 
 impl fmt::Display for ConnectionKeyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidCharacter => f.write_str("caractère invalide dans la clé de connexion"),
-            Self::WrongLength => write!(f, "la clé de connexion doit compter {SYMBOLS} caractères"),
+            Self::Malformed => write!(
+                f,
+                "clé de connexion mal saisie : {GROUPS} groupes de {GROUP_LEN} caractères séparés par des tirets"
+            ),
             Self::InvalidLastCharacter => {
                 f.write_str("dernier caractère de la clé de connexion invalide")
             }
@@ -35,8 +38,7 @@ impl std::error::Error for ConnectionKeyError {}
 impl From<KeyTextError> for ConnectionKeyError {
     fn from(error: KeyTextError) -> Self {
         match error {
-            KeyTextError::InvalidCharacter => Self::InvalidCharacter,
-            KeyTextError::WrongLength => Self::WrongLength,
+            KeyTextError::Malformed => Self::Malformed,
             KeyTextError::InvalidLastCharacter => Self::InvalidLastCharacter,
         }
     }
@@ -65,8 +67,7 @@ impl ConnectionKey {
         key_text::encode(&self.0)
     }
 
-    /// Lit une clé saisie par l'utilisateur, avec les mêmes tolérances que la clé de
-    /// récupération.
+    /// Lit une clé saisie par l'utilisateur, avec la même règle que la clé de récupération.
     ///
     /// # Errors
     ///
@@ -153,8 +154,8 @@ mod tests {
         let valid = ConnectionKey::generate(&fingerprint()).unwrap().encode();
         let text = valid.expose();
         let cases = [
-            ("U", ConnectionKeyError::InvalidCharacter),
-            ("000G", ConnectionKeyError::WrongLength),
+            ("U", ConnectionKeyError::Malformed),
+            ("000G", ConnectionKeyError::Malformed),
             (
                 &format!("{}H", &text[..text.len() - 1]),
                 ConnectionKeyError::InvalidLastCharacter,
@@ -175,12 +176,8 @@ mod tests {
     fn errors_have_explicit_messages() {
         let messages = [
             (
-                ConnectionKeyError::InvalidCharacter,
-                "caractère invalide dans la clé de connexion",
-            ),
-            (
-                ConnectionKeyError::WrongLength,
-                "la clé de connexion doit compter 52 caractères",
+                ConnectionKeyError::Malformed,
+                "clé de connexion mal saisie : 13 groupes de 4 caractères séparés par des tirets",
             ),
             (
                 ConnectionKeyError::InvalidLastCharacter,

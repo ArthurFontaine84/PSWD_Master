@@ -303,11 +303,7 @@ mod tests {
     fn displayed_recovery_key_unlocks_the_vault() {
         let vault = sample_vault();
         let (file, recovery_key) = sample_file(&vault);
-        let typed = recovery_key
-            .encode()
-            .expose()
-            .to_lowercase()
-            .replace('-', " ");
+        let typed = recovery_key.encode().expose().to_lowercase();
         let parsed = RecoveryKey::parse(&typed).unwrap();
         let (_, opened) = VaultFile::unlock_with_recovery_key(&file, &parsed).unwrap();
         assert_eq!(opened, vault);

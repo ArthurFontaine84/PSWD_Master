@@ -9,7 +9,9 @@ use pswd_app::{
 };
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::SecureClipboard;
-use pswd_core::{Credentials, Entry, RecoveryKey, Secret, Timestamp, Vault, import_csv};
+use pswd_core::{
+    Credentials, Entry, RecoveryKey, RecoveryKeyError, Secret, Timestamp, Vault, import_csv,
+};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -365,8 +367,11 @@ impl AppState {
         recovery_key: &Secret,
         new: &Secret,
     ) -> Result<VaultInfo, UiError> {
-        let key = RecoveryKey::parse(recovery_key.expose())
-            .map_err(|_| UiError::code("invalidRecoveryKey"))?;
+        let key = RecoveryKey::parse(recovery_key.expose()).map_err(|error| match error {
+            RecoveryKeyError::Malformed => UiError::code("invalidRecoveryKey"),
+            // Bien formée : l'utilisateur a recopié une autre clé, ou fait une faute de frappe.
+            RecoveryKeyError::InvalidLastCharacter => UiError::code("wrongRecoveryKey"),
+        })?;
         check_master_password(new)?;
         let timeout = self.auto_lock()?;
         let mut session = self.vaults.open(name, Credentials::RecoveryKey(&key))?;
@@ -1340,7 +1345,7 @@ mod tests {
             .create("perso", &secret("Oublié-mot-2026!"), false)
             .unwrap();
         state.lock();
-        let other = secret(&key.expose().to_lowercase().replace('-', " "));
+        let other = secret(&format!(" {} ", key.expose().to_lowercase()));
         assert_eq!(
             state.recover("perso", &other, &secret("Nouveau-2026!")),
             Ok(info("perso", 0))
@@ -1361,11 +1366,19 @@ mod tests {
             .create("perso", &secret("Maître-2026!"), false)
             .unwrap();
         state.lock();
+        for typed in ["pas une clé".to_owned(), key.expose().replace('-', " ")] {
+            assert_eq!(
+                state.recover("perso", &secret(&typed), &secret("x")).err(),
+                Some(UiError::code("invalidRecoveryKey")),
+                "{typed}"
+            );
+        }
+        let impossible = format!("{}H", &key.expose()[..key.expose().len() - 1]);
         assert_eq!(
             state
-                .recover("perso", &secret("pas une clé"), &secret("x"))
+                .recover("perso", &secret(&impossible), &secret("Nouveau-2026!"))
                 .err(),
-            Some(UiError::code("invalidRecoveryKey"))
+            Some(UiError::code("wrongRecoveryKey"))
         );
         assert_eq!(
             state.recover("perso", &key, &secret("")).err(),
