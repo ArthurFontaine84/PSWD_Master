@@ -5,6 +5,7 @@ type Message = (detail: string) => string;
 
 const day = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long" });
 const dateTime = new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" });
+const time = new Intl.DateTimeFormat("fr-FR", { timeStyle: "short" });
 
 const errors = {
   configInvalid: (detail: string) => `Configuration invalide : ${detail}`,
@@ -198,6 +199,9 @@ export const fr = {
   connecting: "Connexion…",
   connected: "Appareil connecté au serveur.",
   connectedTo: (address: string) => `Connecté au serveur ${address}.`,
+  registeredServer: (address: string) => `Serveur enregistré : ${address}.`,
+  serverTrouble: (since: number, reason: string) =>
+    `Échanges impossibles depuis ${time.format(since)} : ${reason}.`,
   synchronize: "Synchroniser",
   synchronizing: "Synchronisation…",
   exchangeIncomplete: (message: string) =>

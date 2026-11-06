@@ -45,7 +45,7 @@ const created = { vault: { name: "perso", entries: 0 }, recoveryKey: "AAAA-BBBB"
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(deviceKind).mockResolvedValue("desktop");
-  vi.mocked(serverStatus).mockResolvedValue({ address: null, vaults: [] });
+  vi.mocked(serverStatus).mockResolvedValue({ address: null, trouble: null, vaults: [] });
   vi.mocked(listInvitations).mockResolvedValue([]);
 });
 
@@ -94,6 +94,7 @@ describe("VaultList", () => {
     vi.mocked(listVaults).mockResolvedValue(["neuf", "perso", "vieux"]);
     vi.mocked(serverStatus).mockResolvedValue({
       address: null,
+      trouble: null,
       vaults: [{ name: "neuf", state: null, shared: true }],
     });
     const { unmount } = render(VaultList, { onOpen: vi.fn(), onBackup: vi.fn(), onRestore: vi.fn() });
@@ -104,6 +105,7 @@ describe("VaultList", () => {
 
     vi.mocked(serverStatus).mockResolvedValue({
       address: "pswd.local:8443",
+      trouble: null,
       vaults: [
         { name: "neuf", state: "local", shared: false },
         { name: "perso", state: "synced", shared: false },
@@ -127,7 +129,7 @@ describe("VaultList", () => {
   it("exchanges vaults with the server, then lists them again", async () => {
     render(Toast);
     vi.mocked(listVaults).mockResolvedValue(["perso"]);
-    vi.mocked(serverStatus).mockResolvedValue({ address: "pswd.local:8443", vaults: [] });
+    vi.mocked(serverStatus).mockResolvedValue({ address: "pswd.local:8443", trouble: null, vaults: [] });
     render(VaultList, { onOpen: vi.fn(), onBackup: vi.fn(), onRestore: vi.fn() });
     vi.mocked(listVaults).mockResolvedValue(["perso", "travail"]);
     vi.mocked(syncServer).mockResolvedValue({

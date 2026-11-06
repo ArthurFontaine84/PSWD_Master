@@ -99,9 +99,19 @@ export interface VaultStatus {
 }
 
 export interface ServerStatus {
-  /** `null` si l'appareil n'est connecté à aucun serveur. */
+  /** `null` si aucun serveur n'est enregistré sur l'appareil. */
   address: string | null;
+  /** Le serveur enregistré ne répond plus ; `null` si le dernier contact a réussi. */
+  trouble: ServerTrouble | null;
   vaults: VaultStatus[];
+}
+
+/** Échec du dernier contact avec le serveur. */
+export interface ServerTrouble {
+  /** Premier échec de la série, en millisecondes depuis 1970. */
+  since: number;
+  /** Message du dernier échec, en français. */
+  reason: string;
 }
 
 /** Échec pour un coffre ; `reason` est un message du backend. */

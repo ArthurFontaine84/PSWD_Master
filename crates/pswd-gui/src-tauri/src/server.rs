@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use pswd_app::{AppError, KeptReason, Update, VaultState};
-use pswd_core::{ConnectionKey, Secret};
+use pswd_core::{ConnectionKey, Secret, Timestamp};
 use serde::Serialize;
 
 use crate::error::UiError;
@@ -11,9 +11,26 @@ use crate::state::AppState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ServerStatus {
-    /// `None` si l'appareil n'est connecté à aucun serveur.
+    /// `None` si aucun serveur n'est enregistré sur l'appareil.
     address: Option<String>,
+    /// Le serveur enregistré ne répond plus ; `None` si le dernier contact a réussi.
+    trouble: Option<ServerTrouble>,
     vaults: Vec<VaultStatus>,
+}
+
+/// Échec du dernier contact avec le serveur.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ServerTrouble {
+    /// Premier échec de la série, en millisecondes depuis 1970.
+    pub(crate) since: Timestamp,
+    /// Message du dernier échec, en français.
+    reason: String,
+}
+
+impl ServerTrouble {
+    pub(crate) fn new(since: Timestamp, reason: String) -> Self {
+        Self { since, reason }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -89,7 +106,7 @@ impl AppState {
         let config = self.vaults.config()?;
         // Serveur injoignable : les coffres restent utilisables, sans état.
         let states: BTreeMap<String, VaultState> = match address {
-            Some(_) => self.vaults.vault_states().unwrap_or_default(),
+            Some(_) => self.observe(self.vaults.vault_states()).unwrap_or_default(),
             None => Vec::new(),
         }
         .into_iter()
@@ -103,7 +120,13 @@ impl AppState {
                 shared: vault.shared,
             })
             .collect();
-        Ok(ServerStatus { address, vaults })
+        // Un ancien serveur, oublié depuis, ne compte plus.
+        let trouble = address.as_ref().and(self.trouble());
+        Ok(ServerStatus {
+            address,
+            trouble,
+            vaults,
+        })
     }
 
     /// Connecte l'appareil ; `account_name`, laissé vide sauf avec une clé administrateur,
@@ -119,16 +142,17 @@ impl AppState {
             .map_err(|_| UiError::code("invalidConnectionKey"))?;
         let account_name = Some(account_name.trim()).filter(|name| !name.is_empty());
         let _one_at_a_time = self.exclusive();
-        self.vaults
-            .connect(address, &key, device_name.trim(), account_name)
-            .map_err(server_error)
+        let connected = self
+            .vaults
+            .connect(address, &key, device_name.trim(), account_name);
+        self.observe(connected).map_err(server_error)
     }
 
     /// Échange avec le serveur, sans mot de passe (bouton « Synchroniser » de la liste) : un
     /// coffre ouvert dont le compte n'est plus membre est fermé, il vient d'être supprimé.
     pub fn exchange(&self) -> Result<Exchange, UiError> {
         let _one_at_a_time = self.exclusive();
-        let exchange = Exchange::from(self.vaults.exchange().map_err(server_error)?);
+        let exchange = Exchange::from(self.observe(self.vaults.exchange()).map_err(server_error)?);
         for name in &exchange.left {
             self.close_without_publishing(name);
         }
@@ -231,6 +255,7 @@ mod tests {
     use std::fs;
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicI64, Ordering};
 
     use pswd_app::Vaults;
     use pswd_core::crypto::KdfParams;
@@ -246,19 +271,15 @@ mod tests {
     const PASSWORD: &str = "Maître-2026!";
 
     fn device(dir: &TempDir) -> AppState {
+        device_with_clock(dir, || Timestamp::from_millis(1_000))
+    }
+
+    fn device_with_clock(dir: &TempDir, clock: fn() -> Timestamp) -> AppState {
         let vaults = Vaults::new(Locations::new(
             &dir.path().join("config"),
             &dir.path().join("data"),
         ));
-        AppState::with_settings(
-            vaults,
-            Box::new(Silent),
-            kdf(),
-            || Timestamp::from_millis(1_000),
-            None,
-            false,
-            Silent,
-        )
+        AppState::with_settings(vaults, Box::new(Silent), kdf(), clock, None, false, Silent)
     }
 
     fn kdf() -> KdfParams {
@@ -310,6 +331,10 @@ mod tests {
                 drop(connection);
             }
         });
+        point_to(dir, address);
+    }
+
+    fn point_to(dir: &TempDir, address: String) {
         let mut file = ServerFile::new(dir.path().join("data").join("server.toml"));
         let mut server = file.load().unwrap().unwrap();
         server.local_address = address;
@@ -329,6 +354,7 @@ mod tests {
             status(&state),
             json!({
                 "address": null,
+                "trouble": null,
                 "vaults": [{ "name": "perso", "state": null, "shared": false }],
             })
         );
@@ -339,6 +365,40 @@ mod tests {
         assert_eq!(status(&state)["vaults"][0]["state"], "synced");
         assert_eq!(state.disconnect(true), Ok(Disconnection::default()));
         assert_eq!(status(&state)["vaults"][0]["state"], Value::Null);
+    }
+
+    #[test]
+    fn status_tells_since_when_the_registered_server_is_unreachable() {
+        static NOW: AtomicI64 = AtomicI64::new(1_000);
+        let at = |millis| NOW.store(millis, Ordering::Relaxed);
+        let dir = TempDir::new().unwrap();
+        let state = device_with_clock(&dir, || Timestamp::from_millis(NOW.load(Ordering::Relaxed)));
+        let server = connect_admin(&state);
+        assert_eq!(status(&state)["trouble"], Value::Null);
+
+        go_offline(&dir);
+        at(2_000);
+        let unreachable = json!({ "since": 2_000, "reason": "serveur injoignable" });
+        assert_eq!(status(&state)["trouble"], unreachable);
+        at(3_000);
+        assert!(state.exchange().is_err());
+        assert!(state.account_status().is_err());
+        assert_eq!(
+            state.observe::<()>(Err(AppError::NotConnected)),
+            Err(AppError::NotConnected)
+        );
+        assert_eq!(status(&state)["trouble"], unreachable);
+
+        point_to(&dir, server.address.clone());
+        assert_eq!(status(&state)["trouble"], Value::Null);
+        go_offline(&dir);
+        at(4_000);
+        assert_eq!(status(&state)["trouble"]["since"], 4_000);
+        state.disconnect(true).unwrap();
+        assert_eq!(
+            status(&state),
+            json!({ "address": null, "trouble": null, "vaults": [] })
+        );
     }
 
     #[test]

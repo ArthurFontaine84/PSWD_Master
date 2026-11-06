@@ -56,7 +56,7 @@ beforeEach(() => {
   vi.mocked(listTags).mockResolvedValue([]);
   vi.mocked(entryDetail).mockResolvedValue(githubDetail);
   vi.mocked(entryHistory).mockResolvedValue([]);
-  vi.mocked(serverStatus).mockResolvedValue({ address: null, vaults: [] });
+  vi.mocked(serverStatus).mockResolvedValue({ address: null, trouble: null, vaults: [] });
   vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
 });
 

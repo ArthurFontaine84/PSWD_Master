@@ -84,7 +84,7 @@ beforeEach(() => {
     { id: "2", kind: "note", title: "Code", username: null, tags: [], hasPassword: false },
   ]);
   vi.mocked(getSettings).mockResolvedValue(defaults);
-  vi.mocked(serverStatus).mockResolvedValue({ address: null, vaults: [] });
+  vi.mocked(serverStatus).mockResolvedValue({ address: null, trouble: null, vaults: [] });
   vi.mocked(accountStatus).mockRejectedValue({ code: "notConnected", detail: null });
   vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
   vi.mocked(onVaultLocked).mockImplementation((handler) => {

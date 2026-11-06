@@ -60,6 +60,7 @@ const nothing: Exchange = {
 };
 const shared: ServerStatus = {
   address: "pswd.local:8443",
+  trouble: null,
   vaults: [
     { name: "famille", state: "synced", shared: true },
     { name: "ancien", state: "removed", shared: true },

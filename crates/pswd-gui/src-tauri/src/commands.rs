@@ -1003,7 +1003,7 @@ mod tests {
         });
         assert_eq!(
             app.call("server_status", json!({})),
-            Ok(json!({ "address": null, "vaults": [] }))
+            Ok(json!({ "address": null, "trouble": null, "vaults": [] }))
         );
         let server = TestServer::start();
         let connection = json!({

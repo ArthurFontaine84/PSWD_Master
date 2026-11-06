@@ -23,8 +23,8 @@ vi.mock("../lib/api", () => ({
   disconnectServer: vi.fn(),
 }));
 
-const disconnected: ServerStatus = { address: null, vaults: [] };
-const connected: ServerStatus = { address: "pswd.local:8443", vaults: [] };
+const disconnected: ServerStatus = { address: null, trouble: null, vaults: [] };
+const connected: ServerStatus = { address: "pswd.local:8443", trouble: null, vaults: [] };
 const nothing: Exchange = {
   downloaded: [],
   notDownloaded: [],
@@ -231,5 +231,24 @@ describe("Server, once connected", () => {
     expect(await screen.findByText("Connecté au serveur pswd.local:8443.")).toBeInTheDocument();
     expect(screen.queryByText(/Compte :/)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("tells a registered server from a connected one", async () => {
+    const since = new Date(2026, 10, 6, 14, 32).getTime();
+    show({ ...connected, trouble: { since, reason: "serveur injoignable" } });
+    expect(await screen.findByText("Serveur enregistré : pswd.local:8443.")).toBeInTheDocument();
+    expect(screen.getByText("Échanges impossibles depuis 14:32 : serveur injoignable.")).toHaveAttribute(
+      "role",
+      "status",
+    );
+    expect(screen.queryByText(/Connecté au serveur/)).not.toBeInTheDocument();
+    expect(accountStatus).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Se déconnecter" })).toBeEnabled();
+
+    vi.mocked(syncServer).mockResolvedValue(nothing);
+    vi.mocked(serverStatus).mockResolvedValue(connected);
+    await fireEvent.click(screen.getByRole("button", { name: "Synchroniser" }));
+    expect(await screen.findByText("Connecté au serveur pswd.local:8443.")).toBeInTheDocument();
+    expect(screen.queryByText(/Échanges impossibles/)).not.toBeInTheDocument();
   });
 });

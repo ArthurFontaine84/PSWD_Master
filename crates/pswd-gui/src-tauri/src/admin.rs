@@ -137,7 +137,9 @@ impl AppState {
     /// Compte de l'appareil, son rôle, et l'adresse publique, retenue au passage.
     pub fn account_status(&self) -> Result<AccountStatus, UiError> {
         let _one_at_a_time = self.exclusive();
-        let info = self.vaults.server_info().map_err(server_error)?;
+        let info = self
+            .observe(self.vaults.server_info())
+            .map_err(server_error)?;
         let address = self.vaults.server()?.map(|server| server.local_address);
         Ok(AccountStatus {
             address: address.unwrap_or_default(),

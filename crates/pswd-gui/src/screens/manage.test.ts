@@ -64,7 +64,7 @@ beforeEach(() => {
   vi.mocked(listVaults).mockResolvedValue(["perso"]);
   vi.mocked(listEntries).mockResolvedValue([]);
   vi.mocked(listTags).mockResolvedValue([]);
-  vi.mocked(serverStatus).mockResolvedValue({ address: null, vaults: [] });
+  vi.mocked(serverStatus).mockResolvedValue({ address: null, trouble: null, vaults: [] });
   vi.mocked(accountStatus).mockRejectedValue({ code: "notConnected", detail: null });
   vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
 });
@@ -192,7 +192,7 @@ describe("deleting the vault", () => {
 
   it("offers to delete a private vault from the server too", async () => {
     vi.mocked(deleteVaultEverywhere).mockResolvedValue();
-    const shared = { address: "pswd.local:8443", vaults: [{ name: "perso", state: "synced" as const, shared: true }] };
+    const shared = { address: "pswd.local:8443", trouble: null, vaults: [{ name: "perso", state: "synced" as const, shared: true }] };
     vi.mocked(serverStatus).mockResolvedValueOnce(shared);
     const { unmount } = render(OpenVault, {
       vault: { name: "perso", entries: 0 },
@@ -210,6 +210,7 @@ describe("deleting the vault", () => {
 
     vi.mocked(serverStatus).mockResolvedValue({
       address: "pswd.local:8443",
+      trouble: null,
       vaults: [{ name: "perso", state: "outdated", shared: false }],
     });
     const { onDeleted } = await manage();

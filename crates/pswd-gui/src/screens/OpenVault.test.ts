@@ -74,7 +74,7 @@ beforeEach(() => {
     { tag: "perso", count: 1 },
   ]);
   vi.mocked(entryHistory).mockResolvedValue([]);
-  vi.mocked(serverStatus).mockResolvedValue({ address: null, vaults: [] });
+  vi.mocked(serverStatus).mockResolvedValue({ address: null, trouble: null, vaults: [] });
   vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
   vi.mocked(entryDetail).mockImplementation((id) =>
     Promise.resolve(id === "1" ? githubDetail : wifiDetail),
@@ -347,7 +347,7 @@ describe("pagination on a wide screen", () => {
 });
 
 describe("OpenVault and the server", () => {
-  const connected = { address: "pswd.local:8443", vaults: [] };
+  const connected = { address: "pswd.local:8443", trouble: null, vaults: [] };
 
   function report(state: SyncState, changed = false, vault = "perso"): SyncReport {
     return { vault, state, detail: state === "offline" ? "serveur injoignable" : null, changed };

@@ -48,7 +48,8 @@
       return;
     }
     // Serveur injoignable : l'écran reste utilisable, sans le compte.
-    account = status.address === null ? null : await accountStatus().catch(() => null);
+    const reachable = status.address !== null && status.trouble === null;
+    account = reachable ? await accountStatus().catch(() => null) : null;
   }
 
   void load();
@@ -198,7 +199,12 @@
       </button>
     </div>
   {:else}
-    <p>{texts.connectedTo(status.address)}</p>
+    {#if status.trouble === null}
+      <p>{texts.connectedTo(status.address)}</p>
+    {:else}
+      <p>{texts.registeredServer(status.address)}</p>
+      <p role="status" class="trouble">{texts.serverTrouble(status.trouble.since, status.trouble.reason)}</p>
+    {/if}
     {#if account !== null}
       <p>{texts.account(account.accountName, account.isAdmin)}</p>
     {/if}
@@ -223,5 +229,9 @@
 <style>
   .explanation {
     color: var(--text-muted);
+  }
+
+  .trouble {
+    color: var(--danger);
   }
 </style>

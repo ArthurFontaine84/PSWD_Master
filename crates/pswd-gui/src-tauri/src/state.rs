@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::editing::{EntryInput, HistoryItem, history};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
+use crate::server::ServerTrouble;
 use crate::settings::Settings;
 use crate::sync::SyncReport;
 
@@ -76,6 +77,8 @@ pub struct AppState {
     /// jamais le même coffre et n'écrivent jamais la configuration en même temps.
     syncing: Arc<Mutex<()>>,
     hidden: Mutex<Option<Hidden>>,
+    /// Échec du dernier contact avec le serveur ; `None` s'il a réussi, ou s'il n'y en a pas eu.
+    trouble: Mutex<Option<ServerTrouble>>,
 }
 
 impl AppState {
@@ -112,6 +115,7 @@ impl AppState {
             openings: AtomicU64::new(0),
             syncing: Arc::new(Mutex::new(())),
             hidden: Mutex::new(None),
+            trouble: Mutex::new(None),
         }
     }
 
@@ -199,6 +203,27 @@ impl AppState {
     /// Attend la fin de la synchro ou de l'échange en cours, et empêche le suivant de commencer.
     pub(crate) fn exclusive(&self) -> MutexGuard<'_, ()> {
         lock(&self.syncing)
+    }
+
+    /// Retient l'issue d'un contact avec le serveur : une erreur de port vient de lui. Une série
+    /// d'échecs garde l'heure du premier.
+    pub(crate) fn observe<T>(&self, result: Result<T, AppError>) -> Result<T, AppError> {
+        let mut trouble = lock(&self.trouble);
+        match &result {
+            Ok(_) => *trouble = None,
+            Err(AppError::Port(error)) => {
+                let since = trouble
+                    .as_ref()
+                    .map_or_else(self.clock, |known| known.since);
+                *trouble = Some(ServerTrouble::new(since, error.to_string()));
+            }
+            Err(_) => {}
+        }
+        result
+    }
+
+    pub(crate) fn trouble(&self) -> Option<ServerTrouble> {
+        lock(&self.trouble).clone()
     }
 
     /// Synchronise le coffre ouvert en arrière-plan ; l'interface est prévenue du résultat.
