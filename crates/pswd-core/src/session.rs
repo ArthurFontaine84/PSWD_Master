@@ -157,6 +157,13 @@ impl<L: LocalStore> Session<L> {
         self.pending
     }
 
+    /// Date du dernier changement de mot de passe maître ou de clé de récupération, ici ou
+    /// reçu d'une autre copie.
+    #[must_use]
+    pub fn keys_updated_at(&self) -> Timestamp {
+        self.file.keys_updated_at()
+    }
+
     /// Copie locale telle que la session l'a lue ou écrite en dernier. Après une synchro réussie,
     /// elle a le même contenu que le distant.
     #[must_use]
@@ -611,9 +618,11 @@ mod tests {
             .change_password(&secret("nouveau"), fast_params(), at(3))
             .unwrap();
         session.local.file.clone_from(&other.local.file);
+        assert_ne!(session.keys_updated_at(), at(3));
         session
             .edit(|vault| vault.add(note("nouvelle"), at(4)))
             .unwrap();
+        assert_eq!(session.keys_updated_at(), at(3));
         let saved = session.local.file.as_deref().unwrap();
         assert_eq!(titles(&decrypt(saved, "nouveau")), ["départ", "nouvelle"]);
     }

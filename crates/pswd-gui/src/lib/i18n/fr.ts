@@ -355,6 +355,7 @@ export const fr = {
   syncRemoved:
     "Coffre supprimé du serveur : il n'existe plus que sur cet appareil. Pour le republier, appuyez sur « Synchroniser ».",
   syncLeft: "Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil.",
+  passwordChangedElsewhere: "Le mot de passe maître de ce coffre a été changé sur un autre appareil.",
   syncOffline: (detail: string) => `Synchro impossible : ${detail}. Les modifications seront publiées plus tard.`,
   syncConflict: "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",
   syncRejected: (detail: string) => `Copie du serveur refusée (${detail}) : elle n'est pas remplacée.`,

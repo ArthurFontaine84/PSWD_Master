@@ -565,34 +565,49 @@ fn sync_open(
         Trigger::Automatic => vaults.sync(&name, &mut session),
         Trigger::Requested => vaults.republish(&name, &mut session),
     };
-    let changed = if outcome == Ok(SyncOutcome::Left) {
+    let given_back = if outcome == Ok(SyncOutcome::Left) {
         let left = lock(open).take_if(|open| open.opening == opening);
         drop(left.and_then(|open| open.lock.close()));
-        false
+        GivenBack::default()
     } else {
         give_back(open, opening, edits, session)
     };
-    Some(SyncReport::new(name, outcome, changed))
+    Some(SyncReport::new(
+        name,
+        outcome,
+        given_back.changed,
+        given_back.password_changed,
+    ))
+}
+
+/// Ce que la copie synchronisée a changé dans le coffre ouvert.
+#[derive(Default)]
+struct GivenBack {
+    changed: bool,
+    password_changed: bool,
 }
 
 /// Rend la copie synchronisée au coffre ouvert, s'il n'a été ni fermé ni modifié entre-temps ;
-/// sinon, la modification a prévu une autre synchro. Renvoie `true` si le contenu a changé.
+/// sinon, la modification a prévu une autre synchro, qui signalera ces changements.
 fn give_back(
     open: &Mutex<Option<OpenVault>>,
     opening: u64,
     edits: u64,
     synced: VaultSession,
-) -> bool {
+) -> GivenBack {
     match lock(open).as_ref() {
         Some(open) if open.opening == opening && open.edits == edits => open
             .lock
             .quietly(|session| {
-                let changed = session.vault() != synced.vault();
+                let given_back = GivenBack {
+                    changed: session.vault() != synced.vault(),
+                    password_changed: session.keys_updated_at() != synced.keys_updated_at(),
+                };
                 *session = synced;
-                changed
+                given_back
             })
-            .unwrap_or(false),
-        _ => false,
+            .unwrap_or_default(),
+        _ => GivenBack::default(),
     }
 }
 
@@ -1594,6 +1609,7 @@ mod tests {
             state,
             detail: None,
             changed,
+            password_changed: false,
         }
     }
 
@@ -1779,6 +1795,44 @@ mod tests {
     }
 
     #[test]
+    fn a_password_changed_on_another_device_is_reported_once_adopted() {
+        let dir = TempDir::new().unwrap();
+        let (pc, _, pc_reports) = build(&dir, None, FakeClipboard::default());
+        connect_admin(&pc);
+        pc.create("perso", &secret("Maître-2026!"), false).unwrap();
+        next_report(&pc_reports);
+        let other = TempDir::new().unwrap();
+        let (phone, _, phone_reports) = build(&other, None, FakeClipboard::default());
+        connect_same_account(&pc, &phone);
+        phone.unlock("perso", &secret("Maître-2026!")).unwrap();
+        next_report(&phone_reports);
+        let adopted = SyncReport {
+            password_changed: true,
+            ..report("perso", SyncState::Synced, false)
+        };
+
+        pc.change_password(&secret("Maître-2026!"), &secret("Nouveau-2026!"))
+            .unwrap();
+        next_report(&pc_reports);
+        phone.check_open();
+        assert_eq!(phone_reports.try_recv(), Ok(adopted.clone()));
+        phone.lock();
+        assert!(phone.unlock("perso", &secret("Maître-2026!")).is_err());
+
+        pc.change_password(&secret("Nouveau-2026!"), &secret("Encore-2026!!"))
+            .unwrap();
+        next_report(&pc_reports);
+        phone.unlock("perso", &secret("Nouveau-2026!")).unwrap();
+        assert_eq!(next_report(&phone_reports), adopted);
+        phone.lock();
+        phone.unlock("perso", &secret("Encore-2026!!")).unwrap();
+        assert_eq!(
+            next_report(&phone_reports),
+            report("perso", SyncState::Synced, false)
+        );
+    }
+
+    #[test]
     fn a_device_without_server_has_nothing_to_check() {
         let dir = TempDir::new().unwrap();
         let (state, _, reports) = build(&dir, None, FakeClipboard::default());
@@ -1849,13 +1903,13 @@ mod tests {
             )
         })
         .unwrap();
-        assert!(!give_back(&state.open, opening + 1, 0, copy.clone()));
-        assert!(!give_back(&state.open, opening, 1, copy.clone()));
+        assert!(!give_back(&state.open, opening + 1, 0, copy.clone()).changed);
+        assert!(!give_back(&state.open, opening, 1, copy.clone()).changed);
         assert_eq!(state.current(), Some(info("perso", 0)));
-        assert!(give_back(&state.open, opening, 0, copy.clone()));
+        assert!(give_back(&state.open, opening, 0, copy.clone()).changed);
         assert_eq!(state.current(), Some(info("perso", 1)));
-        assert!(!give_back(&state.open, opening, 0, copy.clone()));
+        assert!(!give_back(&state.open, opening, 0, copy.clone()).changed);
         state.lock();
-        assert!(!give_back(&state.open, opening, 0, copy));
+        assert!(!give_back(&state.open, opening, 0, copy).changed);
     }
 }

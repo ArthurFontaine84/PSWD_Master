@@ -3,7 +3,7 @@ import type { Exchange, SyncReport, SyncState } from "./api";
 import { disconnectionOutcome, exchangeOutcome, syncMessage, syncProblem } from "./sync";
 
 function report(state: SyncState, detail: string | null = null): SyncReport {
-  return { vault: "perso", state, detail, changed: false };
+  return { vault: "perso", state, detail, changed: false, passwordChanged: false };
 }
 
 const nothing: Exchange = {

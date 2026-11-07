@@ -1036,8 +1036,7 @@ mod tests {
         assert_eq!(app.call("connect_server", connection), Ok(Value::Null));
 
         app.create("perso", "Maître-2026!").unwrap();
-        let synced =
-            json!({ "vault": "perso", "state": "synced", "detail": null, "changed": false });
+        let synced = json!({ "vault": "perso", "state": "synced", "detail": null, "changed": false, "passwordChanged": false });
         let report = receiver.recv_timeout(Duration::from_secs(30)).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&report).unwrap(), synced);
         assert_eq!(app.call("sync_vault", json!({})), Ok(synced));

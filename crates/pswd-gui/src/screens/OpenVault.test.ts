@@ -356,7 +356,13 @@ describe("OpenVault and the server", () => {
   const connected = { address: "pswd.local:8443", trouble: null, vaults: [] };
 
   function report(state: SyncState, changed = false, vault = "perso"): SyncReport {
-    return { vault, state, detail: state === "offline" ? "serveur injoignable" : null, changed };
+    return {
+      vault,
+      state,
+      detail: state === "offline" ? "serveur injoignable" : null,
+      changed,
+      passwordChanged: false,
+    };
   }
 
   /** Le gestionnaire passé à `onVaultSynced`, et la fonction qui arrête l'écoute. */
@@ -455,6 +461,25 @@ describe("OpenVault and the server", () => {
     await vi.waitFor(() => {
       expect(onExpired).toHaveBeenCalled();
     });
+  });
+
+  it("says when the master password was changed on another device", async () => {
+    const syncs = listenSyncs();
+    vi.mocked(serverStatus).mockResolvedValue(connected);
+    vi.mocked(syncVault).mockResolvedValue({ ...report("synced"), passwordChanged: true });
+    show();
+    await screen.findByText("2 entrées");
+    syncs.send({ ...report("synced"), passwordChanged: true });
+    const changed = "Le mot de passe maître de ce coffre a été changé sur un autre appareil.";
+    expect(await screen.findByText(changed)).toBeInTheDocument();
+
+    await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
+    await vi.waitFor(() => {
+      expect(screen.getByRole("button", { name: "Synchroniser" })).toBeEnabled();
+    });
+    expect(syncVault).toHaveBeenCalled();
+    expect(screen.getByText(changed)).toBeInTheDocument();
+    expect(screen.queryByText("Coffre à jour.")).not.toBeInTheDocument();
   });
 
   it("follows the automatic syncs of this vault only", async () => {

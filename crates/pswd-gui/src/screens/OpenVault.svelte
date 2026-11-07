@@ -115,6 +115,9 @@
     if (report.changed) {
       revision += 1;
     }
+    if (report.passwordChanged) {
+      showToast(texts.passwordChangedElsewhere);
+    }
   }
 
   async function synchronize() {
@@ -122,7 +125,7 @@
     try {
       const report = await syncVault();
       synced(report);
-      if (syncNotice === null) {
+      if (syncNotice === null && !report.passwordChanged) {
         showToast(syncMessage(report));
       }
     } catch (error) {

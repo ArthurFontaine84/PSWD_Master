@@ -222,7 +222,7 @@ describe("api", () => {
     vi.mocked(listen).mockClear().mockResolvedValue(stop);
     const handler = vi.fn();
     await expect(onVaultSynced(handler)).resolves.toBe(stop);
-    const report: SyncReport = { vault: "perso", state: "synced", detail: null, changed: true };
+    const report: SyncReport = { vault: "perso", state: "synced", detail: null, changed: true, passwordChanged: false };
     const call = vi.mocked(listen).mock.lastCall;
     expect(call?.[0]).toBe("vault-synced");
     call?.[1]({ event: "vault-synced", id: 1, payload: report });

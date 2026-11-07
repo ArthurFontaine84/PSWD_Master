@@ -234,6 +234,12 @@ impl VaultFile {
         Ok(merge)
     }
 
+    /// Date du dernier changement des enveloppes (mot de passe maître, clé de récupération).
+    #[must_use]
+    pub fn keys_updated_at(&self) -> Timestamp {
+        self.header.keys_updated_at
+    }
+
     /// Contenu complet du fichier `vault.enc` pour ce coffre.
     ///
     /// # Errors
@@ -516,7 +522,9 @@ mod tests {
         let ((mut a, vault), (mut b, _), _) = two_devices();
         b.change_password(&password("nouveau"), fast_params(), at(2_000))
             .unwrap();
+        assert_ne!(a.keys_updated_at(), at(2_000));
         let merged = a.merge_remote(&vault, &b.encrypt(&vault).unwrap()).unwrap();
+        assert_eq!(a.keys_updated_at(), at(2_000));
         assert!(merged.local_outdated);
         assert!(!merged.remote_outdated);
         let file = a.encrypt(&merged.vault).unwrap();

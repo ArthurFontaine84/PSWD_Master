@@ -230,6 +230,8 @@ export interface SyncReport {
   detail: string | null;
   /** La synchro a changé le contenu du coffre : il est à relire. */
   changed: boolean;
+  /** La synchro a adopté le mot de passe maître changé sur un autre appareil. */
+  passwordChanged: boolean;
 }
 
 export function listVaults(): Promise<string[]> {

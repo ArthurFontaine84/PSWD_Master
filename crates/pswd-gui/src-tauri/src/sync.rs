@@ -23,6 +23,7 @@ pub enum SyncState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SyncReport {
     pub vault: String,
     pub state: SyncState,
@@ -30,10 +31,17 @@ pub struct SyncReport {
     pub detail: Option<String>,
     /// La synchro a changé le contenu du coffre : l'interface le relit.
     pub changed: bool,
+    /// La synchro a adopté le mot de passe maître changé sur un autre appareil.
+    pub password_changed: bool,
 }
 
 impl SyncReport {
-    pub fn new(vault: String, outcome: Result<SyncOutcome, AppError>, changed: bool) -> Self {
+    pub fn new(
+        vault: String,
+        outcome: Result<SyncOutcome, AppError>,
+        changed: bool,
+        password_changed: bool,
+    ) -> Self {
         let (state, detail) = match outcome {
             Ok(SyncOutcome::NotConnected) => (SyncState::NotConnected, None),
             Ok(SyncOutcome::Left) => (SyncState::Left, None),
@@ -55,6 +63,7 @@ impl SyncReport {
             state,
             detail,
             changed,
+            password_changed,
         }
     }
 }
@@ -68,12 +77,12 @@ mod tests {
     use super::*;
 
     fn sent(outcome: Result<SyncOutcome, AppError>) -> serde_json::Value {
-        serde_json::to_value(SyncReport::new("perso".to_owned(), outcome, false)).unwrap()
+        serde_json::to_value(SyncReport::new("perso".to_owned(), outcome, false, false)).unwrap()
     }
 
     #[test]
     fn every_outcome_reaches_the_interface() {
-        let report = |state: &str, detail: Option<&str>| json!({ "vault": "perso", "state": state, "detail": detail, "changed": false });
+        let report = |state: &str, detail: Option<&str>| json!({ "vault": "perso", "state": state, "detail": detail, "changed": false, "passwordChanged": false });
         let offline = PortError::new("serveur injoignable");
         let cases = [
             (Ok(SyncOutcome::NotConnected), report("notConnected", None)),
