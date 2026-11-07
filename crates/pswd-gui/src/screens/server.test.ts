@@ -5,6 +5,7 @@ import {
   addDeviceKey,
   connectServer,
   disconnectServer,
+  refreshServer,
   serverStatus,
   syncServer,
   type AccountStatus,
@@ -16,6 +17,7 @@ import Server from "./Server.svelte";
 
 vi.mock("../lib/api", () => ({
   accountStatus: vi.fn(),
+  refreshServer: vi.fn(),
   serverStatus: vi.fn(),
   connectServer: vi.fn(),
   syncServer: vi.fn(),
@@ -55,6 +57,7 @@ function field(label: string): HTMLInputElement {
 
 function show(status: ServerStatus) {
   vi.mocked(serverStatus).mockResolvedValue(status);
+  vi.mocked(refreshServer).mockImplementation(() => serverStatus());
   const onClose = vi.fn();
   render(Server, { onClose });
   return onClose;

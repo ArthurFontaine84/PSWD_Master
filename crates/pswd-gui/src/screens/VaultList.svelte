@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { fly } from "svelte/transition";
   import Icon from "../components/Icon.svelte";
   import {
@@ -6,9 +7,11 @@
     deleteInvitation,
     listInvitations,
     listVaults,
+    refreshServer,
     serverStatus,
     syncServer,
     type Invitation,
+    type ServerStatus,
     type VaultServerState,
     type VaultStatus,
   } from "../lib/api";
@@ -52,12 +55,15 @@
     local: "red",
   };
 
+  function show(status: ServerStatus) {
+    connected = status.address !== null;
+    states = new Map(status.vaults.map((vault) => [vault.name, vault]));
+  }
+
   // Sans état lisible, la liste reste celle d'un appareil non connecté.
   async function loadStatus() {
     try {
-      const status = await serverStatus();
-      connected = status.address !== null;
-      states = new Map(status.vaults.map((vault) => [vault.name, vault]));
+      show(await serverStatus());
     } catch {
       return;
     }
@@ -66,16 +72,62 @@
     }
   }
 
-  /** Un serveur injoignable n'empêche pas d'ouvrir les coffres : son erreur est signalée. */
-  async function loadInvitations() {
+  /**
+   * Un serveur injoignable n'empêche pas d'ouvrir les coffres : son erreur est signalée, sauf
+   * pendant l'échange automatique, muet.
+   */
+  async function loadInvitations(quiet = false) {
     try {
       invitations = await listInvitations();
     } catch (error) {
-      problems = [...problems, errorMessage(error)];
+      if (!quiet) {
+        problems = [...problems, errorMessage(error)];
+      }
     }
   }
 
-  void loadStatus();
+  /** Échange automatique (SPEC §7) ; sans effet si un échange est déjà en cours. */
+  async function refresh() {
+    let status: ServerStatus | null;
+    try {
+      status = await refreshServer();
+    } catch {
+      return;
+    }
+    if (status === null) {
+      return;
+    }
+    show(status);
+    await reloadNames();
+    if (connected && status.trouble === null) {
+      await loadInvitations(true);
+    }
+  }
+
+  /** Les cartes ne sont redessinées que si les noms ont changé. */
+  async function reloadNames() {
+    const fresh = listVaults();
+    const [before, after] = await Promise.all([vaults.catch(() => null), fresh.catch(() => null)]);
+    const unchanged =
+      before === null
+        ? after === null
+        : after !== null && before.length === after.length && before.every((name, i) => name === after[i]);
+    if (!unchanged) {
+      vaults = fresh;
+    }
+  }
+
+  function refreshIfVisible() {
+    if (document.visibilityState === "visible") {
+      void refresh();
+    }
+  }
+
+  onMount(() => {
+    void refresh();
+    const timer = setInterval(refreshIfVisible, 30_000);
+    return () => clearInterval(timer);
+  });
 
   async function accept(invitation: Invitation) {
     answering = invitation.id;
@@ -126,6 +178,9 @@
     }
   }
 </script>
+
+<svelte:window onfocus={refreshIfVisible} />
+<svelte:document onvisibilitychange={refreshIfVisible} />
 
 <section aria-labelledby="vaults-title">
   <div class="toolbar">

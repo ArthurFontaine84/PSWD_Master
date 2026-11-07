@@ -34,6 +34,7 @@ import {
   serverStatus,
   connectServer,
   syncServer,
+  refreshServer,
   addDeviceKey,
   disconnectServer,
   syncVault,
@@ -121,6 +122,7 @@ describe("api", () => {
     await serverStatus();
     await connectServer("pswd.local", "AAAA", "PC", "Arthur");
     await syncServer();
+    await refreshServer();
     await addDeviceKey();
     await disconnectServer(false);
     await listAccounts();
@@ -180,6 +182,7 @@ describe("api", () => {
       ["server_status"],
       ["connect_server", { address: "pswd.local", key: "AAAA", deviceName: "PC", accountName: "Arthur" }],
       ["sync_server"],
+      ["refresh_server"],
       ["add_device_key"],
       ["disconnect_server", { keepLocal: false }],
       ["list_accounts"],

@@ -271,6 +271,14 @@ pub async fn sync_server<R: Runtime>(app: AppHandle<R>) -> Result<Exchange, UiEr
     in_background(app, AppState::exchange).await
 }
 
+/// Échange automatique de la liste des coffres, muet ; `null` si un échange est déjà en cours.
+#[tauri::command]
+pub async fn refresh_server<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Option<ServerStatus>, UiError> {
+    in_background(app, AppState::refresh).await
+}
+
 /// Clé de connexion d'un autre appareil, sur demande explicite de l'utilisateur.
 #[tauri::command]
 pub async fn add_device_key<R: Runtime>(app: AppHandle<R>) -> Result<String, UiError> {
@@ -597,6 +605,7 @@ mod tests {
             server_status,
             connect_server,
             sync_server,
+            refresh_server,
             add_device_key,
             disconnect_server,
             list_accounts,

@@ -34,6 +34,7 @@ const COMMANDS: &[&str] = &[
     "server_status",
     "connect_server",
     "sync_server",
+    "refresh_server",
     "add_device_key",
     "disconnect_server",
     "list_accounts",

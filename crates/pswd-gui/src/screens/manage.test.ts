@@ -15,6 +15,7 @@ import {
   lockVault,
   onVaultSynced,
   recoverVault,
+  refreshServer,
   serverStatus,
   restoreFromFile,
   saveSettings,
@@ -50,6 +51,7 @@ vi.mock("../lib/api", () => ({
   saveSettings: vi.fn(),
   accountStatus: vi.fn(),
   onVaultSynced: vi.fn(),
+  refreshServer: vi.fn(),
   serverStatus: vi.fn(),
 }));
 vi.mock("../lib/files", () => ({
@@ -65,6 +67,7 @@ beforeEach(() => {
   vi.mocked(listEntries).mockResolvedValue([]);
   vi.mocked(listTags).mockResolvedValue([]);
   vi.mocked(serverStatus).mockResolvedValue({ address: null, trouble: null, vaults: [] });
+  vi.mocked(refreshServer).mockImplementation(() => serverStatus());
   vi.mocked(accountStatus).mockRejectedValue({ code: "notConnected", detail: null });
   vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
 });

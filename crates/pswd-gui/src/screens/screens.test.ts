@@ -1,14 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/svelte";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createVault,
   deviceKind,
   listInvitations,
   listVaults,
+  refreshServer,
   serverStatus,
   syncServer,
   unlockVault,
   type Exchange,
+  type ServerStatus,
 } from "../lib/api";
 import Toast from "../components/Toast.svelte";
 import CreateVault from "./CreateVault.svelte";
@@ -21,6 +23,7 @@ vi.mock("../lib/api", () => ({
   listVaults: vi.fn(),
   createVault: vi.fn(),
   unlockVault: vi.fn(),
+  refreshServer: vi.fn(),
   serverStatus: vi.fn(),
   syncServer: vi.fn(),
   listInvitations: vi.fn(),
@@ -46,6 +49,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(deviceKind).mockResolvedValue("desktop");
   vi.mocked(serverStatus).mockResolvedValue({ address: null, trouble: null, vaults: [] });
+  vi.mocked(refreshServer).mockImplementation(() => serverStatus());
   vi.mocked(listInvitations).mockResolvedValue([]);
 });
 
@@ -159,6 +163,121 @@ describe("VaultList", () => {
     render(VaultList, { onOpen: vi.fn(), onBackup: vi.fn(), onRestore: vi.fn() });
     expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Synchroniser" })).not.toBeInTheDocument();
+  });
+});
+
+describe("VaultList automatic exchange", () => {
+  const connected: ServerStatus = {
+    address: "pswd.local:8443",
+    trouble: null,
+    vaults: [{ name: "perso", state: "synced", shared: false }],
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function show() {
+    return render(VaultList, { onOpen: vi.fn(), onBackup: vi.fn(), onRestore: vi.fn() });
+  }
+
+  it("exchanges at once, then every 30 seconds while the page is visible", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    vi.mocked(listVaults).mockResolvedValue(["perso"]);
+    vi.mocked(refreshServer).mockResolvedValue(connected);
+    const { unmount } = show();
+    expect(await screen.findByRole("img", { name: "Synchronisé" })).toBeInTheDocument();
+    expect(refreshServer).toHaveBeenCalledTimes(1);
+    expect(serverStatus).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(30_000);
+    expect(refreshServer).toHaveBeenCalledTimes(2);
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    vi.advanceTimersByTime(30_000);
+    expect(refreshServer).toHaveBeenCalledTimes(2);
+    visibility.mockReturnValue("visible");
+    unmount();
+    vi.advanceTimersByTime(30_000);
+    expect(refreshServer).toHaveBeenCalledTimes(2);
+  });
+
+  it("exchanges again when the page comes back to the foreground", async () => {
+    vi.mocked(listVaults).mockResolvedValue(["perso"]);
+    vi.mocked(refreshServer).mockResolvedValue(connected);
+    show();
+    await screen.findByRole("img", { name: "Synchronisé" });
+    await fireEvent(document, new Event("visibilitychange"));
+    await fireEvent.focus(window);
+    expect(refreshServer).toHaveBeenCalledTimes(3);
+  });
+
+  it("redraws the cards only when the names change", async () => {
+    vi.mocked(listVaults).mockResolvedValue(["perso"]);
+    vi.mocked(refreshServer).mockResolvedValue(connected);
+    show();
+    await vi.waitFor(() => {
+      expect(listInvitations).toHaveBeenCalledTimes(1);
+    });
+    const card = screen.getByRole("button", { name: /perso/ });
+    await fireEvent.focus(window);
+    await vi.waitFor(() => {
+      expect(listInvitations).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByRole("button", { name: /perso/ })).toBe(card);
+
+    vi.mocked(listVaults).mockResolvedValue(["perso", "travail"]);
+    await fireEvent.focus(window);
+    expect(await screen.findByRole("button", { name: "travail" })).toBeInTheDocument();
+
+    vi.mocked(listVaults).mockRejectedValue({ code: "configInvalid", detail: "ligne 2" });
+    await fireEvent.focus(window);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Configuration invalide : ligne 2");
+  });
+
+  it("shows the vaults once they become readable, and keeps the error until then", async () => {
+    vi.mocked(listVaults).mockRejectedValue({ code: "configInvalid", detail: "ligne 2" });
+    vi.mocked(refreshServer).mockResolvedValue(connected);
+    show();
+    await vi.waitFor(() => {
+      expect(listInvitations).toHaveBeenCalledTimes(1);
+    });
+    const error = screen.getByRole("alert");
+    await fireEvent.focus(window);
+    await vi.waitFor(() => {
+      expect(listInvitations).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByRole("alert")).toBe(error);
+
+    vi.mocked(listVaults).mockResolvedValue(["perso"]);
+    await fireEvent.focus(window);
+    expect(await screen.findByRole("button", { name: /perso/ })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("ignores a busy or failing exchange, and an unreachable server", async () => {
+    vi.mocked(listVaults).mockResolvedValue(["perso"]);
+    vi.mocked(refreshServer).mockResolvedValueOnce(null);
+    show();
+    expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
+    expect(refreshServer).toHaveBeenCalledTimes(1);
+
+    vi.mocked(refreshServer).mockRejectedValueOnce({ code: "configInvalid", detail: "config.toml" });
+    await fireEvent.focus(window);
+    expect(refreshServer).toHaveBeenCalledTimes(2);
+    expect(listVaults).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Synchroniser" })).not.toBeInTheDocument();
+
+    vi.mocked(refreshServer).mockResolvedValueOnce({
+      ...connected,
+      trouble: { since: 0, reason: "serveur injoignable" },
+      vaults: [{ name: "perso", state: null, shared: false }],
+    });
+    await fireEvent.focus(window);
+    expect(await screen.findByRole("button", { name: "Synchroniser" })).toBeInTheDocument();
+    expect(listInvitations).not.toHaveBeenCalled();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
 

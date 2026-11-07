@@ -372,6 +372,11 @@ export function syncServer(): Promise<Exchange> {
   return invoke<Exchange>("sync_server");
 }
 
+/** Échange automatique et muet de la liste des coffres ; `null` si un échange est déjà en cours. */
+export function refreshServer(): Promise<ServerStatus | null> {
+  return invoke<ServerStatus | null>("refresh_server");
+}
+
 /** Clé de connexion d'un autre appareil : seulement à la demande de l'utilisateur. */
 export function addDeviceKey(): Promise<string> {
   return invoke<string>("add_device_key");

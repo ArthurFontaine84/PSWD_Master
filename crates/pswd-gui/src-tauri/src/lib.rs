@@ -79,6 +79,7 @@ pub fn run() {
             commands::server_status,
             commands::connect_server,
             commands::sync_server,
+            commands::refresh_server,
             commands::add_device_key,
             commands::disconnect_server,
             commands::list_accounts,

@@ -12,7 +12,9 @@ import {
   listTags,
   listVaults,
   onVaultSynced,
+  refreshServer,
   serverStatus,
+  syncServer,
   vaultMembers,
   type Exchange,
   type Invitation,
@@ -26,6 +28,7 @@ import VaultList from "./VaultList.svelte";
 vi.mock("../lib/api", () => ({
   listVaults: vi.fn(),
   createVault: vi.fn(),
+  refreshServer: vi.fn(),
   serverStatus: vi.fn(),
   syncServer: vi.fn(),
   listEntries: vi.fn(),
@@ -73,6 +76,7 @@ beforeEach(() => {
   render(Toast);
   vi.mocked(listVaults).mockResolvedValue(["ancien", "famille", "perso"]);
   vi.mocked(serverStatus).mockResolvedValue(shared);
+  vi.mocked(refreshServer).mockImplementation(() => serverStatus());
   vi.mocked(listInvitations).mockResolvedValue([]);
   vi.mocked(listEntries).mockResolvedValue([]);
   vi.mocked(listTags).mockResolvedValue([]);
@@ -129,7 +133,7 @@ describe("the vault list", () => {
     await vi.waitFor(() => {
       expect(screen.queryByText(/vous invite/)).not.toBeInTheDocument();
     });
-    expect(listVaults).toHaveBeenCalledTimes(2);
+    expect(listVaults).toHaveBeenCalledTimes(3);
   });
 
   it("declines an invitation", async () => {
@@ -155,11 +159,17 @@ describe("the vault list", () => {
     expect(screen.getByRole("button", { name: "Refuser" })).toBeEnabled();
   });
 
-  it("stays usable when the invitations cannot be read", async () => {
+  it("stays usable when the invitations cannot be read, silently until asked", async () => {
     vi.mocked(listInvitations).mockRejectedValue({ code: "serverError", detail: "serveur injoignable" });
+    vi.mocked(syncServer).mockResolvedValue(nothing);
     list();
-    expect(await screen.findByRole("alert")).toHaveTextContent("serveur injoignable");
+    await vi.waitFor(() => {
+      expect(listInvitations).toHaveBeenCalled();
+    });
     expect(screen.getByRole("button", { name: /^perso/ })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Synchroniser" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("serveur injoignable");
   });
 });
 

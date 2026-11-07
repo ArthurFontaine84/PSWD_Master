@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError};
 use std::thread;
 use std::time::Duration;
 
@@ -203,6 +203,16 @@ impl AppState {
     /// Attend la fin de la synchro ou de l'échange en cours, et empêche le suivant de commencer.
     pub(crate) fn exclusive(&self) -> MutexGuard<'_, ()> {
         lock(&self.syncing)
+    }
+
+    /// Comme [`AppState::exclusive`], sans attendre : `None` si un échange ou une synchro est en
+    /// cours.
+    pub(crate) fn try_exclusive(&self) -> Option<MutexGuard<'_, ()>> {
+        match self.syncing.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        }
     }
 
     /// Retient l'issue d'un contact avec le serveur : une erreur de port vient de lui. Une série

@@ -34,6 +34,7 @@
     "allow-server-status",
     "allow-connect-server",
     "allow-sync-server",
+    "allow-refresh-server",
     "allow-add-device-key",
     "allow-disconnect-server",
     "allow-list-accounts",

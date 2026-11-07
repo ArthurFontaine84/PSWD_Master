@@ -9,6 +9,7 @@ import {
   lockVault,
   onVaultSynced,
   revealPassword,
+  refreshServer,
   serverStatus,
   syncVault,
   type EntryDetail,
@@ -28,6 +29,7 @@ vi.mock("../lib/api", () => ({
   copyPassword: vi.fn(),
   lockVault: vi.fn(),
   onVaultSynced: vi.fn(),
+  refreshServer: vi.fn(),
   serverStatus: vi.fn(),
   syncVault: vi.fn(),
 }));
@@ -75,6 +77,7 @@ beforeEach(() => {
   ]);
   vi.mocked(entryHistory).mockResolvedValue([]);
   vi.mocked(serverStatus).mockResolvedValue({ address: null, trouble: null, vaults: [] });
+  vi.mocked(refreshServer).mockImplementation(() => serverStatus());
   vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
   vi.mocked(entryDetail).mockImplementation((id) =>
     Promise.resolve(id === "1" ? githubDetail : wifiDetail),

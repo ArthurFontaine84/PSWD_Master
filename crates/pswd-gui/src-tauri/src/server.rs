@@ -102,11 +102,19 @@ impl AppState {
     /// Le serveur de l'appareil et l'état de chaque coffre, d'après la liste des coffres du
     /// serveur.
     pub fn server_status(&self) -> Result<ServerStatus, UiError> {
+        // Serveur injoignable : les coffres restent utilisables, sans état.
+        self.status(|| self.observe(self.vaults.vault_states()).unwrap_or_default())
+    }
+
+    /// État vu par l'interface ; `states` n'est demandé que si un serveur est enregistré.
+    fn status(
+        &self,
+        states: impl FnOnce() -> Vec<(String, VaultState)>,
+    ) -> Result<ServerStatus, UiError> {
         let address = self.vaults.server()?.map(|server| server.local_address);
         let config = self.vaults.config()?;
-        // Serveur injoignable : les coffres restent utilisables, sans état.
         let states: BTreeMap<String, VaultState> = match address {
-            Some(_) => self.observe(self.vaults.vault_states()).unwrap_or_default(),
+            Some(_) => states(),
             None => Vec::new(),
         }
         .into_iter()
@@ -152,7 +160,28 @@ impl AppState {
     /// coffre ouvert dont le compte n'est plus membre est fermé, il vient d'être supprimé.
     pub fn exchange(&self) -> Result<Exchange, UiError> {
         let _one_at_a_time = self.exclusive();
-        let exchange = Exchange::from(self.observe(self.vaults.exchange()).map_err(server_error)?);
+        self.exchange_now().map_err(server_error)
+    }
+
+    /// Échange automatique de la liste des coffres (SPEC §7), muet : `None` si un échange ou une
+    /// synchro est déjà en cours. Renvoie l'état qui en résulte ; un serveur qui n'a pas répondu
+    /// n'est pas recontacté pour le lire.
+    pub fn refresh(&self) -> Result<Option<ServerStatus>, UiError> {
+        let Some(one_at_a_time) = self.try_exclusive() else {
+            return Ok(None);
+        };
+        let exchanged = self.vaults.server()?.map(|_| self.exchange_now());
+        drop(one_at_a_time);
+        let status = match exchanged {
+            Some(Err(AppError::Port(_))) => self.status(Vec::new),
+            _ => self.server_status(),
+        };
+        status.map(Some)
+    }
+
+    /// À appeler pendant [`AppState::exclusive`].
+    fn exchange_now(&self) -> Result<Exchange, AppError> {
+        let exchange = Exchange::from(self.observe(self.vaults.exchange())?);
         for name in &exchange.left {
             self.close_without_publishing(name);
         }
@@ -399,6 +428,69 @@ mod tests {
             status(&state),
             json!({ "address": null, "trouble": null, "vaults": [] })
         );
+    }
+
+    #[test]
+    fn refresh_exchanges_then_returns_the_status() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        create(&state, "perso");
+        let local_only = sent(&state.refresh().unwrap().unwrap());
+        assert_eq!(local_only["address"], Value::Null);
+        assert_eq!(local_only["vaults"][0]["state"], Value::Null);
+
+        let server = connect_admin(&state);
+        let refreshed = sent(&state.refresh().unwrap().unwrap());
+        assert_eq!(refreshed["address"], server.address.as_str());
+        assert_eq!(refreshed["trouble"], Value::Null);
+        assert_eq!(refreshed["vaults"][0]["state"], "synced");
+    }
+
+    #[test]
+    fn refresh_waits_for_nobody() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        connect_admin(&state);
+        let busy = state.exclusive();
+        assert_eq!(state.refresh(), Ok(None));
+        drop(busy);
+        assert!(state.refresh().unwrap().is_some());
+    }
+
+    #[test]
+    fn refresh_still_runs_after_a_failed_exchange_panicked() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        std::thread::scope(|scope| {
+            let crashed = scope.spawn(|| {
+                let _held = state.exclusive();
+                panic!("échange interrompu");
+            });
+            assert!(crashed.join().is_err());
+        });
+        assert!(state.refresh().unwrap().is_some());
+    }
+
+    #[test]
+    fn refresh_reports_an_unreachable_server_without_asking_twice() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        create(&state, "perso");
+        connect_admin(&state);
+        go_offline(&dir);
+        let offline = sent(&state.refresh().unwrap().unwrap());
+        assert_eq!(offline["trouble"]["reason"], "serveur injoignable");
+        assert_eq!(offline["vaults"][0]["state"], Value::Null);
+    }
+
+    #[test]
+    fn refresh_reports_an_unreadable_configuration() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        connect_admin(&state);
+        fs::create_dir_all(dir.path().join("config")).unwrap();
+        fs::write(dir.path().join("config").join("config.toml"), "[[[").unwrap();
+        assert_eq!(sent(&state.refresh().unwrap_err())["code"], "configInvalid");
     }
 
     #[test]
