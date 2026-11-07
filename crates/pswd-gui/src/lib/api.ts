@@ -423,6 +423,11 @@ export function syncVault(): Promise<SyncReport> {
   return invoke<SyncReport>("sync_vault");
 }
 
+/** Vérifie si le serveur a changé le coffre ouvert ; la synchro éventuelle arrive par `onVaultSynced`. */
+export async function checkVault(): Promise<void> {
+  await invoke("check_vault");
+}
+
 /** Compte de l'appareil et son rôle ; l'adresse publique est retenue au passage. */
 export function accountStatus(): Promise<AccountStatus> {
   return invoke<AccountStatus>("account_status");

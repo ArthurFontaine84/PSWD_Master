@@ -256,6 +256,26 @@ impl AppState {
             .ok_or_else(UiError::vault_locked)
     }
 
+    /// Vérification périodique du coffre ouvert (SPEC §7) : si sa copie du serveur a changé,
+    /// synchro avec fusion, signalée comme les autres synchros automatiques. Ne repousse pas le
+    /// verrouillage ; sans effet si un échange ou une synchro est en cours.
+    pub fn check_open(&self) {
+        let Some(name) = self.open().as_ref().map(|open| open.name.clone()) else {
+            return;
+        };
+        let Some(one_at_a_time) = self.try_exclusive() else {
+            return;
+        };
+        let moved = self.observe(self.vaults.server_moved(&name)) == Ok(true);
+        drop(one_at_a_time);
+        if moved
+            && let Some(report) =
+                sync_open(&self.vaults, &self.open, &self.syncing, Trigger::Automatic)
+        {
+            self.notifier.vault_synced(&report);
+        }
+    }
+
     /// L'application passe en arrière-plan : le coffre ouvert se verrouillera après
     /// `background_lock_seconds`, ou tout de suite si la configuration est illisible.
     pub fn hide(&self) {
@@ -526,7 +546,8 @@ enum Trigger {
 
 /// Synchronise une copie de la session ouverte : l'interface continue de lire et de modifier le
 /// coffre pendant l'échange avec le serveur. `None` si aucun coffre n'est ouvert. Un coffre dont
-/// le compte n'est plus membre vient d'être supprimé : il est fermé.
+/// le compte n'est plus membre vient d'être supprimé : il est fermé. Une synchro n'est pas une
+/// activité de l'utilisateur : elle ne repousse pas le verrouillage.
 fn sync_open(
     vaults: &Vaults,
     open: &Mutex<Option<OpenVault>>,
@@ -537,7 +558,7 @@ fn sync_open(
     let (name, opening, edits, mut session) = {
         let open = lock(open);
         let open = open.as_ref()?;
-        let session = open.lock.with(|session| session.clone())?;
+        let session = open.lock.quietly(|session| session.clone())?;
         (open.name.clone(), open.opening, open.edits, session)
     };
     let outcome = match trigger {
@@ -565,7 +586,7 @@ fn give_back(
     match lock(open).as_ref() {
         Some(open) if open.opening == opening && open.edits == edits => open
             .lock
-            .with(|session| {
+            .quietly(|session| {
                 let changed = session.vault() != synced.vault();
                 *session = synced;
                 changed
@@ -1693,6 +1714,81 @@ mod tests {
             phone.sync_now(),
             Ok(report("perso", SyncState::Synced, false))
         );
+    }
+
+    /// `pc` et `phone` du même compte, `perso` ouvert sur chacun ; leurs synchros automatiques.
+    fn open_on_two_devices(
+        pc_dir: &TempDir,
+        phone_dir: &TempDir,
+        phone_lock: Option<Duration>,
+    ) -> (AppState, AppState, mpsc::Receiver<SyncReport>, TestServer) {
+        let (pc, _, pc_reports) = build(pc_dir, None, FakeClipboard::default());
+        let server = connect_admin(&pc);
+        pc.create("perso", &secret("Maître-2026!"), false).unwrap();
+        next_report(&pc_reports);
+        let (phone, _, phone_reports) = build(phone_dir, phone_lock, FakeClipboard::default());
+        connect_same_account(&pc, &phone);
+        phone.unlock("perso", &secret("Maître-2026!")).unwrap();
+        next_report(&phone_reports);
+        pc.add_entry(wifi_input(&json!({ "mode": "set", "value": "box-1234" })))
+            .unwrap();
+        next_report(&pc_reports);
+        (pc, phone, phone_reports, server)
+    }
+
+    #[test]
+    fn the_open_vault_follows_the_changes_of_the_server() {
+        let (pc_dir, phone_dir) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+        let (_pc, phone, reports, _server) = open_on_two_devices(&pc_dir, &phone_dir, None);
+        let busy = phone.exclusive();
+        phone.check_open();
+        drop(busy);
+        assert!(reports.try_recv().is_err());
+
+        phone.check_open();
+        assert_eq!(
+            reports.try_recv(),
+            Ok(report("perso", SyncState::Synced, true))
+        );
+        assert_eq!(titles(&phone.entries("", None).unwrap()), ["Box"]);
+        phone.check_open();
+        assert!(reports.try_recv().is_err());
+
+        phone.lock();
+        phone.check_open();
+        assert!(reports.try_recv().is_err());
+    }
+
+    #[test]
+    fn checking_the_open_vault_does_not_postpone_its_lock() {
+        let (pc_dir, phone_dir) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+        let (_pc, phone, reports, _server) =
+            open_on_two_devices(&pc_dir, &phone_dir, Some(Duration::from_secs(2)));
+        // Verrouillage prévu avant `unlocked` + 2 s ; repoussé, il viendrait après + 3 s.
+        let unlocked = std::time::Instant::now();
+        thread::sleep(Duration::from_secs(1));
+        phone.check_open();
+        assert_eq!(
+            reports.try_recv(),
+            Ok(report("perso", SyncState::Synced, true))
+        );
+        thread::sleep(Duration::from_millis(2_500).saturating_sub(unlocked.elapsed()));
+        assert_eq!(phone.current(), None);
+        phone.check_open();
+        assert!(reports.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_device_without_server_has_nothing_to_check() {
+        let dir = TempDir::new().unwrap();
+        let (state, _, reports) = build(&dir, None, FakeClipboard::default());
+        state
+            .create("perso", &secret("Maître-2026!"), false)
+            .unwrap();
+        next_report(&reports);
+        state.check_open();
+        assert!(reports.try_recv().is_err());
+        assert_eq!(state.trouble(), None);
     }
 
     /// Version du coffre `perso` sur le serveur de `state`.

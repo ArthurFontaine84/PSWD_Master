@@ -483,6 +483,26 @@ impl Vaults {
             .collect())
     }
 
+    /// `true` si la copie du serveur du coffre `name` a changé depuis leur dernier état commun,
+    /// ou si celui-ci est inconnu : une synchro avec fusion est à faire. `false` pour un coffre
+    /// inconnu, ou absent de ce serveur (jamais publié, lié à un autre serveur, supprimé).
+    ///
+    /// # Errors
+    ///
+    /// Si l'appareil n'est pas connecté, si le serveur est injoignable, ou si la configuration
+    /// est illisible.
+    pub fn server_moved(&self, name: &str) -> Result<bool, AppError> {
+        let server = self.connected()?;
+        let listed = server.client()?.list_vaults()?;
+        let server_id = server.server_id();
+        Ok(self
+            .config()?
+            .vaults
+            .get(name)
+            .and_then(|vault| vault.remote.as_ref())
+            .is_some_and(|link| link.server == server_id && moved(link, &listed)))
+    }
+
     /// Clé de connexion d'un appareil de plus pour le même compte, à montrer une seule fois.
     ///
     /// # Errors
@@ -567,6 +587,19 @@ fn state(vault: &VaultConfig, server_id: &str, listed: &[RemoteVaultInfo]) -> Va
         (true, true) => VaultState::NeedsUnlock,
         _ => VaultState::Outdated,
     }
+}
+
+/// La copie du serveur a changé depuis le dernier état commun, ou celui-ci est inconnu.
+fn moved(link: &RemoteLink, listed: &[RemoteVaultInfo]) -> bool {
+    listed
+        .iter()
+        .find(|remote| remote.id == link.id)
+        .and_then(|remote| remote.version.as_ref())
+        .is_some_and(|version| {
+            link.synced
+                .as_ref()
+                .is_none_or(|synced| synced.version != version.0)
+        })
 }
 
 /// Ce qui a changé depuis le dernier état commun : la copie locale (absente, elle compte comme
@@ -1047,6 +1080,7 @@ mod tests {
         create(&a, "perso");
         assert_eq!(a.exchange(), Err(AppError::NotConnected));
         assert_eq!(a.vault_states(), Err(AppError::NotConnected));
+        assert_eq!(a.server_moved("perso"), Err(AppError::NotConnected));
         assert_eq!(a.new_device_key(), Err(AppError::NotConnected));
         assert_eq!(a.disconnect(true), Err(AppError::NotConnected));
         let mut session = open(&a, "perso");
@@ -1143,6 +1177,42 @@ mod tests {
             [updated("perso", Update::NeedsUnlock)]
         );
         assert_eq!(states(&b), [state_of("perso", VaultState::NeedsUnlock)]);
+    }
+
+    #[test]
+    fn only_a_change_on_the_server_calls_for_a_sync() {
+        let dir = TempDir::new().unwrap();
+        let (a, b, _server) = two_devices(&dir);
+        create(&b, "neuf");
+        assert_eq!(b.server_moved("perso"), Ok(false));
+        assert_eq!(b.server_moved("neuf"), Ok(false));
+        assert_eq!(b.server_moved("inconnu"), Ok(false));
+
+        add_note(&mut open(&b, "perso"), "Banque");
+        assert_eq!(b.server_moved("perso"), Ok(false));
+        b.exchange().unwrap();
+        assert_eq!(a.server_moved("perso"), Ok(true));
+        a.sync("perso", &mut open(&a, "perso")).unwrap();
+        assert_eq!(a.server_moved("perso"), Ok(false));
+
+        forget_synced(&a, "perso");
+        assert_eq!(a.server_moved("perso"), Ok(true));
+        b.delete_everywhere("perso").unwrap();
+        assert_eq!(a.server_moved("perso"), Ok(false));
+    }
+
+    #[test]
+    fn a_vault_of_another_server_has_not_moved_on_this_one() {
+        let dir = TempDir::new().unwrap();
+        let a = device(&dir, "a");
+        create(&a, "perso");
+        connect_admin(&a);
+        a.exchange().unwrap();
+        a.disconnect(true).unwrap();
+        connect_admin(&a);
+        assert_eq!(a.server_moved("perso"), Ok(false));
+        go_offline(&a);
+        assert_eq!(a.server_moved("perso"), Err(offline()));
     }
 
     #[test]
@@ -1343,6 +1413,10 @@ mod tests {
         fs::write(&config, "couleur = 1").unwrap();
         assert!(matches!(
             a.vault_states(),
+            Err(AppError::Config(ConfigError::Invalid(_)))
+        ));
+        assert!(matches!(
+            a.server_moved("perso"),
             Err(AppError::Config(ConfigError::Invalid(_)))
         ));
     }

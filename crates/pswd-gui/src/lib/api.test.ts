@@ -38,6 +38,7 @@ import {
   addDeviceKey,
   disconnectServer,
   syncVault,
+  checkVault,
   listAccounts,
   vaultMembers,
   inviteMember,
@@ -133,6 +134,7 @@ describe("api", () => {
     await deleteInvitation("i1");
     await leaveVault("famille");
     await syncVault();
+    await checkVault();
     await accountStatus();
     await deleteVaultEverywhere("perso", "perso");
     await adminAccounts();
@@ -193,6 +195,7 @@ describe("api", () => {
       ["delete_invitation", { id: "i1" }],
       ["leave_vault", { vault: "famille" }],
       ["sync_vault"],
+      ["check_vault"],
       ["account_status"],
       ["delete_vault_everywhere", { name: "perso", confirmation: "perso" }],
       ["admin_accounts"],

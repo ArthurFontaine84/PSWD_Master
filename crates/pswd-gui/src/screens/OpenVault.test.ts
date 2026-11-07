@@ -12,6 +12,7 @@ import {
   refreshServer,
   serverStatus,
   syncVault,
+  checkVault,
   type EntryDetail,
   type EntrySummary,
   type SyncReport,
@@ -32,6 +33,7 @@ vi.mock("../lib/api", () => ({
   refreshServer: vi.fn(),
   serverStatus: vi.fn(),
   syncVault: vi.fn(),
+  checkVault: vi.fn(),
 }));
 
 const github: EntrySummary = {
@@ -79,6 +81,7 @@ beforeEach(() => {
   vi.mocked(serverStatus).mockResolvedValue({ address: null, trouble: null, vaults: [] });
   vi.mocked(refreshServer).mockImplementation(() => serverStatus());
   vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
+  vi.mocked(checkVault).mockResolvedValue();
   vi.mocked(entryDetail).mockImplementation((id) =>
     Promise.resolve(id === "1" ? githubDetail : wifiDetail),
   );
@@ -366,6 +369,32 @@ describe("OpenVault and the server", () => {
     });
     return { stop, send: (sent: SyncReport) => handler(sent) };
   }
+
+  it("checks the server every 30 seconds while the page is visible, silently", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    vi.mocked(checkVault).mockRejectedValueOnce({ code: "serverError", detail: "serveur injoignable" });
+    const { unmount } = render(OpenVault, {
+      vault: { name: "perso", entries: 2 },
+      onLocked: vi.fn(),
+      onExpired: vi.fn(),
+      onDeleted: vi.fn(),
+    });
+    await screen.findByText("2 entrées");
+    expect(checkVault).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(30_000);
+    expect(checkVault).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(30_000);
+    expect(checkVault).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    vi.advanceTimersByTime(30_000);
+    expect(checkVault).toHaveBeenCalledTimes(2);
+    visibility.mockRestore();
+    unmount();
+    vi.advanceTimersByTime(30_000);
+    expect(checkVault).toHaveBeenCalledTimes(2);
+  });
 
   it("offers no sync to a device without a server", async () => {
     show();

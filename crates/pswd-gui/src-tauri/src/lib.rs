@@ -90,6 +90,7 @@ pub fn run() {
             commands::delete_invitation,
             commands::leave_vault,
             commands::sync_vault,
+            commands::check_vault,
             commands::account_status,
             commands::delete_vault_everywhere,
             commands::admin_accounts,

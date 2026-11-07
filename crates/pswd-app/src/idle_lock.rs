@@ -58,6 +58,12 @@ impl<S: Send + 'static> IdleLock<S> {
         result
     }
 
+    /// Comme [`IdleLock::with`], sans repousser l'échéance : pour un travail qui n'est pas une
+    /// activité de l'utilisateur, comme une synchro.
+    pub fn quietly<R>(&self, use_session: impl FnOnce(&mut S) -> R) -> Option<R> {
+        lock(&self.shared.0).session.as_mut().map(use_session)
+    }
+
     /// Avance l'échéance : sans utilisation d'ici là, la session sera détruite dans `delay` au
     /// plus tard, même si le verrouillage par inactivité est désactivé. Ne la repousse jamais.
     pub fn expire_within(&self, delay: Duration) {
@@ -168,6 +174,18 @@ mod tests {
             assert_eq!(guarded.with(|_| ()), Some(()));
         }
         assert_eq!(events(&log), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn quiet_use_does_not_postpone_the_lock() {
+        let (guarded, log) = guarded(Duration::from_millis(200));
+        for _ in 0..3 {
+            thread::sleep(Duration::from_millis(50));
+            assert_eq!(guarded.quietly(|_| 7), Some(7));
+        }
+        thread::sleep(Duration::from_millis(300));
+        assert_eq!(events(&log), ["détruite"]);
+        assert_eq!(guarded.quietly(|_| 7), None);
     }
 
     #[test]

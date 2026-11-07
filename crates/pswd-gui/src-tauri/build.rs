@@ -45,6 +45,7 @@ const COMMANDS: &[&str] = &[
     "delete_invitation",
     "leave_vault",
     "sync_vault",
+    "check_vault",
     "account_status",
     "delete_vault_everywhere",
     "admin_accounts",

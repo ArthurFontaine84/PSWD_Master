@@ -12,6 +12,7 @@
   import Members from "../components/Members.svelte";
   import {
     addEntry,
+    checkVault,
     listEntries,
     listTags,
     lockVault,
@@ -230,7 +231,14 @@
     const stopBack = onBack(back);
     const stopWide = watchWide((value) => (wide = value));
     const stopSynced = onVaultSynced(synced);
+    // Vérification muette (SPEC §7) : elle ne repousse pas le verrouillage.
+    const checking = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        checkVault().catch(() => undefined);
+      }
+    }, 30_000);
     return () => {
+      clearInterval(checking);
       stopBack();
       stopWide();
       void stopSynced.then((stop) => {

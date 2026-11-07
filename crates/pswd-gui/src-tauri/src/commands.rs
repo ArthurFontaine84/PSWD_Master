@@ -352,6 +352,17 @@ pub async fn sync_vault<R: Runtime>(app: AppHandle<R>) -> Result<SyncReport, UiE
     in_background(app, AppState::sync_now).await
 }
 
+/// Vérification périodique du coffre ouvert ; une synchro qu'elle lance arrive par
+/// `vault-synced`.
+#[tauri::command]
+pub async fn check_vault<R: Runtime>(app: AppHandle<R>) -> Result<(), UiError> {
+    in_background(app, |state| {
+        state.check_open();
+        Ok(())
+    })
+    .await
+}
+
 /// Compte de l'appareil sur le serveur et son rôle ; l'adresse publique est retenue au passage.
 #[tauri::command]
 pub async fn account_status<R: Runtime>(app: AppHandle<R>) -> Result<AccountStatus, UiError> {
@@ -616,6 +627,7 @@ mod tests {
             delete_invitation,
             leave_vault,
             sync_vault,
+            check_vault,
             account_status,
             delete_vault_everywhere,
             admin_accounts,
@@ -1029,6 +1041,7 @@ mod tests {
         let report = receiver.recv_timeout(Duration::from_secs(30)).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&report).unwrap(), synced);
         assert_eq!(app.call("sync_vault", json!({})), Ok(synced));
+        assert_eq!(app.call("check_vault", json!({})), Ok(Value::Null));
         assert_eq!(
             app.call("sync_server", json!({})),
             Ok(json!({

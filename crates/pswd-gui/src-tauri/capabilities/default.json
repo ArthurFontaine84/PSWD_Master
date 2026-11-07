@@ -45,6 +45,7 @@
     "allow-delete-invitation",
     "allow-leave-vault",
     "allow-sync-vault",
+    "allow-check-vault",
     "allow-account-status",
     "allow-delete-vault-everywhere",
     "allow-admin-accounts",
