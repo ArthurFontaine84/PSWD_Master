@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { fly } from "svelte/transition";
   import Icon from "../components/Icon.svelte";
+  import StateDot from "../components/StateDot.svelte";
   import {
     acceptInvitation,
     deleteInvitation,
@@ -12,7 +13,6 @@
     syncServer,
     type Invitation,
     type ServerStatus,
-    type VaultServerState,
     type VaultStatus,
   } from "../lib/api";
   import { errorMessage } from "../lib/errors";
@@ -20,11 +20,12 @@
   import { motion } from "../lib/motion";
   import { exchangeOutcome } from "../lib/sync";
   import { showToast } from "../lib/toast.svelte";
+  import { vaultDot, type VaultDot } from "../lib/vaultDot";
 
   interface Props {
     notice?: string;
-    /** `removed` : le coffre a été supprimé du serveur. */
-    onOpen: (name: string, removed: boolean) => void;
+    /** `dot` : la pastille du coffre au moment de l'ouvrir, `null` sans pastille. */
+    onOpen: (name: string, dot: VaultDot | null) => void;
     onBackup: () => void;
     onRestore: () => void;
   }
@@ -38,7 +39,8 @@
       () => false,
     ),
   );
-  let connected = $state(false);
+  let server = $state<Pick<ServerStatus, "address" | "trouble">>({ address: null, trouble: null });
+  const connected = $derived(server.address !== null);
   /** Type de chaque coffre, et son état vis-à-vis du serveur, inconnu sans serveur joignable. */
   let states = $state(new Map<string, VaultStatus>());
   let invitations = $state<Invitation[]>([]);
@@ -46,17 +48,8 @@
   let answering = $state<string | null>(null);
   let syncing = $state(false);
   let problems = $state<string[]>([]);
-  /** Vert : à jour ; orange : à synchroniser ou supprimé du serveur ; rouge : pas sur le serveur. */
-  const dotColor: Record<VaultServerState, string> = {
-    synced: "green",
-    outdated: "orange",
-    needsUnlock: "orange",
-    removed: "orange",
-    local: "red",
-  };
-
   function show(status: ServerStatus) {
-    connected = status.address !== null;
+    server = { address: status.address, trouble: status.trouble };
     states = new Map(status.vaults.map((vault) => [vault.name, vault]));
   }
 
@@ -230,19 +223,24 @@
       <ul>
         {#each names as name, index (name)}
           {@const status = states.get(name)}
+          {@const dot = vaultDot(server, status?.state)}
           <li in:fly={{ y: 12, duration: motion(300), delay: motion(Math.min(index, 8) * 40) }}>
-            <button type="button" class="vault" onclick={() => onOpen(name, status?.state === "removed")}>
-              <span class="badge"><Icon name="lock" /></span>
-              <span class="name" title={name}>{name}</span>
-              {#if status?.shared}
-                <span class="state">{texts.shared}</span>
-              {/if}
-              {#if status?.state}
-                {@const label = texts.vaultStates[status.state]}
-                <span class="dot {dotColor[status.state]}" role="img" aria-label={label} title={label}></span>
+            <div class="vault">
+              <button type="button" class="open" onclick={() => onOpen(name, dot)}>
+                <span class="badge"><Icon name="lock" /></span>
+                <span class="name" title={name}>{name}</span>
+                {#if status?.shared}
+                  <span class="state">{texts.shared}</span>
+                {/if}
+              </button>
+              {#if dot}
+                {@const label = texts.vaultStates[dot]}
+                <button type="button" class="dot" aria-label={label} title={label} onclick={() => showToast(label)}>
+                  <StateDot {dot} />
+                </button>
               {/if}
               <Icon name="chevron" />
-            </button>
+            </div>
           </li>
         {/each}
       </ul>
@@ -292,22 +290,95 @@
     min-width: 0;
   }
 
+  /* La carte entière ouvre le coffre (bouton étendu par `::after`), sauf sa pastille. */
   .vault {
-    width: 100%;
-    justify-content: flex-start;
+    position: relative;
+    display: flex;
+    align-items: center;
     gap: var(--space-m);
     padding: var(--space-m);
+    border: 1px solid var(--border);
     border-radius: var(--radius-l);
+    background: var(--surface);
     box-shadow: var(--shadow);
     color: var(--text-muted);
     -webkit-backdrop-filter: var(--blur);
     backdrop-filter: var(--blur);
+    transition:
+      background-color 0.2s var(--ease),
+      border-color 0.2s var(--ease),
+      box-shadow 0.2s var(--ease),
+      transform 0.15s var(--ease);
+  }
+
+  .vault:has(.open:active) {
+    transform: scale(0.98);
+  }
+
+  .vault:has(.open:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .open {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    justify-content: flex-start;
+    gap: var(--space-m);
+    padding: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    color: inherit;
+    font-weight: inherit;
+  }
+
+  .open::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+  }
+
+  .open:active:not(:disabled) {
+    transform: none;
+  }
+
+  .open:focus-visible {
+    outline: none;
+  }
+
+  /* Cible plus grande que la pastille, sans changer la taille de la carte. */
+  .dot {
+    position: relative;
+    z-index: 1;
+    flex: none;
+    width: 2.25rem;
+    height: 2.25rem;
+    min-height: 0;
+    margin: -0.75rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    box-shadow: none;
   }
 
   @media (hover: hover) {
     .vault:hover {
       transform: translateY(-2px);
+      background: var(--surface-hover);
+      border-color: var(--accent-soft);
       box-shadow: var(--shadow-raised);
+    }
+
+    .open:hover:not(:disabled) {
+      background: none;
+    }
+
+    .dot:hover:not(:disabled) {
+      background: var(--accent-soft);
     }
   }
 
@@ -329,25 +400,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .dot {
-    flex: none;
-    width: 0.75rem;
-    height: 0.75rem;
-    border-radius: 50%;
-  }
-
-  .dot.green {
-    background: var(--success);
-  }
-
-  .dot.orange {
-    background: var(--warning);
-  }
-
-  .dot.red {
-    background: var(--danger);
   }
 
   .state {

@@ -109,7 +109,8 @@ describe("the vault list", () => {
     await vi.waitFor(() => {
       expect(card("famille").getByText("commun")).toBeInTheDocument();
     });
-    expect(card("ancien").getByRole("img")).toHaveAccessibleName("Supprimé du serveur : gardé sur cet appareil");
+    expect(card("ancien").getByText("commun")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Supprimé du serveur : gardé sur cet appareil" })).toBeInTheDocument();
     expect(card("perso").queryByText("commun")).not.toBeInTheDocument();
   });
 

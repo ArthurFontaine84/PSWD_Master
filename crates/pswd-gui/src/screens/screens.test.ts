@@ -57,6 +57,14 @@ function field(label: string): HTMLInputElement {
   return screen.getByLabelText(label, { exact: false });
 }
 
+/** Les pastilles de la liste : un bouton chacune, nommé par son texte, coloré par sa pastille. */
+function dots() {
+  return screen
+    .queryAllByRole("button")
+    .filter((button) => button.classList.contains("dot"))
+    .map((button) => [button.getAttribute("aria-label"), button.firstElementChild?.classList[1]]);
+}
+
 function expectVerbatim(element: HTMLElement) {
   expect(element).toHaveAttribute("autocapitalize", "off");
   expect(element).toHaveAttribute("autocorrect", "off");
@@ -71,7 +79,7 @@ describe("VaultList", () => {
     expect(screen.getByText("Chargement…")).toBeInTheDocument();
     expect(await screen.findByText("travail")).toHaveAttribute("title", "travail");
     await fireEvent.click(screen.getByRole("button", { name: "travail" }));
-    expect(onOpen).toHaveBeenCalledWith("travail", false);
+    expect(onOpen).toHaveBeenCalledWith("travail", null);
   });
 
   it("shows the notice, the empty list and the errors", async () => {
@@ -103,7 +111,7 @@ describe("VaultList", () => {
     });
     const { unmount } = render(VaultList, { onOpen: vi.fn(), onBackup: vi.fn(), onRestore: vi.fn() });
     expect(await screen.findByText("commun")).toBeInTheDocument();
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(dots()).toEqual([]);
     expect(screen.queryByRole("button", { name: "Synchroniser" })).not.toBeInTheDocument();
     unmount();
 
@@ -118,16 +126,33 @@ describe("VaultList", () => {
     });
     const onOpen = vi.fn();
     render(VaultList, { onOpen, onBackup: vi.fn(), onRestore: vi.fn() });
-    const dots = await screen.findAllByRole("img");
-    expect(dots.map((dot) => [dot.getAttribute("aria-label"), dot.classList[1]])).toEqual([
-      ["Pas encore sur le serveur : publié au prochain « Synchroniser »", "red"],
+    await screen.findByRole("button", { name: "Synchronisé" });
+    expect(dots()).toEqual([
+      ["Pas sur ce serveur : publié au prochain échange", "red"],
       ["Synchronisé", "green"],
-      ["Supprimé du serveur : gardé sur cet appareil", "orange"],
+      ["Supprimé du serveur : gardé sur cet appareil", "red"],
     ]);
-    await fireEvent.click(screen.getByRole("button", { name: /vieux/ }));
-    expect(onOpen).toHaveBeenCalledWith("vieux", true);
-    await fireEvent.click(screen.getByRole("button", { name: /perso/ }));
-    expect(onOpen).toHaveBeenCalledWith("perso", false);
+    await fireEvent.click(screen.getByRole("button", { name: "vieux" }));
+    expect(onOpen).toHaveBeenCalledWith("vieux", "removed");
+    await fireEvent.click(screen.getByRole("button", { name: "perso" }));
+    expect(onOpen).toHaveBeenCalledWith("perso", "synced");
+  });
+
+  it("tells the text of a dot when it is touched, without opening the vault", async () => {
+    render(Toast);
+    vi.mocked(listVaults).mockResolvedValue(["vieux"]);
+    vi.mocked(serverStatus).mockResolvedValue({
+      address: "pswd.local:8443",
+      trouble: null,
+      vaults: [{ name: "vieux", state: "removed", shared: false }],
+    });
+    const onOpen = vi.fn();
+    render(VaultList, { onOpen, onBackup: vi.fn(), onRestore: vi.fn() });
+    const dot = await screen.findByRole("button", { name: "Supprimé du serveur : gardé sur cet appareil" });
+    expect(dot).toHaveAttribute("title", "Supprimé du serveur : gardé sur cet appareil");
+    await fireEvent.click(dot);
+    expect(await screen.findByRole("status")).toHaveTextContent("Supprimé du serveur : gardé sur cet appareil");
+    expect(onOpen).not.toHaveBeenCalled();
   });
 
   it("exchanges vaults with the server, then lists them again", async () => {
@@ -187,7 +212,7 @@ describe("VaultList automatic exchange", () => {
     vi.mocked(listVaults).mockResolvedValue(["perso"]);
     vi.mocked(refreshServer).mockResolvedValue(connected);
     const { unmount } = show();
-    expect(await screen.findByRole("img", { name: "Synchronisé" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Synchronisé" })).toBeInTheDocument();
     expect(refreshServer).toHaveBeenCalledTimes(1);
     expect(serverStatus).not.toHaveBeenCalled();
     vi.advanceTimersByTime(30_000);
@@ -205,7 +230,7 @@ describe("VaultList automatic exchange", () => {
     vi.mocked(listVaults).mockResolvedValue(["perso"]);
     vi.mocked(refreshServer).mockResolvedValue(connected);
     show();
-    await screen.findByRole("img", { name: "Synchronisé" });
+    await screen.findByRole("button", { name: "Synchronisé" });
     await fireEvent(document, new Event("visibilitychange"));
     await fireEvent.focus(window);
     expect(refreshServer).toHaveBeenCalledTimes(3);
@@ -276,7 +301,7 @@ describe("VaultList automatic exchange", () => {
     await fireEvent.focus(window);
     expect(await screen.findByRole("button", { name: "Synchroniser" })).toBeInTheDocument();
     expect(listInvitations).not.toHaveBeenCalled();
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(dots()).toEqual([["Échanges avec le serveur impossibles : synchro en pause", "red"]]);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
@@ -377,11 +402,28 @@ describe("Unlock", () => {
     expect(field("Mot de passe maître").value).toBe("");
   });
 
-  it("tells that a vault deleted from the server only lives here", () => {
-    const { unmount } = render(Unlock, { name: "perso", removed: true, onUnlocked: vi.fn(), onCancel: vi.fn() });
-    expect(screen.getByRole("status")).toHaveTextContent("Ce coffre a été supprimé du serveur");
+  it("shows the dot of the vault with its text", () => {
+    const { unmount } = render(Unlock, {
+      name: "perso",
+      dot: "needsUnlock",
+      onUnlocked: vi.fn(),
+      onCancel: vi.fn(),
+    });
+    const state = screen.getByText("Modifié ici et sur le serveur : à déverrouiller pour finir la synchro");
+    expect(state.querySelector(".dot")).toHaveClass("orange");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
     unmount();
     render(Unlock, { name: "perso", onUnlocked: vi.fn(), onCancel: vi.fn() });
+    expect(document.querySelector(".dot")).toBeNull();
+  });
+
+  it("tells that a vault deleted from the server only lives here", () => {
+    const { unmount } = render(Unlock, { name: "perso", dot: "removed", onUnlocked: vi.fn(), onCancel: vi.fn() });
+    expect(screen.getByText("Supprimé du serveur : gardé sur cet appareil").querySelector(".dot")).toHaveClass("red");
+    expect(screen.getByRole("status")).toHaveTextContent("Ce coffre a été supprimé du serveur");
+    unmount();
+    render(Unlock, { name: "perso", dot: "synced", onUnlocked: vi.fn(), onCancel: vi.fn() });
+    expect(screen.getByText("Synchronisé").querySelector(".dot")).toHaveClass("green");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 

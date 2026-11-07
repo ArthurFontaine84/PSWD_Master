@@ -243,11 +243,12 @@ export const fr = {
   keptOnDevice: (name: string, reason: string | null) =>
     `Coffre « ${name} » gardé : ${reason ?? "des modifications ne sont pas encore sur le serveur"}.`,
   vaultStates: {
-    local: "Pas encore sur le serveur : publié au prochain « Synchroniser »",
+    local: "Pas sur ce serveur : publié au prochain échange",
     synced: "Synchronisé",
-    outdated: "À synchroniser : « Synchroniser » le met à jour",
+    outdated: "Différent du serveur : mis à jour au prochain échange",
     needsUnlock: "Modifié ici et sur le serveur : à déverrouiller pour finir la synchro",
     removed: "Supprimé du serveur : gardé sur cet appareil",
+    unreachable: "Échanges avec le serveur impossibles : synchro en pause",
   },
   removedNotice:
     "Ce coffre a été supprimé du serveur : il n'existe plus que sur cet appareil. Pour le republier, déverrouillez-le puis appuyez sur « Synchroniser ».",

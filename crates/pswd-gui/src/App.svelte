@@ -16,6 +16,7 @@
   import { motion } from "./lib/motion";
   import { applyTheme } from "./lib/theme";
   import { showToast } from "./lib/toast.svelte";
+  import type { VaultDot } from "./lib/vaultDot";
   import Toast from "./components/Toast.svelte";
   import Icon from "./components/Icon.svelte";
   import Admin from "./screens/Admin.svelte";
@@ -33,7 +34,7 @@
     | { kind: "list"; notice?: string }
     | { kind: "create" }
     | { kind: "recovery"; vault: VaultInfo; recoveryKey: string }
-    | { kind: "unlock"; name: string; removed: boolean }
+    | { kind: "unlock"; name: string; dot: VaultDot | null }
     | { kind: "open"; vault: VaultInfo }
     | { kind: "backup" }
     | { kind: "restore" }
@@ -173,7 +174,7 @@
       {#if screen.kind === "list"}
         <VaultList
           notice={screen.notice}
-          onOpen={(name, removed) => (screen = { kind: "unlock", name, removed })}
+          onOpen={(name, dot) => (screen = { kind: "unlock", name, dot })}
           onBackup={() => (screen = { kind: "backup" })}
           onRestore={() => (screen = { kind: "restore" })}
         />
@@ -188,7 +189,7 @@
       {:else if screen.kind === "unlock"}
         <Unlock
           name={screen.name}
-          removed={screen.removed}
+          dot={screen.dot}
           onUnlocked={(vault) => (screen = { kind: "open", vault })}
           onCancel={() => (screen = { kind: "list" })}
         />

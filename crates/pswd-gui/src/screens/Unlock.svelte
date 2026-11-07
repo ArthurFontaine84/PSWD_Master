@@ -1,20 +1,22 @@
 <script lang="ts">
   import PasswordInput from "../components/PasswordInput.svelte";
+  import StateDot from "../components/StateDot.svelte";
   import { recoverVault, unlockVault, type VaultInfo } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { verbatim } from "../lib/keyboard";
   import { newPasswordProblem } from "../lib/validation";
+  import type { VaultDot } from "../lib/vaultDot";
 
   interface Props {
     name: string;
-    /** Le coffre a été supprimé du serveur : l'utilisateur est prévenu. */
-    removed?: boolean;
+    /** Pastille du coffre dans la liste, affichée avec son texte ; `null` sans serveur enregistré. */
+    dot?: VaultDot | null;
     onUnlocked: (vault: VaultInfo) => void;
     onCancel: () => void;
   }
 
-  const { name, removed = false, onUnlocked, onCancel }: Props = $props();
+  const { name, dot = null, onUnlocked, onCancel }: Props = $props();
 
   /** `true` : mot de passe oublié, la clé de récupération en fixe un nouveau. */
   let recovering = $state(false);
@@ -67,7 +69,10 @@
 
 <section class="panel" aria-labelledby="unlock-title">
   <h2 id="unlock-title">{recovering ? texts.recoverTitle(name) : texts.unlockTitle(name)}</h2>
-  {#if removed}
+  {#if dot}
+    <p class="server-state"><StateDot {dot} />{texts.vaultStates[dot]}</p>
+  {/if}
+  {#if dot === "removed"}
     <p role="status" class="notice">{texts.removedNotice}</p>
   {/if}
   <form onsubmit={submit} novalidate>
@@ -102,6 +107,14 @@
 </section>
 
 <style>
+  .server-state {
+    display: flex;
+    align-items: center;
+    gap: var(--space-s);
+    margin: 0 0 var(--space-m);
+    color: var(--text-muted);
+  }
+
   .link {
     justify-self: start;
     padding: 0;
