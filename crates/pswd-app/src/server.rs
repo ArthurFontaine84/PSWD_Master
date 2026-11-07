@@ -839,7 +839,7 @@ mod tests {
     }
 
     fn offline() -> AppError {
-        PortError::new("serveur injoignable").into()
+        PortError::unreachable("serveur injoignable").into()
     }
 
     #[test]
@@ -1272,9 +1272,9 @@ mod tests {
         go_offline(&a);
         assert_eq!(
             a.sync("perso", &mut session),
-            Ok(SyncOutcome::Done(SyncStatus::Offline(PortError::new(
-                "serveur injoignable"
-            ))))
+            Ok(SyncOutcome::Done(SyncStatus::Offline(
+                PortError::unreachable("serveur injoignable")
+            )))
         );
     }
 
@@ -1342,9 +1342,9 @@ mod tests {
         go_offline(&a);
         assert_eq!(
             a.sync("perso", &mut session),
-            Ok(SyncOutcome::Done(SyncStatus::Offline(PortError::new(
-                "serveur injoignable"
-            ))))
+            Ok(SyncOutcome::Done(SyncStatus::Offline(
+                PortError::unreachable("serveur injoignable")
+            )))
         );
         assert_eq!(link(&a, "perso"), None);
     }
@@ -1524,7 +1524,7 @@ mod tests {
         let report = a.disconnect(false).unwrap();
         assert_eq!(
             report.revoke_error,
-            Some(PortError::new("serveur injoignable"))
+            Some(PortError::unreachable("serveur injoignable"))
         );
         assert_eq!(report.removed, Vec::<String>::new());
         assert_eq!(
@@ -1594,7 +1594,9 @@ mod tests {
             .into()
         );
         assert_eq!(
-            push_error(PushError::Failed(PortError::new("serveur injoignable"))),
+            push_error(PushError::Failed(PortError::unreachable(
+                "serveur injoignable"
+            ))),
             offline()
         );
     }

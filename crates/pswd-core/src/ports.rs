@@ -11,31 +11,50 @@ use crate::Secret;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PortError {
     message: String,
-    removed: bool,
+    kind: PortErrorKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PortErrorKind {
+    Other,
+    Removed,
+    Unreachable,
 }
 
 impl PortError {
     #[must_use]
     pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            removed: false,
-        }
+        Self::with_kind(message, PortErrorKind::Other)
     }
 
     /// Le distant a retiré le coffre, ou en a retiré l'utilisateur : il ne faut plus le
     /// republier.
     #[must_use]
     pub fn removed(message: impl Into<String>) -> Self {
+        Self::with_kind(message, PortErrorKind::Removed)
+    }
+
+    /// Le distant n'a pas répondu : aucune de ses adresses n'est joignable.
+    #[must_use]
+    pub fn unreachable(message: impl Into<String>) -> Self {
+        Self::with_kind(message, PortErrorKind::Unreachable)
+    }
+
+    fn with_kind(message: impl Into<String>, kind: PortErrorKind) -> Self {
         Self {
             message: message.into(),
-            removed: true,
+            kind,
         }
     }
 
     #[must_use]
     pub fn is_removed(&self) -> bool {
-        self.removed
+        self.kind == PortErrorKind::Removed
+    }
+
+    #[must_use]
+    pub fn is_unreachable(&self) -> bool {
+        self.kind == PortErrorKind::Unreachable
     }
 }
 
@@ -139,5 +158,16 @@ mod tests {
         assert!(!PortError::new("serveur injoignable").is_removed());
         assert!(PortError::removed("coffre retiré").is_removed());
         assert_ne!(PortError::new("x"), PortError::removed("x"));
+        assert!(!PortError::unreachable("serveur injoignable").is_removed());
+    }
+
+    #[test]
+    fn only_an_unreachable_remote_says_so() {
+        let unreachable = PortError::unreachable("serveur injoignable");
+        assert!(unreachable.is_unreachable());
+        assert_eq!(unreachable.to_string(), "serveur injoignable");
+        assert!(!PortError::new("serveur injoignable").is_unreachable());
+        assert!(!PortError::removed("coffre retiré").is_unreachable());
+        assert_ne!(PortError::new("x"), PortError::unreachable("x"));
     }
 }

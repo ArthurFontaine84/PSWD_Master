@@ -111,6 +111,14 @@ describe("Server, before connecting", () => {
     expect(syncServer).not.toHaveBeenCalled();
   });
 
+  it("asks to check the address of a server that does not answer", async () => {
+    show(disconnected);
+    await fillConnection();
+    vi.mocked(connectServer).mockRejectedValue({ code: "serverUnreachable", detail: null });
+    await fireEvent.click(screen.getByRole("button", { name: "Se connecter" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Serveur injoignable. Vérifiez l'adresse saisie.");
+  });
+
   it("says when the first exchange is incomplete", async () => {
     show(disconnected);
     await fillConnection();
@@ -149,11 +157,9 @@ describe("Server, once connected", () => {
     vi.mocked(syncServer).mockResolvedValue(nothing);
     await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
     expect(await screen.findByText("Coffres à jour.")).toBeInTheDocument();
-    vi.mocked(syncServer).mockRejectedValue({ code: "serverError", detail: "serveur injoignable" });
+    vi.mocked(syncServer).mockRejectedValue({ code: "serverUnreachable", detail: null });
     await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Échange avec le serveur impossible : serveur injoignable.",
-    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Serveur injoignable\.$/);
   });
 
   it("shows the key of a new device until it is closed", async () => {

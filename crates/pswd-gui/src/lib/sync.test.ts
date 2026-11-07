@@ -84,11 +84,8 @@ describe("exchangeOutcome", () => {
     };
     expect(exchangeOutcome(exchange)).toEqual({
       done: [
-        "Coffre « perso » téléchargé.",
-        "Coffre « travail » téléchargé sous le nom « travail-0123abcd » : ce nom était déjà pris.",
-        "Coffre « notes » publié.",
-        "Coffre « banque » envoyé au serveur.",
-        "Coffre « maison » mis à jour depuis le serveur.",
+        "2 coffres téléchargés, 1 publié, 1 envoyé au serveur, 1 mis à jour depuis le serveur.",
+        "Coffre « travail » enregistré sous le nom « travail-0123abcd » : ce nom était déjà pris.",
         "Coffre « ancien » supprimé du serveur : gardé sur cet appareil. Pour le republier, ouvrez-le puis appuyez sur « Synchroniser ».",
         "Coffre « club » supprimé de cet appareil : vous n'êtes plus membre de ce coffre.",
       ],
@@ -100,6 +97,26 @@ describe("exchangeOutcome", () => {
         "Vous n'êtes plus membre du coffre « asso », mais il n'a pas pu être supprimé de cet appareil : accès refusé.",
       ],
     });
+  });
+
+  it("names a single exchanged vault", () => {
+    const one = (exchange: Partial<Exchange>) => exchangeOutcome({ ...nothing, ...exchange }).done;
+    expect(one({ downloaded: [{ name: "perso", localName: "perso" }] })).toEqual(["Coffre « perso » téléchargé."]);
+    expect(one({ downloaded: [{ name: "travail", localName: "travail-0123abcd" }] })).toEqual([
+      "Coffre « travail » téléchargé sous le nom « travail-0123abcd » : ce nom était déjà pris.",
+    ]);
+    expect(one({ published: ["notes"] })).toEqual(["Coffre « notes » publié."]);
+    expect(one({ sent: ["banque"] })).toEqual(["Coffre « banque » envoyé au serveur."]);
+    expect(one({ received: ["maison"] })).toEqual(["Coffre « maison » mis à jour depuis le serveur."]);
+  });
+
+  it("counts several exchanged vaults in one sentence", () => {
+    const summary = (exchange: Partial<Exchange>) => exchangeOutcome({ ...nothing, ...exchange }).done;
+    expect(summary({ published: ["a", "b", "c", "d"] })).toEqual(["4 coffres publiés."]);
+    expect(summary({ downloaded: [{ name: "a", localName: "a" }], received: ["b", "c"] })).toEqual([
+      "1 coffre téléchargé, 2 mis à jour depuis le serveur.",
+    ]);
+    expect(summary({ sent: ["a", "b"], published: ["c"] })).toEqual(["1 coffre publié, 2 envoyés au serveur."]);
   });
 
   it("does not claim that nothing was exchanged when everything failed", () => {

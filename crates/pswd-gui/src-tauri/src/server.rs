@@ -274,6 +274,7 @@ fn failure(name: String, error: &AppError) -> Failure {
 /// Une erreur de port vient ici du serveur, pas d'un fichier.
 pub(crate) fn server_error(error: AppError) -> UiError {
     match error {
+        AppError::Port(error) if error.is_unreachable() => UiError::code("serverUnreachable"),
         AppError::Port(error) => UiError::new("serverError", error.to_string()),
         other => other.into(),
     }
@@ -697,7 +698,7 @@ mod tests {
         create(&state, "perso");
         connect_admin(&state);
         go_offline(&dir);
-        let offline = Some(UiError::new("serverError", "serveur injoignable"));
+        let offline = Some(UiError::code("serverUnreachable"));
         assert_eq!(state.exchange().err(), offline);
         assert_eq!(state.new_device_key().err(), offline);
         assert_eq!(status(&state)["vaults"][0]["state"], Value::Null);

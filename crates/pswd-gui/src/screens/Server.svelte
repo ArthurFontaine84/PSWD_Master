@@ -9,7 +9,7 @@
     type AccountStatus,
     type ServerStatus,
   } from "../lib/api";
-  import { errorMessage } from "../lib/errors";
+  import { errorMessage, isServerUnreachable } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { verbatim } from "../lib/keyboard";
   import { disconnectionOutcome, exchangeOutcome, type Outcome } from "../lib/sync";
@@ -62,17 +62,23 @@
   }
 
   /** Une seule opération à la fois ; son erreur s'affiche dans l'écran. */
-  async function run(task: Task, action: () => Promise<void>) {
+  async function run(task: Task, action: () => Promise<void>, explain = errorMessage) {
     running = task;
     problem = null;
     problems = [];
     try {
       await action();
     } catch (error) {
-      problem = errorMessage(error);
+      problem = explain(error);
     } finally {
       running = null;
     }
+  }
+
+  /** Pendant la connexion seulement, l'adresse vient d'être saisie : elle peut être fausse. */
+  function connectionError(error: unknown): string {
+    const message = errorMessage(error);
+    return isServerUnreachable(error) ? `${message} ${texts.checkAddress}` : message;
   }
 
   async function connect(event: SubmitEvent) {
@@ -93,7 +99,7 @@
         showToast(texts.connected);
         problem = texts.exchangeIncomplete(errorMessage(error));
       }
-    });
+    }, connectionError);
   }
 
   async function synchronize() {

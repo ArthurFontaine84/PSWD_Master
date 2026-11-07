@@ -47,6 +47,7 @@ const errors = {
   alreadyConnected: () => "Cet appareil est déjà connecté à un serveur.",
   invalidConnectionKey: () => "Clé de connexion mal saisie : 13 groupes de 4 caractères séparés par des tirets.",
   serverError: (detail: string) => `Échange avec le serveur impossible : ${detail}.`,
+  serverUnreachable: () => "Serveur injoignable.",
   notPublished: (detail: string) => `Le coffre « ${detail} » n'est pas publié sur le serveur de cet appareil.`,
   unexpected: (detail: string) => `Erreur : ${detail}`,
 } satisfies Record<string, Message>;
@@ -207,6 +208,27 @@ export const fr = {
   exchangeIncomplete: (message: string) =>
     `Échange avec le serveur incomplet. ${message} Réessayez avec « Synchroniser ».`,
   nothingToExchange: "Coffres à jour.",
+  checkAddress: "Vérifiez l'adresse saisie.",
+  exchangeSummary: (counts: { downloaded: number; published: number; sent: number; received: number }) => {
+    const parts = [
+      [counts.downloaded, "téléchargé", "téléchargés"],
+      [counts.published, "publié", "publiés"],
+      [counts.sent, "envoyé au serveur", "envoyés au serveur"],
+      [counts.received, "mis à jour depuis le serveur", "mis à jour depuis le serveur"],
+    ] as const;
+    const shown = parts
+      .filter(([count]) => count > 0)
+      .map(([count, one, many], index) => {
+        const noun = index > 0 ? "" : count === 1 ? "coffre " : "coffres ";
+        return `${count} ${noun}${count === 1 ? one : many}`;
+      });
+    return `${shown.join(", ")}.`;
+  },
+  renamedOnDownload: (name: string, localName: string) =>
+    `Coffre « ${name} » enregistré sous le nom « ${localName} » : ce nom était déjà pris.`,
+  vaultArrived: (name: string) => `Nouveau coffre « ${name} » reçu du serveur.`,
+  newInvitation: (vaultName: string, invitedBy: string) =>
+    `Nouvelle invitation : ${invitedBy} vous invite dans le coffre « ${vaultName} ».`,
   downloaded: (name: string, localName: string) =>
     name === localName
       ? `Coffre « ${name} » téléchargé.`

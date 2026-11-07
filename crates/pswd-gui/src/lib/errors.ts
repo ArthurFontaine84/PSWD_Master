@@ -16,6 +16,11 @@ export function isVaultLocked(error: unknown): boolean {
   return isUiError(error) && error.code === "vaultLocked";
 }
 
+/** Aucune adresse du serveur n'a répondu. */
+export function isServerUnreachable(error: unknown): boolean {
+  return isUiError(error) && error.code === "serverUnreachable";
+}
+
 /** Message à afficher pour une erreur reçue du backend, dans la langue de l'interface. */
 export function errorMessage(error: unknown): string {
   if (!isUiError(error)) {

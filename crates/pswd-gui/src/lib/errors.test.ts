@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { errorMessage, isVaultLocked } from "./errors";
+import { errorMessage, isServerUnreachable, isVaultLocked } from "./errors";
 
 describe("isVaultLocked", () => {
   it("recognizes only the locked vault error", () => {
     expect(isVaultLocked({ code: "vaultLocked", detail: null })).toBe(true);
     expect(isVaultLocked({ code: "wrongPassword", detail: null })).toBe(false);
     expect(isVaultLocked("vaultLocked")).toBe(false);
+  });
+});
+
+describe("isServerUnreachable", () => {
+  it("recognizes only the unreachable server error", () => {
+    expect(isServerUnreachable({ code: "serverUnreachable", detail: null })).toBe(true);
+    expect(isServerUnreachable({ code: "serverError", detail: "serveur injoignable" })).toBe(false);
+    expect(isServerUnreachable("serverUnreachable")).toBe(false);
   });
 });
 
@@ -67,6 +75,7 @@ describe("errorMessage", () => {
         "serveur injoignable",
         "Échange avec le serveur impossible : serveur injoignable.",
       ],
+      ["serverUnreachable", null, "Serveur injoignable."],
       ["unexpected", "disque plein", "Erreur : disque plein"],
     ];
     for (const [code, detail, message] of cases) {

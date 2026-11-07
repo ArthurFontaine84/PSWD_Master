@@ -278,7 +278,7 @@ impl ServerClient {
         if self.observed.mismatch.load(Ordering::Relaxed) {
             Err(PortError::new("le serveur n'est pas celui attendu"))
         } else {
-            Err(PortError::new("serveur injoignable"))
+            Err(PortError::unreachable("serveur injoignable"))
         }
     }
 }
@@ -918,7 +918,7 @@ mod tests {
             Secret::new("jeton".to_owned()),
         )
         .unwrap();
-        let offline = PortError::new("serveur injoignable");
+        let offline = PortError::unreachable("serveur injoignable");
         assert_eq!(client.vault(Uuid::new_v4()).fetch(), Err(offline.clone()));
         assert_eq!(client.disconnect(), Err(offline));
     }
@@ -950,7 +950,7 @@ mod tests {
         };
         assert_eq!(
             offline.vault(Uuid::new_v4()).fetch(),
-            Err(PortError::new("serveur injoignable"))
+            Err(PortError::unreachable("serveur injoignable"))
         );
     }
 

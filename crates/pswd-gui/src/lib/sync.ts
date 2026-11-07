@@ -38,12 +38,28 @@ export function syncProblem(report: SyncReport): string | null {
   return QUIET.includes(report.state) ? null : syncMessage(report);
 }
 
+/**
+ * Un seul coffre échangé est nommé ; plusieurs sont comptés en une phrase. Les problèmes et ce
+ * qui demande l'attention (coffre renommé, supprimé du serveur ou quitté) restent un par un.
+ */
 export function exchangeOutcome(exchange: Exchange): Outcome {
-  const done = [
+  const each = [
     ...exchange.downloaded.map(({ name, localName }) => texts.downloaded(name, localName)),
     ...exchange.published.map((name) => texts.published(name)),
     ...exchange.sent.map((name) => texts.sent(name)),
     ...exchange.received.map((name) => texts.received(name)),
+  ];
+  const renamed = exchange.downloaded
+    .filter(({ name, localName }) => name !== localName)
+    .map(({ name, localName }) => texts.renamedOnDownload(name, localName));
+  const counts = {
+    downloaded: exchange.downloaded.length,
+    published: exchange.published.length,
+    sent: exchange.sent.length,
+    received: exchange.received.length,
+  };
+  const done = [
+    ...(each.length > 1 ? [texts.exchangeSummary(counts), ...renamed] : each),
     ...exchange.removed.map((name) => texts.removedByServer(name)),
     ...exchange.left.map((name) => texts.leftElsewhere(name)),
   ];

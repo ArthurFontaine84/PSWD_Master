@@ -315,7 +315,7 @@ mod tests {
         let fingerprint = [0; pswd_core::crypto::FINGERPRINT_LEN];
         let token = Secret::new("jeton".to_owned());
         let offline = ServerClient::new(vec![address], fingerprint, token).unwrap();
-        let unreachable = PortError::new("serveur injoignable");
+        let unreachable = PortError::unreachable("serveur injoignable");
         let id = Uuid::new_v4();
         assert_eq!(offline.invitations().err(), Some(unreachable.clone()));
         assert_eq!(offline.invite(id, id).err(), Some(unreachable.clone()));

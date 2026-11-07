@@ -259,6 +259,37 @@ describe("VaultList automatic exchange", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Configuration invalide : ligne 2");
   });
 
+  it("announces the vaults and the invitations received by the automatic exchange", async () => {
+    render(Toast);
+    const invitation = { id: "1", vaultName: "famille", invitedBy: "Arthur" };
+    vi.mocked(listVaults).mockResolvedValue(["perso"]);
+    vi.mocked(refreshServer).mockResolvedValue(connected);
+    vi.mocked(listInvitations).mockResolvedValue([invitation]);
+    show();
+    expect(await screen.findByText("Arthur vous invite dans le coffre « famille ».")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    vi.mocked(listInvitations).mockResolvedValue([invitation, { id: "2", vaultName: "club", invitedBy: "Camille" }]);
+    await fireEvent.focus(window);
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Nouvelle invitation : Camille vous invite dans le coffre « club ».",
+    );
+
+    vi.mocked(listVaults).mockResolvedValue(["club", "perso"]);
+    await fireEvent.focus(window);
+    await vi.waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Nouveau coffre « club » reçu du serveur.");
+    });
+
+    vi.mocked(listVaults).mockResolvedValue(["club"]);
+    vi.mocked(listInvitations).mockResolvedValue([]);
+    await fireEvent.focus(window);
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("button", { name: "perso" })).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Nouveau coffre « club » reçu du serveur.");
+  });
+
   it("shows the vaults once they become readable, and keeps the error until then", async () => {
     vi.mocked(listVaults).mockRejectedValue({ code: "configInvalid", detail: "ligne 2" });
     vi.mocked(refreshServer).mockResolvedValue(connected);

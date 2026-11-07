@@ -71,7 +71,11 @@
    */
   async function loadInvitations(quiet = false) {
     try {
-      invitations = await listInvitations();
+      const fresh = await listInvitations();
+      if (quiet) {
+        announceInvitations(fresh);
+      }
+      invitations = fresh;
     } catch (error) {
       if (!quiet) {
         problems = [...problems, errorMessage(error)];
@@ -97,7 +101,25 @@
     }
   }
 
-  /** Les cartes ne sont redessinées que si les noms ont changé. */
+  /**
+   * Invitations reçues pendant l'échange automatique, signalées une fois : celles déjà là à
+   * l'affichage de la liste sont visibles en haut, sans notification.
+   */
+  let knownInvitations: Set<string> | null = null;
+
+  function announceInvitations(fresh: Invitation[]) {
+    const known = knownInvitations;
+    knownInvitations = new Set(fresh.map((invitation) => invitation.id));
+    if (known === null) {
+      return;
+    }
+    const arrived = fresh.filter((invitation) => !known.has(invitation.id));
+    if (arrived.length > 0) {
+      showToast(arrived.map(({ vaultName, invitedBy }) => texts.newInvitation(vaultName, invitedBy)).join(" "));
+    }
+  }
+
+  /** Les cartes ne sont redessinées que si les noms ont changé ; un nouveau coffre est signalé. */
   async function reloadNames() {
     const fresh = listVaults();
     const [before, after] = await Promise.all([vaults.catch(() => null), fresh.catch(() => null)]);
@@ -105,8 +127,13 @@
       before === null
         ? after === null
         : after !== null && before.length === after.length && before.every((name, i) => name === after[i]);
-    if (!unchanged) {
-      vaults = fresh;
+    if (unchanged) {
+      return;
+    }
+    vaults = fresh;
+    const arrived = before === null || after === null ? [] : after.filter((name) => !before.includes(name));
+    if (arrived.length > 0) {
+      showToast(arrived.map((name) => texts.vaultArrived(name)).join(" "));
     }
   }
 
