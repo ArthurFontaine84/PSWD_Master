@@ -269,14 +269,18 @@ export const fr = {
     synced: "Synchronisé",
     outdated: "Différent du serveur : mis à jour au prochain échange",
     needsUnlock: "Modifié ici et sur le serveur : à déverrouiller pour finir la synchro",
-    removed: "Supprimé du serveur : gardé sur cet appareil",
+    removed: "Absent de votre compte sur le serveur : gardé sur cet appareil",
     unreachable: "Échanges avec le serveur impossibles : synchro en pause",
   },
   removedNotice:
-    "Ce coffre a été supprimé du serveur : il n'existe plus que sur cet appareil. Pour le republier, déverrouillez-le puis appuyez sur « Synchroniser ».",
+    "Ce coffre n'est pas (ou plus) sur votre compte du serveur : il n'existe que sur cet appareil. Déverrouillez-le puis appuyez sur « Synchroniser » pour le publier, ou supprimez-le.",
   shared: "commun",
-  removedByServer: (name: string) =>
-    `Coffre « ${name} » supprimé du serveur : gardé sur cet appareil. Pour le republier, ouvrez-le puis appuyez sur « Synchroniser ».`,
+  absentFromAccount: (names: string[]) =>
+    names.length === 1
+      ? `Coffre « ${names.join("")} » absent de votre compte sur le serveur : gardé sur cet appareil. Pour le publier, ouvrez-le puis appuyez sur « Synchroniser ».`
+      : `Coffres absents de votre compte sur le serveur, gardés sur cet appareil : ${names.map((name) => `« ${name} »`).join(", ")}. Pour les publier, ouvrez-les puis appuyez sur « Synchroniser ».`,
+  otherAccountReminder:
+    "Les coffres gardés sur cet appareil restent liés à ce compte : s'ils appartiennent à quelqu'un d'autre, supprimez-les avant de connecter un autre compte.",
   invitations: "Invitations",
   invitation: (vaultName: string, invitedBy: string) => `${invitedBy} vous invite dans le coffre « ${vaultName} ».`,
   accept: "Accepter",
@@ -376,7 +380,7 @@ export const fr = {
   syncDone: "Coffre à jour.",
   syncNotConnected: "Cet appareil n'est connecté à aucun serveur.",
   syncRemoved:
-    "Coffre supprimé du serveur : il n'existe plus que sur cet appareil. Pour le republier, appuyez sur « Synchroniser ».",
+    "Coffre absent de votre compte sur le serveur : il n'existe que sur cet appareil. Pour le publier, appuyez sur « Synchroniser ».",
   syncLeft: "Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil.",
   passwordChangedElsewhere: "Le mot de passe maître de ce coffre a été changé sur un autre appareil.",
   syncOffline: (detail: string) => `Synchro impossible : ${detail}. Les modifications seront publiées plus tard.`,

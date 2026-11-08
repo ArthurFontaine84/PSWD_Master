@@ -31,7 +31,7 @@ describe("syncProblem", () => {
       "Synchro impossible : serveur injoignable. Les modifications seront publiées plus tard.",
     );
     expect(syncProblem(report("removed"))).toBe(
-      "Coffre supprimé du serveur : il n'existe plus que sur cet appareil. Pour le republier, appuyez sur « Synchroniser ».",
+      "Coffre absent de votre compte sur le serveur : il n'existe que sur cet appareil. Pour le publier, appuyez sur « Synchroniser ».",
     );
     expect(syncProblem(report("left"))).toBe(
       "Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil.",
@@ -86,7 +86,7 @@ describe("exchangeOutcome", () => {
       done: [
         "2 coffres téléchargés, 1 publié, 1 envoyé au serveur, 1 mis à jour depuis le serveur.",
         "Coffre « travail » enregistré sous le nom « travail-0123abcd » : ce nom était déjà pris.",
-        "Coffre « ancien » supprimé du serveur : gardé sur cet appareil. Pour le republier, ouvrez-le puis appuyez sur « Synchroniser ».",
+        "Coffre « ancien » absent de votre compte sur le serveur : gardé sur cet appareil. Pour le publier, ouvrez-le puis appuyez sur « Synchroniser ».",
         "Coffre « club » supprimé de cet appareil : vous n'êtes plus membre de ce coffre.",
       ],
       problems: [
@@ -119,6 +119,12 @@ describe("exchangeOutcome", () => {
     expect(summary({ sent: ["a", "b"], published: ["c"] })).toEqual(["1 coffre publié, 2 envoyés au serveur."]);
   });
 
+  it("lists the vaults absent from the account in one sentence", () => {
+    expect(exchangeOutcome({ ...nothing, removed: ["perso", "travail"] }).done).toEqual([
+      "Coffres absents de votre compte sur le serveur, gardés sur cet appareil : « perso », « travail ». Pour les publier, ouvrez-les puis appuyez sur « Synchroniser ».",
+    ]);
+  });
+
   it("does not claim that nothing was exchanged when everything failed", () => {
     const failed = { ...nothing, notPublished: [{ name: "abime", reason: "refusé" }] };
     expect(exchangeOutcome(failed).done).toEqual([]);
@@ -126,8 +132,15 @@ describe("exchangeOutcome", () => {
 });
 
 describe("disconnectionOutcome", () => {
+  it("reminds that the copies kept belong to this account", () => {
+    expect(disconnectionOutcome({ revokeError: null, removed: [], kept: [] }, true).done).toEqual([
+      "Appareil déconnecté du serveur.",
+      "Les coffres gardés sur cet appareil restent liés à ce compte : s'ils appartiennent à quelqu'un d'autre, supprimez-les avant de connecter un autre compte.",
+    ]);
+  });
+
   it("lists the removed vaults", () => {
-    expect(disconnectionOutcome({ revokeError: null, removed: ["perso"], kept: [] })).toEqual({
+    expect(disconnectionOutcome({ revokeError: null, removed: ["perso"], kept: [] }, false)).toEqual({
       done: [
         "Appareil déconnecté du serveur.",
         "Coffre « perso » retiré de cet appareil ; il reste sur le serveur.",
@@ -144,8 +157,11 @@ describe("disconnectionOutcome", () => {
         { name: "modifie", reason: null },
         { name: "perso", reason: "serveur injoignable" },
       ],
-    });
-    expect(outcome.done).toEqual(["Appareil déconnecté du serveur."]);
+    }, false);
+    expect(outcome.done).toEqual([
+      "Appareil déconnecté du serveur.",
+      "Les coffres gardés sur cet appareil restent liés à ce compte : s'ils appartiennent à quelqu'un d'autre, supprimez-les avant de connecter un autre compte.",
+    ]);
     expect(outcome.problems).toEqual([
       "Le serveur n'a pas pu être prévenu (serveur injoignable) : révoquez cet appareil depuis le panneau d'administration.",
       "Coffre « modifie » gardé : des modifications ne sont pas encore sur le serveur.",

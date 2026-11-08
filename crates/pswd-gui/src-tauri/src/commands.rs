@@ -1041,6 +1041,8 @@ mod tests {
         assert_eq!(serde_json::from_str::<Value>(&report).unwrap(), synced);
         assert_eq!(app.call("sync_vault", json!({})), Ok(synced));
         assert_eq!(app.call("check_vault", json!({})), Ok(Value::Null));
+        let refreshed = app.call("refresh_server", json!({})).unwrap();
+        assert_eq!(refreshed["vaults"][0]["state"], "synced");
         assert_eq!(
             app.call("sync_server", json!({})),
             Ok(json!({

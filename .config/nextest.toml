@@ -1,0 +1,5 @@
+# Ce test mesure un délai de verrouillage en temps réel : il tourne seul. En parallèle des autres,
+# surtout instrumentés par la campagne de couverture, sa préparation dépasse le délai.
+[[profile.default.overrides]]
+filter = 'package(pswd-gui) & test(=state::tests::checking_the_open_vault_does_not_postpone_its_lock)'
+threads-required = "num-test-threads"

@@ -33,7 +33,8 @@ pub enum VaultState {
     /// Modifié des deux côtés, ou dernier état commun inconnu : la fusion exige de le
     /// déverrouiller.
     NeedsUnlock,
-    /// Supprimé du serveur : gardé ici, republié seulement à la demande.
+    /// Absent du compte sur le serveur (supprimé, ou jamais accessible à ce compte) : gardé
+    /// ici, republié seulement à la demande.
     Removed,
 }
 
@@ -190,7 +191,7 @@ impl Vaults {
                     let deleted = self.delete(&name);
                     exchange.left.push((name, deleted));
                 }
-                Ok(Step::Gone(Removal::Deleted)) => {
+                Ok(Step::Gone(Removal::Deleted | Removal::Absent)) => {
                     self.set_removed(&name, true)?;
                     exchange.removed.push(name);
                 }
@@ -1304,22 +1305,38 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_vault_is_reported() {
+    fn a_vault_out_of_the_account_is_reported_once_and_kept() {
         let dir = TempDir::new().unwrap();
         let (_a, b, _server) = two_devices(&dir);
-        b.update_config(|config| {
-            let vault = config.vaults.get_mut("perso").unwrap();
-            vault.remote.as_mut().unwrap().id = Uuid::new_v4();
-        })
-        .unwrap();
+        let out_of_the_account = |vaults: &Vaults| {
+            vaults
+                .update_config(|config| {
+                    let vault = config.vaults.get_mut("perso").unwrap();
+                    vault.remote.as_mut().unwrap().id = Uuid::new_v4();
+                })
+                .unwrap();
+        };
+        out_of_the_account(&b);
         assert_eq!(states(&b), [state_of("perso", VaultState::Removed)]);
+        let exchange = b.exchange().unwrap();
+        assert_eq!(exchange.removed, ["perso"]);
+        assert_eq!(exchange.updated, []);
+        // Le vrai coffre du compte, que le lien ne désigne plus, est téléchargé à côté.
+        assert_eq!(exchange.downloaded.len(), 1);
+        assert_eq!(b.exchange().unwrap(), Exchange::default());
+        assert!(names(&b).contains(&"perso".to_owned()));
+
+        let mut session = open(&b, "perso");
+        assert_eq!(b.sync("perso", &mut session), Ok(SyncOutcome::Removed));
         assert_eq!(
-            b.exchange().unwrap().updated,
-            [(
-                "perso".to_owned(),
-                Err(PortError::new("coffre inconnu du serveur").into())
-            )]
+            b.republish("perso", &mut session),
+            Ok(SyncOutcome::Done(SyncStatus::Synced))
         );
+        assert_eq!(states(&b)[0], state_of("perso", VaultState::Synced));
+
+        out_of_the_account(&b);
+        assert_eq!(b.sync("perso", &mut session), Ok(SyncOutcome::Removed));
+        assert!(link(&b, "perso").unwrap().removed);
     }
 
     #[test]

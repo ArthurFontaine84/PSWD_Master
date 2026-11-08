@@ -110,7 +110,7 @@ describe("the vault list", () => {
       expect(card("famille").getByText("commun")).toBeInTheDocument();
     });
     expect(card("ancien").getByText("commun")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Supprimé du serveur : gardé sur cet appareil" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Absent de votre compte sur le serveur : gardé sur cet appareil" })).toBeInTheDocument();
     expect(card("perso").queryByText("commun")).not.toBeInTheDocument();
   });
 

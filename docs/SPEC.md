@@ -416,7 +416,7 @@ Le serveur identifie les coffres par son propre identifiant (UUID v4), jamais pa
 
 **État d'un coffre sur un appareil** (calculé à partir de la liste des coffres du serveur, `Vaults::vault_states` ; aucun état sans serveur enregistré ou si le serveur est injoignable)
 
-Règle des couleurs : **rouge** dès que le coffre n'a pas de lien avec le serveur (jamais publié, lié à un autre serveur, supprimé du serveur), même s'il est gardé sur l'appareil, et sur tous les coffres tant que les échanges avec le serveur enregistré échouent (pastille « Échanges avec le serveur impossibles : synchro en pause ») ; **orange** quand le lien existe mais que les deux copies diffèrent (nuance : rien n'est perdu, la synchro peut les réunir) ; **verte** quand elles sont identiques. Aucune pastille sans serveur enregistré.
+Règle des couleurs : **rouge** dès que le coffre n'a pas de lien avec le serveur (jamais publié, lié à un autre serveur, absent du compte sur le serveur), même s'il est gardé sur l'appareil, et sur tous les coffres tant que les échanges avec le serveur enregistré échouent (pastille « Échanges avec le serveur impossibles : synchro en pause ») ; **orange** quand le lien existe mais que les deux copies diffèrent (nuance : rien n'est perdu, la synchro peut les réunir) ; **verte** quand elles sont identiques. Aucune pastille sans serveur enregistré.
 
 | État | Pastille | Signification | Comportement |
 |---|---|---|---|
@@ -424,13 +424,14 @@ Règle des couleurs : **rouge** dès que le coffre n'a pas de lien avec le serve
 | à jour | verte | Même contenu que la copie du serveur | — |
 | à mettre à jour | orange | Un seul côté a changé depuis l'état commun | Mis à jour sans mot de passe au prochain échange (§7) |
 | à déverrouiller | orange | Modifié des deux côtés, ou état commun inconnu | Fusionné à son ouverture ; l'échange le signale |
-| supprimé | rouge | Supprimé du serveur (`410`, raison `deleted`) | Gardé en local, noté `removed = true` dans `[vaults.<nom>.remote]`, jamais republié automatiquement : seulement par le bouton « Synchroniser » du coffre ouvert (commande `sync` du shell), comme nouveau coffre |
+| absent du compte | rouge | Supprimé du serveur (`410`, raison `deleted`), ou inconnu du serveur pour ce compte (`404` : coffre d'un autre compte laissé sur l'appareil, par exemple) | Signalé une seule fois, à l'échange qui le découvre (plusieurs coffres en une phrase, au résumé de connexion notamment) ; gardé en local, noté `removed = true` dans `[vaults.<nom>.remote]`, jamais republié automatiquement : seulement par le bouton « Synchroniser » du coffre ouvert (commande `sync` du shell), comme nouveau coffre |
 
 - Un coffre commun dont le compte n'est plus membre (il l'a quitté depuis un appareil, ou un administrateur l'en a retiré) n'a pas d'état : il est supprimé de chaque appareil du compte (`SyncOutcome::Left`). Quitter un coffre le supprime aussitôt de l'appareil.
 - **Limite acceptée** : un coffre republié sur un nouveau serveur oublie l'ancien ; reconnecté plus tard à l'ancien serveur, l'appareil y publierait un doublon.
 - À la déconnexion, l'application demande s'il faut garder une copie locale des coffres (oui par défaut). Sans copie, les données restent sur le serveur : seuls sont supprimés de l'appareil les coffres dont l'appareil n'a rien que le serveur n'ait déjà : le coffre figure encore dans la liste du serveur, et l'empreinte de la copie locale est celle du dernier état commun (`synced.file_hash`). Le serveur a pu avancer depuis : il ne fait qu'ajouter à cet état, il n'y a donc rien à perdre. Les autres (modifications non publiées, jamais synchronisé, absent du serveur, serveur injoignable) sont gardés et signalés.
 - Déconnexion : vérification des copies (si demandée), révocation du jeton, suppression de `server.toml`, puis des copies locales. Un serveur injoignable n'empêche pas de se déconnecter : le jeton, non révoqué, est signalé, à révoquer depuis le panneau.
-- Le serveur distingue « coffre inconnu » de « coffre retiré » : `RemoteStore` reçoit pour cela une erreur dédiée ; l'adaptateur HTTP retient en plus la raison du `410` (`RemoteVault::removal`) et la dernière version vue (`RemoteVault::version`).
+- Pour l'application, « coffre inconnu » (`404`) et « coffre retiré » (`410`, raison `deleted`) sont un même état : le coffre n'est pas sur le compte, et le serveur ne dit pas s'il existe (§7). `RemoteStore` reçoit dans les deux cas une erreur de retrait (`PortError::removed`) ; l'adaptateur HTTP retient la raison (`RemoteVault::removal` : `Left`, `Deleted`, ou `Absent` pour un `404`) et la dernière version vue (`RemoteVault::version`). Seul `Left` supprime la copie locale. Décidé le 2026-11-07 (#11 des tests d'intégration) : avant, un coffre d'un autre compte resté sur l'appareil répétait l'erreur « coffre inconnu du serveur » à chaque échange.
+- À la déconnexion, si des coffres restent sur l'appareil, un rappel le dit : ils restent liés à ce compte ; s'ils appartiennent à quelqu'un d'autre, les supprimer avant de connecter un autre compte.
 
 ## 12. Interfaces graphiques (étape 2)
 
@@ -493,6 +494,7 @@ Règle des couleurs : **rouge** dès que le coffre n'a pas de lien avec le serve
 - TypeScript : Vitest, 100 % des lignes pour la logique (`.ts`) ; composants Svelte testés par comportement avec Testing Library, sans seuil.
 - `svelte-check` et ESLint strict sans avertissement ; `package-lock.json` versionné et `npm audit` sans faille, comme `cargo deny`. `npm audit` est toujours lancé en entier (sans `--audit-level`) ; une faille n'est acceptée que si aucun correctif n'existe et qu'elle n'est pas exploitable, et elle est listée ici :
   - `deepmerge` 4.3.1 (GHSA-gcqx-w48m-w2h4, gravité faible), par `@sveltejs/vite-plugin-svelte` : empoisonnement de prototype de l'objet fusionné. Seuls nos fichiers de configuration y passent, à la construction ; la bibliothèque n'est pas dans l'application livrée. Accepté le 2026-10-28, à revoir à chaque mise à jour du plugin.
+  - `minimatch` 10.2.6 (GHSA-g3hv-75wg-m249, gravité modérée), par ESLint et `typescript-eslint` : déni de service par un motif de fichiers piégé. Seuls les motifs de notre configuration ESLint y passent, à l'analyse du code ; la bibliothèque n'est pas dans l'application livrée. Le seul correctif proposé (`npm audit fix --force`) rétrograde ESLint d'une version majeure. Accepté le 2026-11-07, à revoir à chaque mise à jour d'ESLint.
 - Pas de test de bout en bout (`tauri-driver` : Windows et Linux seulement) : l'application construite est essayée à la main.
 - Builds mobiles lancés à la main : Android à la fin de chaque sous-étape qui touche au mobile ; iOS sur le Mac, quand il sera disponible.
 

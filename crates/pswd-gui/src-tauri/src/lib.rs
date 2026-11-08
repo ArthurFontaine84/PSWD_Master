@@ -225,6 +225,14 @@ mod tests {
     }
 
     #[test]
+    fn exit_without_state_does_nothing() {
+        // Le démarrage a échoué avant de créer l'état : rien à effacer, et pas de panique.
+        let app = mock_builder().build(tauri::generate_context!()).unwrap();
+        on_run_event(app.handle(), &RunEvent::Exit);
+        assert!(app.try_state::<AppState>().is_none());
+    }
+
+    #[test]
     fn other_events_leave_the_clipboard_alone() {
         let dir = TempDir::new().unwrap();
         let (app, clears) = app_with_clipboard(&dir);

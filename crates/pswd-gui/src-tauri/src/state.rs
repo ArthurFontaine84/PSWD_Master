@@ -1596,8 +1596,9 @@ mod tests {
         assert!(state.save_settings(changed).is_err());
     }
 
-    /// Délai d'attente d'une synchro faite en arrière-plan.
-    const SYNC_WAIT: Duration = Duration::from_secs(30);
+    /// Délai d'attente maximal d'une synchro faite en arrière-plan : large, car la campagne de
+    /// couverture instrumente aussi les dépendances (crypto comprise) et ralentit tout.
+    const SYNC_WAIT: Duration = Duration::from_secs(120);
 
     fn next_report(reports: &mpsc::Receiver<SyncReport>) -> SyncReport {
         reports.recv_timeout(SYNC_WAIT).unwrap()
@@ -1776,19 +1777,43 @@ mod tests {
     }
 
     #[test]
+    fn a_vault_locked_meanwhile_is_not_synced() {
+        let (pc_dir, phone_dir) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+        let (_pc, phone, reports, _server) = open_on_two_devices(&pc_dir, &phone_dir, None);
+        let locked = || {
+            let open = phone.open();
+            open.as_ref().unwrap().lock.quietly(|_| ()).is_none()
+        };
+        phone
+            .open()
+            .as_ref()
+            .unwrap()
+            .lock
+            .expire_within(Duration::ZERO);
+        let start = std::time::Instant::now();
+        while !locked() {
+            assert!(start.elapsed() < SYNC_WAIT, "jamais verrouillé");
+            thread::sleep(Duration::from_millis(10));
+        }
+        phone.check_open();
+        assert!(reports.try_recv().is_err());
+    }
+
+    #[test]
     fn checking_the_open_vault_does_not_postpone_its_lock() {
         let (pc_dir, phone_dir) = (TempDir::new().unwrap(), TempDir::new().unwrap());
         let (_pc, phone, reports, _server) =
-            open_on_two_devices(&pc_dir, &phone_dir, Some(Duration::from_secs(2)));
-        // Verrouillage prévu avant `unlocked` + 2 s ; repoussé, il viendrait après + 3 s.
+            open_on_two_devices(&pc_dir, &phone_dir, Some(Duration::from_secs(5)));
+        // Verrouillage prévu avant `unlocked` + 5 s ; repoussé, il viendrait après + 5,5 s. Le
+        // délai laisse de la marge à la préparation, lente sous la campagne de couverture.
         let unlocked = std::time::Instant::now();
-        thread::sleep(Duration::from_secs(1));
+        thread::sleep(Duration::from_millis(500));
         phone.check_open();
         assert_eq!(
             reports.try_recv(),
             Ok(report("perso", SyncState::Synced, true))
         );
-        thread::sleep(Duration::from_millis(2_500).saturating_sub(unlocked.elapsed()));
+        thread::sleep(Duration::from_millis(5_250).saturating_sub(unlocked.elapsed()));
         assert_eq!(phone.current(), None);
         phone.check_open();
         assert!(reports.try_recv().is_err());

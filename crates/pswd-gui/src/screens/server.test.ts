@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   accountStatus,
@@ -201,10 +201,28 @@ describe("Server, once connected", () => {
     );
     expect(
       await screen.findByText(
-        "Appareil déconnecté du serveur. Coffre « perso » retiré de cet appareil ; il reste sur le serveur.",
+        "Appareil déconnecté du serveur. Coffre « perso » retiré de cet appareil ; il reste sur le serveur. Les coffres gardés sur cet appareil restent liés à ce compte : s'ils appartiennent à quelqu'un d'autre, supprimez-les avant de connecter un autre compte.",
       ),
     ).toBeInTheDocument();
     expect(await screen.findByText(/Connectez cet appareil/)).toBeInTheDocument();
+  });
+
+  it("reminds that the copies kept belong to this account, only if there are some", async () => {
+    const perso = { name: "perso", state: "synced" as const, shared: false };
+    const nobody = { revokeError: null, removed: [], kept: [] };
+    vi.mocked(disconnectServer).mockResolvedValue(nobody);
+    show({ ...connected, vaults: [perso] });
+    await fireEvent.click(await screen.findByRole("button", { name: "Se déconnecter" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Se déconnecter" }));
+    expect(disconnectServer).toHaveBeenCalledWith(true);
+    expect(await screen.findByText(/Appareil déconnecté du serveur\. Les coffres gardés/)).toBeInTheDocument();
+    cleanup();
+    render(Toast);
+
+    show(connected);
+    await fireEvent.click(await screen.findByRole("button", { name: "Se déconnecter" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Se déconnecter" }));
+    expect(await screen.findByText("Appareil déconnecté du serveur.")).toBeInTheDocument();
   });
 
   it("shows a failed disconnection", async () => {

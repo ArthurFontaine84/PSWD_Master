@@ -117,7 +117,8 @@
 
   async function disconnect() {
     await run("disconnect", async () => {
-      const outcome = disconnectionOutcome(await disconnectServer(keepLocal));
+      const copiesKept = keepLocal && status !== null && status.vaults.length > 0;
+      const outcome = disconnectionOutcome(await disconnectServer(keepLocal), copiesKept);
       confirming = false;
       report(outcome);
       await load();

@@ -60,7 +60,7 @@ export function exchangeOutcome(exchange: Exchange): Outcome {
   };
   const done = [
     ...(each.length > 1 ? [texts.exchangeSummary(counts), ...renamed] : each),
-    ...exchange.removed.map((name) => texts.removedByServer(name)),
+    ...(exchange.removed.length > 0 ? [texts.absentFromAccount(exchange.removed)] : []),
     ...exchange.left.map((name) => texts.leftElsewhere(name)),
   ];
   const problems = [
@@ -76,8 +76,12 @@ export function exchangeOutcome(exchange: Exchange): Outcome {
   return { done, problems };
 }
 
-export function disconnectionOutcome(disconnection: Disconnection): Outcome {
+/** `copiesKept` : l'utilisateur a choisi de garder les coffres, et l'appareil en a. */
+export function disconnectionOutcome(disconnection: Disconnection, copiesKept: boolean): Outcome {
   const done = [texts.disconnected, ...disconnection.removed.map((name) => texts.removedFromDevice(name))];
+  if (copiesKept || disconnection.kept.length > 0) {
+    done.push(texts.otherAccountReminder);
+  }
   const problems = disconnection.kept.map(({ name, reason }) => texts.keptOnDevice(name, reason));
   if (disconnection.revokeError !== null) {
     problems.unshift(texts.tokenNotRevoked(disconnection.revokeError));

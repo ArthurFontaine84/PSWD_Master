@@ -130,7 +130,7 @@ describe("VaultList", () => {
     expect(dots()).toEqual([
       ["Pas sur ce serveur : publié au prochain échange", "red"],
       ["Synchronisé", "green"],
-      ["Supprimé du serveur : gardé sur cet appareil", "red"],
+      ["Absent de votre compte sur le serveur : gardé sur cet appareil", "red"],
     ]);
     await fireEvent.click(screen.getByRole("button", { name: "vieux" }));
     expect(onOpen).toHaveBeenCalledWith("vieux", "removed");
@@ -148,10 +148,10 @@ describe("VaultList", () => {
     });
     const onOpen = vi.fn();
     render(VaultList, { onOpen, onBackup: vi.fn(), onRestore: vi.fn() });
-    const dot = await screen.findByRole("button", { name: "Supprimé du serveur : gardé sur cet appareil" });
-    expect(dot).toHaveAttribute("title", "Supprimé du serveur : gardé sur cet appareil");
+    const dot = await screen.findByRole("button", { name: "Absent de votre compte sur le serveur : gardé sur cet appareil" });
+    expect(dot).toHaveAttribute("title", "Absent de votre compte sur le serveur : gardé sur cet appareil");
     await fireEvent.click(dot);
-    expect(await screen.findByRole("status")).toHaveTextContent("Supprimé du serveur : gardé sur cet appareil");
+    expect(await screen.findByRole("status")).toHaveTextContent("Absent de votre compte sur le serveur : gardé sur cet appareil");
     expect(onOpen).not.toHaveBeenCalled();
   });
 
@@ -450,8 +450,8 @@ describe("Unlock", () => {
 
   it("tells that a vault deleted from the server only lives here", () => {
     const { unmount } = render(Unlock, { name: "perso", dot: "removed", onUnlocked: vi.fn(), onCancel: vi.fn() });
-    expect(screen.getByText("Supprimé du serveur : gardé sur cet appareil").querySelector(".dot")).toHaveClass("red");
-    expect(screen.getByRole("status")).toHaveTextContent("Ce coffre a été supprimé du serveur");
+    expect(screen.getByText("Absent de votre compte sur le serveur : gardé sur cet appareil").querySelector(".dot")).toHaveClass("red");
+    expect(screen.getByRole("status")).toHaveTextContent("Ce coffre n'est pas (ou plus) sur votre compte du serveur");
     unmount();
     render(Unlock, { name: "perso", dot: "synced", onUnlocked: vi.fn(), onCancel: vi.fn() });
     expect(screen.getByText("Synchronisé").querySelector(".dot")).toHaveClass("green");

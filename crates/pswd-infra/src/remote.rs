@@ -283,13 +283,16 @@ impl ServerClient {
     }
 }
 
-/// Pourquoi le serveur ne donne plus un coffre (`410`).
+/// Pourquoi le serveur ne donne pas un coffre : `410`, ou `404`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Removal {
     /// Le compte a quitté le coffre commun, ou en a été retiré.
     Left,
     /// Le coffre a été supprimé du serveur.
     Deleted,
+    /// Le serveur ne le connaît pas pour ce compte (`404`) : coffre d'un autre compte, laissé
+    /// sur l'appareil, ou disparu du serveur.
+    Absent,
 }
 
 /// Un coffre sur le serveur.
@@ -316,6 +319,12 @@ impl RemoteVault {
 
     fn url(&self, base: &str) -> String {
         format!("{base}/v1/vaults/{}", self.id)
+    }
+
+    /// Un `404` : le compte n'y a pas accès, ce qui ne dit pas si le coffre existe.
+    fn absent(&mut self) -> PortError {
+        self.removal = Some(Removal::Absent);
+        PortError::removed("coffre absent de votre compte sur le serveur")
     }
 
     /// Retient la raison d'un `410`. Sans raison lisible, le coffre est réputé supprimé : sa copie
@@ -352,7 +361,7 @@ impl RemoteStore for RemoteVault {
                 self.version = None;
                 Ok(None)
             }
-            StatusCode::NOT_FOUND => Err(unknown_vault()),
+            StatusCode::NOT_FOUND => Err(self.absent()),
             StatusCode::GONE => Err(self.gone(response)),
             status => Err(status_error(status)),
         }
@@ -378,7 +387,7 @@ impl RemoteStore for RemoteVault {
                 Ok(())
             }
             StatusCode::PRECONDITION_FAILED => Err(PushError::Conflict),
-            StatusCode::NOT_FOUND => Err(PushError::Failed(unknown_vault())),
+            StatusCode::NOT_FOUND => Err(PushError::Failed(self.absent())),
             StatusCode::GONE => Err(PushError::Failed(self.gone(response))),
             status => Err(PushError::Failed(status_error(status))),
         }
@@ -822,12 +831,15 @@ mod tests {
     }
 
     #[test]
-    fn unknown_vault_is_reported() {
+    fn a_vault_out_of_the_account_is_absent() {
         let (client, _) = admin();
+        let absent = PortError::removed("coffre absent de votre compte sur le serveur");
         let mut vault = client.vault(Uuid::new_v4());
-        let unknown = PortError::new("coffre inconnu du serveur");
-        assert_eq!(vault.fetch(), Err(unknown.clone()));
-        assert_eq!(vault.push(&VAULT, None), Err(PushError::Failed(unknown)));
+        assert_eq!(vault.fetch(), Err(absent.clone()));
+        assert_eq!(vault.removal(), Some(Removal::Absent));
+        let mut vault = client.vault(Uuid::new_v4());
+        assert_eq!(vault.push(&VAULT, None), Err(PushError::Failed(absent)));
+        assert_eq!(vault.removal(), Some(Removal::Absent));
     }
 
     #[test]
