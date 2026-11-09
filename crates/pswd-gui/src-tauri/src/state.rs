@@ -565,7 +565,7 @@ fn sync_open(
         Trigger::Automatic => vaults.sync(&name, &mut session),
         Trigger::Requested => vaults.republish(&name, &mut session),
     };
-    let given_back = if outcome == Ok(SyncOutcome::Left) {
+    let given_back = if matches!(outcome, Ok(SyncOutcome::Left | SyncOutcome::Deleted)) {
         let left = lock(open).take_if(|open| open.opening == opening);
         drop(left.and_then(|open| open.lock.close()));
         GivenBack::default()
@@ -1650,6 +1650,30 @@ mod tests {
         assert_eq!(
             phone.sync_now(),
             Ok(report("famille", SyncState::Left, false))
+        );
+        assert_eq!(phone.current(), None);
+        assert!(phone.vaults.config().unwrap().vaults.is_empty());
+    }
+
+    #[test]
+    fn an_open_vault_deleted_everywhere_is_closed_and_deleted() {
+        let dir = TempDir::new().unwrap();
+        let (pc, _, pc_reports) = build(&dir, None, FakeClipboard::default());
+        connect_admin(&pc);
+        pc.create("perso", &secret("Maître-2026!"), false).unwrap();
+        next_report(&pc_reports);
+        pc.lock();
+
+        let other = TempDir::new().unwrap();
+        let (phone, _, phone_reports) = build(&other, None, FakeClipboard::default());
+        connect_same_account(&pc, &phone);
+        phone.unlock("perso", &secret("Maître-2026!")).unwrap();
+        next_report(&phone_reports);
+        pc.vaults.delete_everywhere("perso").unwrap();
+
+        assert_eq!(
+            phone.sync_now(),
+            Ok(report("perso", SyncState::Deleted, false))
         );
         assert_eq!(phone.current(), None);
         assert!(phone.vaults.config().unwrap().vaults.is_empty());

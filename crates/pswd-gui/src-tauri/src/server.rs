@@ -63,6 +63,10 @@ pub struct Exchange {
     /// Coffres communs dont le compte n'est plus membre ; supprimés de cet appareil.
     left: Vec<String>,
     not_left: Vec<Failure>,
+    /// Coffres supprimés partout depuis un autre appareil, sans modification ici ; supprimés de
+    /// cet appareil.
+    deleted: Vec<String>,
+    not_deleted: Vec<Failure>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -182,7 +186,7 @@ impl AppState {
     /// À appeler pendant [`AppState::exclusive`].
     fn exchange_now(&self) -> Result<Exchange, AppError> {
         let exchange = Exchange::from(self.observe(self.vaults.exchange())?);
-        for name in &exchange.left {
+        for name in exchange.left.iter().chain(&exchange.deleted) {
             self.close_without_publishing(name);
         }
         Ok(exchange)
@@ -248,6 +252,12 @@ impl From<pswd_app::Exchange> for Exchange {
             match result {
                 Ok(()) => exchange.left.push(name),
                 Err(error) => exchange.not_left.push(failure(name, &error)),
+            }
+        }
+        for (name, result) in done.deleted {
+            match result {
+                Ok(()) => exchange.deleted.push(name),
+                Err(error) => exchange.not_deleted.push(failure(name, &error)),
             }
         }
         exchange
@@ -549,6 +559,8 @@ mod tests {
                 "removed": [],
                 "left": [],
                 "notLeft": [],
+                "deleted": [],
+                "notDeleted": [],
             })
         );
 
@@ -646,6 +658,7 @@ mod tests {
                 Timestamp::from_millis(0),
             )
             .unwrap();
+        create(&pc, "travail");
         connect_admin(&pc);
         pc.exchange().unwrap();
         let other = TempDir::new().unwrap();
@@ -654,13 +667,44 @@ mod tests {
         phone.exchange().unwrap();
         phone.unlock("famille", &secret(PASSWORD)).unwrap();
         pc.vaults.delete_everywhere("perso").unwrap();
+        let travail = pc
+            .vaults
+            .config()
+            .unwrap()
+            .vault("travail")
+            .unwrap()
+            .remote
+            .clone();
+        pc.vaults.delete_server_vault(travail.unwrap().id).unwrap();
         pc.vaults.leave("famille").unwrap();
 
         let exchange = sent(&phone.exchange().unwrap());
-        assert_eq!(exchange["removed"], json!(["perso"]));
+        assert_eq!(exchange["deleted"], json!(["perso"]));
+        assert_eq!(exchange["removed"], json!(["travail"]));
         assert_eq!(exchange["left"], json!(["famille"]));
         assert_eq!(phone.current(), None);
         assert_eq!(status(&phone)["vaults"][0]["state"], "removed");
+    }
+
+    #[test]
+    fn a_vault_deleted_everywhere_but_not_here_is_reported() {
+        let dir = TempDir::new().unwrap();
+        let pc = device(&dir);
+        create(&pc, "perso");
+        connect_admin(&pc);
+        pc.exchange().unwrap();
+        let other = TempDir::new().unwrap();
+        let phone = device(&other);
+        connect_same_account(&pc, &phone);
+        phone.exchange().unwrap();
+        pc.vaults.delete_everywhere("perso").unwrap();
+        let mut temporary = vault_file(other.path(), "perso").into_os_string();
+        temporary.push(".tmp");
+        fs::create_dir(&temporary).unwrap();
+        assert_eq!(
+            sent(&phone.exchange().unwrap())["notDeleted"][0]["name"],
+            "perso"
+        );
     }
 
     #[test]

@@ -46,8 +46,11 @@ pub enum SyncOutcome {
     Removed,
     /// Le compte n'est plus membre de ce coffre commun : sa copie locale a été supprimée.
     Left,
-    /// Jamais [`SyncStatus::Removed`] : ce cas devient [`SyncOutcome::Removed`] ou
-    /// [`SyncOutcome::Left`].
+    /// Le coffre a été supprimé partout depuis un autre appareil, et cette copie n'avait rien de
+    /// plus : elle a été supprimée.
+    Deleted,
+    /// Jamais [`SyncStatus::Removed`] : ce cas devient [`SyncOutcome::Removed`],
+    /// [`SyncOutcome::Left`] ou [`SyncOutcome::Deleted`].
     Done(SyncStatus),
 }
 
@@ -72,10 +75,14 @@ pub struct Exchange {
     /// Coffres déjà sur le serveur, mis à jour ou à déverrouiller ; ceux qui étaient à jour
     /// n'y figurent pas.
     pub updated: VaultResults<Update>,
-    /// Coffres supprimés du serveur depuis le dernier échange : gardés ici.
+    /// Coffres absents du compte sur le serveur depuis le dernier échange : gardés ici (ceux
+    /// supprimés partout mais modifiés ici compris).
     pub removed: Vec<String>,
     /// Coffres communs dont le compte n'est plus membre : supprimés de cet appareil.
     pub left: VaultResults<()>,
+    /// Coffres supprimés partout depuis un autre appareil, sans modification ici : supprimés de
+    /// cet appareil.
+    pub deleted: VaultResults<()>,
 }
 
 /// Pourquoi un coffre n'a pas été retiré de l'appareil à la déconnexion.
@@ -155,10 +162,11 @@ impl Vaults {
     }
 
     /// Échange avec le serveur, sans mot de passe : télécharge les coffres du compte que
-    /// l'appareil n'a pas, publie les coffres locaux, met à jour ceux dont un seul côté a changé,
-    /// garde ceux que le serveur a supprimés et supprime ceux dont le compte n'est plus membre.
-    /// Un coffre supprimé du serveur n'est jamais republié ici. L'adresse publique du serveur
-    /// est reprise au passage.
+    /// l'appareil n'a pas (sauf ceux retirés de l'appareil), publie les coffres locaux, met à
+    /// jour ceux dont un seul côté a changé, garde ceux qui sont absents du compte et supprime
+    /// ceux dont le compte n'est plus membre, ou supprimés partout et sans modification ici.
+    /// Un coffre absent du compte n'est jamais republié ici. L'adresse publique du serveur est
+    /// reprise au passage.
     ///
     /// # Errors
     ///
@@ -172,6 +180,7 @@ impl Vaults {
         self.remember_public_address(&server, client.server_info()?.public_address.as_deref())?;
         let server_id = server.server_id();
         let mut exchange = Exchange::default();
+        self.forget_ignored_gone(&listed)?;
         self.download(&client, &server_id, &listed, &mut exchange)?;
         for (name, vault) in self.config()?.vaults {
             let link = vault.remote.clone().filter(|link| link.server == server_id);
@@ -191,7 +200,11 @@ impl Vaults {
                     let deleted = self.delete(&name);
                     exchange.left.push((name, deleted));
                 }
-                Ok(Step::Gone(Removal::Deleted | Removal::Absent)) => {
+                Ok(Step::Gone(Removal::DeletedEverywhere)) if nothing_new_here(&vault, &link) => {
+                    let deleted = self.delete(&name);
+                    exchange.deleted.push((name, deleted));
+                }
+                Ok(Step::Gone(_)) => {
                     self.set_removed(&name, true)?;
                     exchange.removed.push(name);
                 }
@@ -201,8 +214,9 @@ impl Vaults {
         Ok(exchange)
     }
 
-    /// Télécharge les coffres du serveur que l'appareil n'a pas encore. Un coffre noté
-    /// supprimé que le serveur donne de nouveau est de nouveau synchronisé.
+    /// Télécharge les coffres du serveur que l'appareil n'a pas encore, sauf ceux retirés de
+    /// l'appareil. Un coffre noté absent que le serveur donne de nouveau est de nouveau
+    /// synchronisé.
     fn download(
         &self,
         client: &ServerClient,
@@ -216,6 +230,9 @@ impl Vaults {
                 if self.set_removed(&name, false)? {
                     exchange.downloaded.push((remote.name.clone(), Ok(name)));
                 }
+                continue;
+            }
+            if self.config()?.ignored.contains(&remote.id) {
                 continue;
             }
             let mut vault = client.vault(remote.id);
@@ -234,6 +251,16 @@ impl Vaults {
             });
             exchange.downloaded.push((remote.name.clone(), added));
         }
+        Ok(())
+    }
+
+    /// Oublie les coffres retirés de l'appareil que le serveur ne donne plus.
+    fn forget_ignored_gone(&self, listed: &[RemoteVaultInfo]) -> Result<(), AppError> {
+        let listed_id = |id: &Uuid| listed.iter().any(|remote| remote.id == *id);
+        if self.config()?.ignored.iter().all(listed_id) {
+            return Ok(());
+        }
+        self.update_config(|config| config.ignored.retain(listed_id))?;
         Ok(())
     }
 
@@ -416,7 +443,7 @@ impl Vaults {
         let vault = self.config()?.vault(name)?.clone();
         let client = server.client()?;
         let server_id = server.server_id();
-        let id = match vault.remote {
+        let id = match &vault.remote {
             Some(link) if link.server == server_id && link.removed => {
                 return Ok(SyncOutcome::Removed);
             }
@@ -434,6 +461,16 @@ impl Vaults {
             SyncStatus::Removed if remote.removal() == Some(Removal::Left) => {
                 self.delete(name)?;
                 Ok(SyncOutcome::Left)
+            }
+            SyncStatus::Removed
+                if remote.removal() == Some(Removal::DeletedEverywhere)
+                    && vault
+                        .remote
+                        .as_ref()
+                        .is_some_and(|link| nothing_new_here(&vault, link)) =>
+            {
+                self.delete(name)?;
+                Ok(SyncOutcome::Deleted)
             }
             SyncStatus::Removed => {
                 self.set_removed(name, true)?;
@@ -504,6 +541,57 @@ impl Vaults {
             .is_some_and(|link| link.server == server_id && moved(link, &listed)))
     }
 
+    /// Retire de cet appareil le coffre publié `name`, qui reste sur le serveur et sur les
+    /// autres appareils : il n'est plus téléchargé ici (voir [`Vaults::download_again`]).
+    ///
+    /// # Errors
+    ///
+    /// Si le coffre n'est pas publié sur le serveur de l'appareil, si sa copie locale a des
+    /// modifications que le serveur n'a pas, ou si le serveur est injoignable : rien n'est
+    /// alors retiré.
+    pub fn forget(&self, name: &str) -> Result<(), AppError> {
+        let server = self.connected()?;
+        let vault = self.config()?.vault(name)?.clone();
+        let Some(link) = vault
+            .remote
+            .as_ref()
+            .filter(|link| link.server == server.server_id() && !link.removed)
+        else {
+            return Err(AppError::NotPublished(name.to_owned()));
+        };
+        if !nothing_only_here(&vault, link, &server.client()?.list_vaults()?)? {
+            return Err(AppError::Unpublished(name.to_owned()));
+        }
+        self.update_config(|config| config.ignored.push(link.id))?;
+        self.delete(name)
+    }
+
+    /// Coffres du serveur retirés de cet appareil.
+    ///
+    /// # Errors
+    ///
+    /// Si l'appareil n'est pas connecté, si le serveur est injoignable, ou si la configuration
+    /// est illisible.
+    pub fn ignored_vaults(&self) -> Result<Vec<RemoteVaultInfo>, AppError> {
+        let listed = self.connected()?.client()?.list_vaults()?;
+        let ignored = self.config()?.ignored;
+        Ok(listed
+            .into_iter()
+            .filter(|remote| ignored.contains(&remote.id))
+            .collect())
+    }
+
+    /// Télécharge de nouveau le coffre `id`, retiré de cet appareil, par un échange.
+    ///
+    /// # Errors
+    ///
+    /// Comme [`Vaults::exchange`].
+    pub fn download_again(&self, id: Uuid) -> Result<Exchange, AppError> {
+        self.connected()?;
+        self.update_config(|config| config.ignored.retain(|ignored| *ignored != id))?;
+        self.exchange()
+    }
+
     /// Clé de connexion d'un appareil de plus pour le même compte, à montrer une seule fois.
     ///
     /// # Errors
@@ -513,9 +601,10 @@ impl Vaults {
         Ok(self.connected()?.client()?.new_device_key()?)
     }
 
-    /// Déconnecte l'appareil : son jeton est révoqué et le serveur oublié. Sans `keep_local`, les
-    /// coffres dont l'appareil n'a rien que le serveur n'ait déjà sont retirés de l'appareil ; les
-    /// autres sont gardés. Un serveur injoignable n'empêche pas la déconnexion.
+    /// Déconnecte l'appareil : son jeton est révoqué et le serveur oublié, avec les coffres
+    /// retirés de l'appareil. Sans `keep_local`, les coffres dont l'appareil n'a rien que le
+    /// serveur n'ait déjà sont retirés de l'appareil ; les autres sont gardés. Un serveur
+    /// injoignable n'empêche pas la déconnexion.
     ///
     /// # Errors
     ///
@@ -544,6 +633,7 @@ impl Vaults {
             }
         }
         report.revoke_error = client.disconnect().err();
+        self.update_config(|config| config.ignored.clear())?;
         self.server_file().remove()?;
         for name in to_remove {
             match self.delete(&name) {
@@ -649,6 +739,14 @@ fn local_name(config: &Config, name: &str, id: Uuid) -> Result<String, AppError>
 /// L'appareil n'a rien que le serveur n'ait déjà : le coffre y est publié, et la copie locale
 /// n'a pas changé depuis le dernier état commun. Le serveur a pu avancer depuis : il ne fait
 /// qu'ajouter à cet état.
+/// La copie locale n'a pas changé depuis le dernier état commun : le serveur avait tout.
+fn nothing_new_here(vault: &VaultConfig, link: &RemoteLink) -> bool {
+    let local = FileStore::new(vault.vault_file()).load().ok().flatten();
+    link.synced
+        .as_ref()
+        .is_some_and(|synced| !local_changed(synced, local.as_deref()))
+}
+
 fn nothing_only_here(
     vault: &VaultConfig,
     link: &RemoteLink,
@@ -791,6 +889,17 @@ mod tests {
 
     fn names(vaults: &Vaults) -> Vec<String> {
         vaults.config().unwrap().vaults.into_keys().collect()
+    }
+
+    /// Suppression du serveur par un administrateur : les copies locales sont gardées.
+    fn delete_on_server(admin: &Vaults, name: &str) {
+        admin
+            .delete_server_vault(link(admin, name).unwrap().id)
+            .unwrap();
+    }
+
+    fn ignored(vaults: &Vaults) -> Vec<Uuid> {
+        vaults.config().unwrap().ignored
     }
 
     fn link(vaults: &Vaults, name: &str) -> Option<RemoteLink> {
@@ -1231,7 +1340,7 @@ mod tests {
     fn a_vault_deleted_from_the_server_is_kept_until_republished() {
         let dir = TempDir::new().unwrap();
         let (a, b, _server) = two_devices(&dir);
-        a.delete_everywhere("perso").unwrap();
+        delete_on_server(&a, "perso");
         let exchange = b.exchange().unwrap();
         assert_eq!(exchange.removed, ["perso"]);
         assert_eq!(states(&b), [state_of("perso", VaultState::Removed)]);
@@ -1254,7 +1363,7 @@ mod tests {
     fn a_vault_deleted_from_the_server_is_neither_shared_nor_removed_at_disconnection() {
         let dir = TempDir::new().unwrap();
         let (a, b, _server) = two_devices(&dir);
-        a.delete_everywhere("perso").unwrap();
+        delete_on_server(&a, "perso");
         b.exchange().unwrap();
         assert_eq!(
             b.members("perso").err(),
@@ -1284,10 +1393,143 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (a, b, _server) = two_devices(&dir);
         let mut session = open(&b, "perso");
-        a.delete_everywhere("perso").unwrap();
+        delete_on_server(&a, "perso");
         assert_eq!(b.sync("perso", &mut session), Ok(SyncOutcome::Removed));
         assert_eq!(states(&b), [state_of("perso", VaultState::Removed)]);
         assert_eq!(names(&b), ["perso"]);
+    }
+
+    #[test]
+    fn a_vault_deleted_everywhere_leaves_the_other_devices() {
+        let dir = TempDir::new().unwrap();
+        let (a, b, _server) = two_devices(&dir);
+        a.delete_everywhere("perso").unwrap();
+        let exchange = b.exchange().unwrap();
+        assert_eq!(exchange.deleted, [done("perso")]);
+        assert_eq!(exchange.removed, Vec::<String>::new());
+        assert_eq!(names(&b), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_vault_deleted_everywhere_but_changed_here_is_kept() {
+        let dir = TempDir::new().unwrap();
+        let (a, b, _server) = two_devices(&dir);
+        add_note(&mut open(&b, "perso"), "pas encore publiée");
+        a.delete_everywhere("perso").unwrap();
+        let exchange = b.exchange().unwrap();
+        assert_eq!(exchange.removed, ["perso"]);
+        assert_eq!(exchange.deleted, []);
+        assert_eq!(states(&b), [state_of("perso", VaultState::Removed)]);
+        assert_eq!(b.exchange().unwrap(), Exchange::default());
+    }
+
+    #[test]
+    fn a_vault_deleted_everywhere_with_an_unknown_common_state_is_kept() {
+        let dir = TempDir::new().unwrap();
+        let (a, b, _server) = two_devices(&dir);
+        forget_synced(&b, "perso");
+        a.delete_everywhere("perso").unwrap();
+        assert_eq!(b.exchange().unwrap().removed, ["perso"]);
+        assert_eq!(names(&b), ["perso"]);
+    }
+
+    #[test]
+    fn an_open_vault_deleted_everywhere_is_deleted_unless_changed() {
+        let dir = TempDir::new().unwrap();
+        let (a, b, _server) = two_devices(&dir);
+        create(&a, "travail");
+        a.exchange().unwrap();
+        b.exchange().unwrap();
+        let mut perso = open(&b, "perso");
+        let mut travail = open(&b, "travail");
+        add_note(&mut travail, "pas encore publiée");
+        a.delete_everywhere("perso").unwrap();
+        a.delete_everywhere("travail").unwrap();
+        assert_eq!(b.sync("perso", &mut perso), Ok(SyncOutcome::Deleted));
+        assert_eq!(b.sync("travail", &mut travail), Ok(SyncOutcome::Removed));
+        assert_eq!(names(&b), ["travail"]);
+        assert!(link(&b, "travail").unwrap().removed);
+    }
+
+    #[test]
+    fn a_vault_removed_from_this_device_stays_on_the_server() {
+        let dir = TempDir::new().unwrap();
+        let (a, b, _server) = two_devices(&dir);
+        let id = link(&b, "perso").unwrap().id;
+        b.forget("perso").unwrap();
+        assert_eq!(names(&b), Vec::<String>::new());
+        assert_eq!(ignored(&b), [id]);
+        assert_eq!(b.exchange().unwrap(), Exchange::default());
+        assert_eq!(names(&b), Vec::<String>::new());
+        assert_eq!(states(&a), [state_of("perso", VaultState::Synced)]);
+        let listed: Vec<String> = b
+            .ignored_vaults()
+            .unwrap()
+            .into_iter()
+            .map(|remote| remote.name)
+            .collect();
+        assert_eq!(listed, ["perso"]);
+
+        let exchange = b.download_again(id).unwrap();
+        assert_eq!(
+            exchange.downloaded,
+            [("perso".to_owned(), Ok("perso".to_owned()))]
+        );
+        assert_eq!(ignored(&b), Vec::<Uuid>::new());
+        assert_eq!(b.ignored_vaults().unwrap(), []);
+    }
+
+    #[test]
+    fn only_a_published_copy_without_changes_is_removed_from_the_device() {
+        let dir = TempDir::new().unwrap();
+        let (_a, b, _server) = two_devices(&dir);
+        create(&b, "local");
+        assert_eq!(
+            b.forget("local"),
+            Err(AppError::NotPublished("local".to_owned()))
+        );
+        add_note(&mut open(&b, "perso"), "pas encore publiée");
+        assert_eq!(
+            b.forget("perso"),
+            Err(AppError::Unpublished("perso".to_owned()))
+        );
+        assert_eq!(names(&b), ["local", "perso"]);
+        assert_eq!(ignored(&b), Vec::<Uuid>::new());
+        assert_eq!(
+            b.forget("inconnu"),
+            Err(ConfigError::UnknownVault("inconnu".to_owned()).into())
+        );
+        go_offline(&b);
+        assert_eq!(b.forget("perso"), Err(offline()));
+    }
+
+    #[test]
+    fn vaults_removed_from_the_device_are_forgotten_once_gone() {
+        let dir = TempDir::new().unwrap();
+        let (a, b, _server) = two_devices(&dir);
+        create(&a, "travail");
+        a.exchange().unwrap();
+        b.exchange().unwrap();
+        let travail = link(&b, "travail").unwrap().id;
+        b.forget("perso").unwrap();
+        b.forget("travail").unwrap();
+        a.delete_everywhere("perso").unwrap();
+        b.exchange().unwrap();
+        assert_eq!(ignored(&b), [travail]);
+        b.disconnect(true).unwrap();
+        assert_eq!(ignored(&b), Vec::<Uuid>::new());
+    }
+
+    #[test]
+    fn a_disconnected_device_has_no_vault_removed_from_it() {
+        let dir = TempDir::new().unwrap();
+        let a = device(&dir, "a");
+        assert_eq!(a.ignored_vaults(), Err(AppError::NotConnected));
+        assert_eq!(
+            a.download_again(Uuid::new_v4()),
+            Err(AppError::NotConnected)
+        );
+        assert_eq!(a.forget("perso"), Err(AppError::NotConnected));
     }
 
     #[test]

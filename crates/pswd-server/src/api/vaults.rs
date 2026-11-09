@@ -98,13 +98,14 @@ pub(super) async fn publish(
     Ok((StatusCode::NO_CONTENT, [(ETAG, etag(version))]).into_response())
 }
 
-/// Un compte supprime son coffre privé ; un coffre commun se quitte.
+/// Un compte supprime partout son coffre privé, ou le coffre commun dont il est le dernier
+/// membre ; un coffre commun qui a d'autres membres se quitte.
 pub(super) async fn delete(
     State(state): State<Shared>,
     caller: Caller,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    state.storage().delete_private_vault(id, caller.account)?;
+    state.storage().delete_own_vault(id, caller.account)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -226,7 +227,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_account_deletes_its_private_vault_only() {
+    async fn an_account_deletes_its_own_vaults_everywhere() {
         let (app, token) = app_with_admin().await;
         let private = create(&app, &token).await;
         send(&app, put(private, &token, FIRST, VAULT.clone())).await;
@@ -241,12 +242,14 @@ mod tests {
             |id: String| request("DELETE", &format!("/v1/vaults/{id}"), Some(&token), None);
 
         let response = send(&app, delete(shared)).await;
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
         let response = send(&app, delete(private.to_string())).await;
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let response = send(&app, get(private, &token)).await;
+        assert_eq!(response.status(), StatusCode::GONE);
         assert_eq!(
-            send(&app, get(private, &token)).await.status(),
-            StatusCode::GONE
+            json(response).await,
+            serde_json::json!({ "reason": "deleted_everywhere" })
         );
         let response = send(&app, delete(Uuid::new_v4().to_string())).await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);

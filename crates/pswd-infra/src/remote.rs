@@ -288,8 +288,10 @@ impl ServerClient {
 pub enum Removal {
     /// Le compte a quitté le coffre commun, ou en a été retiré.
     Left,
-    /// Le coffre a été supprimé du serveur.
+    /// Le coffre a été supprimé du serveur par un administrateur.
     Deleted,
+    /// Le coffre a été supprimé partout par un de ses membres, depuis un autre appareil.
+    DeletedEverywhere,
     /// Le serveur ne le connaît pas pour ce compte (`404`) : coffre d'un autre compte, laissé
     /// sur l'appareil, ou disparu du serveur.
     Absent,
@@ -335,11 +337,11 @@ impl RemoteVault {
             reason: String,
         }
 
-        let left = parse::<Gone>(response).is_ok_and(|gone| gone.reason == "left");
-        let (removal, message) = if left {
-            (Removal::Left, "ce compte n'est plus membre du coffre")
-        } else {
-            (Removal::Deleted, "coffre supprimé du serveur")
+        let reason = parse::<Gone>(response).map(|gone| gone.reason);
+        let (removal, message) = match reason.as_deref() {
+            Ok("left") => (Removal::Left, "ce compte n'est plus membre du coffre"),
+            Ok("deleted_everywhere") => (Removal::DeletedEverywhere, "coffre supprimé partout"),
+            _ => (Removal::Deleted, "coffre supprimé du serveur"),
         };
         self.removal = Some(removal);
         PortError::removed(message)
@@ -764,7 +766,7 @@ mod tests {
         assert_eq!(left.removal(), Some(Removal::Left));
 
         let private = client.create_vault("perso", false).unwrap();
-        client.delete_own_vault(private).unwrap();
+        client.delete_server_vault(private).unwrap();
         let mut deleted = client.vault(private);
         assert_eq!(
             deleted.push(&VAULT, None),
@@ -773,6 +775,13 @@ mod tests {
             )))
         );
         assert_eq!(deleted.removal(), Some(Removal::Deleted));
+
+        let private = client.create_vault("travail", false).unwrap();
+        client.delete_own_vault(private).unwrap();
+        let mut everywhere = client.vault(private);
+        let error = everywhere.fetch().unwrap_err();
+        assert_eq!(error, PortError::removed("coffre supprimé partout"));
+        assert_eq!(everywhere.removal(), Some(Removal::DeletedEverywhere));
     }
 
     #[test]

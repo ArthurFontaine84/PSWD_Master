@@ -1057,6 +1057,8 @@ mod tests {
                 "removed": [],
                 "left": [],
                 "notLeft": [],
+                "deleted": [],
+                "notDeleted": [],
             }))
         );
         let key = app.call("add_device_key", json!({})).unwrap();

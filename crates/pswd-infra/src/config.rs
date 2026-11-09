@@ -158,6 +158,9 @@ pub struct Config {
     /// Mobile : verrouillage après ce délai en arrière-plan ; 0 = immédiat.
     pub background_lock_seconds: u32,
     pub theme: Theme,
+    /// Coffres du serveur retirés de cet appareil : ils n'y sont plus téléchargés.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ignored: Vec<Uuid>,
     pub vaults: BTreeMap<String, VaultConfig>,
 }
 
@@ -168,6 +171,7 @@ impl Default for Config {
             clipboard_clear_seconds: 20,
             background_lock_seconds: 60,
             theme: Theme::Auto,
+            ignored: Vec::new(),
             vaults: BTreeMap::new(),
         }
     }
@@ -483,6 +487,21 @@ theme = \"dark\"
         let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         assert!(text.contains("shared = true"), "{text}");
         assert!(text.contains("removed = true"), "{text}");
+        assert_eq!(file.load().unwrap(), config);
+    }
+
+    #[test]
+    fn ignored_vaults_are_saved() {
+        let dir = TempDir::new().unwrap();
+        let mut file = config_file_in(&dir);
+        let id = Uuid::new_v4();
+        let config = Config {
+            ignored: vec![id],
+            ..Config::default()
+        };
+        file.save(&config).unwrap();
+        let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+        assert!(text.contains(&format!("ignored = [\"{id}\"]")), "{text}");
         assert_eq!(file.load().unwrap(), config);
     }
 

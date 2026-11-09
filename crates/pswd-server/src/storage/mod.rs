@@ -51,8 +51,9 @@ const SCHEMA: &str = "
         account_name TEXT,
         expires_at INTEGER NOT NULL
     );
-    -- Un coffre supprimé (`removed`) n'a plus ni contenu, ni versions, ni membres : il ne reste
-    -- que la trace de ses anciens membres, qui reçoivent 410.
+    -- Un coffre supprimé (`removed` : 1 par un administrateur, 2 partout par un membre) n'a
+    -- plus ni contenu, ni versions, ni membres : il ne reste que la trace de ses anciens
+    -- membres, qui reçoivent 410.
     CREATE TABLE vaults (
         id BLOB PRIMARY KEY,
         name TEXT NOT NULL,
@@ -104,15 +105,18 @@ pub enum StorageError {
     NotFound,
     /// Le compte a quitté le coffre commun ou en a été retiré.
     Gone,
-    /// Le coffre a été supprimé du serveur.
+    /// Le coffre a été supprimé du serveur par un administrateur.
     Deleted,
+    /// Le coffre a été supprimé partout par un de ses membres : ses appareils suppriment leur
+    /// copie.
+    DeletedEverywhere,
     /// Un coffre privé ne se partage pas et ne se quitte pas.
     NotShared,
     /// Le compte invité n'existe pas.
     UnknownAccount,
     /// Le compte invité est déjà membre ou déjà invité.
     AlreadyMember,
-    /// Un coffre commun se quitte : il n'est supprimé que par un administrateur.
+    /// Un coffre commun se quitte : seul son dernier membre le supprime.
     SharedVault,
     /// Seul un coffre sans membre reçoit un compte rattaché par un administrateur.
     HasMembers,
@@ -136,6 +140,7 @@ impl fmt::Display for StorageError {
             Self::NotFound => f.write_str("coffre inconnu"),
             Self::Gone => f.write_str("coffre retiré"),
             Self::Deleted => f.write_str("coffre supprimé"),
+            Self::DeletedEverywhere => f.write_str("coffre supprimé partout"),
             Self::NotShared => f.write_str("coffre privé"),
             Self::UnknownAccount => f.write_str("compte inconnu"),
             Self::AlreadyMember => f.write_str("déjà membre ou déjà invité"),

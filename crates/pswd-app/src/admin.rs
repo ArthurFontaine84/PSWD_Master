@@ -52,13 +52,15 @@ impl Vaults {
         Ok(())
     }
 
-    /// Supprime le coffre privé `name` du serveur, puis de cet appareil. Un coffre déjà supprimé
-    /// du serveur depuis un autre appareil est seulement supprimé ici.
+    /// Supprime partout le coffre privé `name`, ou le coffre commun dont le compte est le
+    /// dernier membre : du serveur, de cet appareil, puis des autres appareils au prochain
+    /// échange (sauf d'une copie modifiée, gardée). Un coffre déjà supprimé du serveur depuis un
+    /// autre appareil est seulement supprimé ici.
     ///
     /// # Errors
     ///
-    /// Si le coffre n'est pas publié ou est commun, ou si le serveur est injoignable : rien n'est
-    /// alors supprimé.
+    /// Si le coffre n'est pas publié, ou est commun et a d'autres membres, ou si le serveur est
+    /// injoignable : rien n'est alors supprimé.
     pub fn delete_everywhere(&self, name: &str) -> Result<(), AppError> {
         let (client, server) = self.client()?;
         match client.delete_own_vault(self.published_id(&server, name)?) {
@@ -321,13 +323,7 @@ mod tests {
         b.exchange().unwrap();
         create(&a, "neuf", false);
 
-        assert_eq!(
-            a.delete_everywhere("famille"),
-            Err(
-                PortError::new("un coffre commun se quitte : il ne se supprime pas du serveur")
-                    .into()
-            )
-        );
+        a.delete_everywhere("famille").unwrap();
         assert_eq!(
             a.delete_everywhere("neuf"),
             Err(AppError::NotPublished("neuf".to_owned()))
@@ -343,7 +339,7 @@ mod tests {
             .into_iter()
             .map(|v| v.name)
             .collect();
-        assert_eq!(names, ["brouillon", "famille"]);
+        assert_eq!(names, ["brouillon"]);
     }
 
     #[test]

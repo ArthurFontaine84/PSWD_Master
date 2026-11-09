@@ -10,6 +10,10 @@ use super::{Storage, StorageError};
 /// Nombre de versions conservées par coffre, la version courante comprise.
 pub const KEPT_VERSIONS: i64 = 15;
 
+/// Valeurs de `vaults.removed`, après 0 (coffre présent).
+pub(super) const REMOVED_BY_ADMIN: i64 = 1;
+pub(super) const REMOVED_EVERYWHERE: i64 = 2;
+
 const LIST_VAULTS: &str = "SELECT v.id, v.name, v.shared, v.current_version FROM vaults v
      JOIN vault_members m ON m.vault_id = v.id
      WHERE m.account_id = ?1 ORDER BY v.id";
@@ -174,8 +178,8 @@ pub(super) fn shared_if_member(
 }
 
 /// Pourquoi `account` n'accède pas au coffre : le coffre a été supprimé
-/// ([`StorageError::Deleted`]), il l'a quitté ou en a été retiré ([`StorageError::Gone`]), ou ne
-/// l'a jamais eu ([`StorageError::NotFound`]).
+/// ([`StorageError::Deleted`], [`StorageError::DeletedEverywhere`]), il l'a quitté ou en a été
+/// retiré ([`StorageError::Gone`]), ou ne l'a jamais eu ([`StorageError::NotFound`]).
 fn absence(conn: &Connection, id: Uuid, account: Uuid) -> StorageError {
     let deleted = conn
         .query_row(
@@ -186,8 +190,9 @@ fn absence(conn: &Connection, id: Uuid, account: Uuid) -> StorageError {
         )
         .optional();
     match deleted {
-        Ok(Some(true)) => StorageError::Deleted,
-        Ok(Some(false)) => StorageError::Gone,
+        Ok(Some(REMOVED_BY_ADMIN)) => StorageError::Deleted,
+        Ok(Some(REMOVED_EVERYWHERE)) => StorageError::DeletedEverywhere,
+        Ok(Some(_)) => StorageError::Gone,
         Ok(None) => StorageError::NotFound,
         Err(error) => error.into(),
     }

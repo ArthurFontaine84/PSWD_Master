@@ -13,6 +13,9 @@ pub enum SyncState {
     Removed,
     /// Le compte n'est plus membre de ce coffre commun : il a été fermé et supprimé.
     Left,
+    /// Supprimé partout depuis un autre appareil, sans modification ici : il a été fermé et
+    /// supprimé.
+    Deleted,
     Offline,
     /// Le coffre a changé sur le serveur à chaque essai.
     Conflict,
@@ -45,6 +48,7 @@ impl SyncReport {
         let (state, detail) = match outcome {
             Ok(SyncOutcome::NotConnected) => (SyncState::NotConnected, None),
             Ok(SyncOutcome::Left) => (SyncState::Left, None),
+            Ok(SyncOutcome::Deleted) => (SyncState::Deleted, None),
             Ok(SyncOutcome::Removed | SyncOutcome::Done(SyncStatus::Removed)) => {
                 (SyncState::Removed, None)
             }
@@ -87,6 +91,7 @@ mod tests {
         let cases = [
             (Ok(SyncOutcome::NotConnected), report("notConnected", None)),
             (Ok(SyncOutcome::Left), report("left", None)),
+            (Ok(SyncOutcome::Deleted), report("deleted", None)),
             (Ok(SyncOutcome::Removed), report("removed", None)),
             (
                 Ok(SyncOutcome::Done(SyncStatus::Removed)),

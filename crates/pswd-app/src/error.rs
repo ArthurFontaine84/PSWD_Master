@@ -26,6 +26,8 @@ pub enum AppError {
     AlreadyConnected,
     /// Le coffre n'est pas publié sur le serveur de l'appareil (à publier, détaché ou retiré).
     NotPublished(String),
+    /// La copie locale du coffre a des modifications que le serveur n'a pas.
+    Unpublished(String),
 }
 
 impl fmt::Display for AppError {
@@ -61,6 +63,11 @@ impl fmt::Display for AppError {
             Self::NotPublished(name) => write!(
                 f,
                 "le coffre « {name} » n'est pas publié sur le serveur de cet appareil"
+            ),
+            Self::Unpublished(name) => write!(
+                f,
+                "le coffre « {name} » a des modifications que le serveur n'a pas : le \
+                 synchroniser d'abord"
             ),
         }
     }
@@ -167,6 +174,11 @@ mod tests {
             (
                 AppError::NotPublished("famille".to_owned()),
                 "le coffre « famille » n'est pas publié sur le serveur de cet appareil",
+            ),
+            (
+                AppError::Unpublished("perso".to_owned()),
+                "le coffre « perso » a des modifications que le serveur n'a pas : le \
+                 synchroniser d'abord",
             ),
         ];
         for (error, message) in messages {

@@ -85,6 +85,17 @@ impl<T: Terminal, C> App<T, C> {
                 Err(error) => format!("⚠ Coffre « {name} » quitté mais pas supprimé : {error}"),
             });
         }
+        for (name, result) in exchange.deleted {
+            lines.push(match result {
+                Ok(()) => format!(
+                    "Coffre « {name} » supprimé partout depuis un autre appareil : supprimé de cet \
+                     appareil."
+                ),
+                Err(error) => {
+                    format!("⚠ Coffre « {name} » supprimé partout mais pas ici : {error}")
+                }
+            });
+        }
         for line in &lines {
             self.terminal.print(line);
         }
@@ -177,7 +188,7 @@ impl<T: Terminal, C> App<T, C> {
             Ok(outcome) => {
                 self.terminal
                     .print(&format!("⚠ Synchro : {}.", describe(&outcome)));
-                outcome != SyncOutcome::Left
+                !matches!(outcome, SyncOutcome::Left | SyncOutcome::Deleted)
             }
             Err(error) => {
                 self.terminal.print(&format!("⚠ Synchro : {error}."));
@@ -221,6 +232,9 @@ fn describe(outcome: &SyncOutcome) -> String {
         SyncOutcome::Left => {
             "ce compte n'est plus membre du coffre : il a été supprimé de cet appareil".to_owned()
         }
+        SyncOutcome::Deleted => "coffre supprimé partout depuis un autre appareil : il a été \
+                                 supprimé de cet appareil"
+            .to_owned(),
         SyncOutcome::Done(SyncStatus::Synced) => "coffre à jour".to_owned(),
         SyncOutcome::Done(SyncStatus::Offline(error)) => {
             format!("hors ligne ({error}) ; les modifications seront publiées plus tard")
@@ -480,7 +494,15 @@ mod tests {
         let env = TestEnv::with_vault();
         env.connect_admin("a");
         env.connect_same_account("a", "b");
-        env.vaults("a").delete_everywhere("perso").unwrap();
+        let id = env
+            .config("a")
+            .vault("perso")
+            .unwrap()
+            .remote
+            .clone()
+            .unwrap()
+            .id;
+        env.vaults("a").delete_server_vault(id).unwrap();
 
         assert_eq!(
             output(&env, "b", &[], Command::Sync),
@@ -493,6 +515,20 @@ mod tests {
         let shown = output(&env, "b", &[PASSWORD, "sync"], open());
         assert!(shown.ends_with("Synchro : coffre à jour."), "{shown}");
         assert!(status(&env, "b").ends_with("  perso : à jour"));
+    }
+
+    #[test]
+    fn a_vault_deleted_everywhere_leaves_the_other_devices() {
+        let env = TestEnv::with_vault();
+        env.connect_admin("a");
+        env.connect_same_account("a", "b");
+        env.vaults("a").delete_everywhere("perso").unwrap();
+        assert_eq!(
+            output(&env, "b", &[], Command::Sync),
+            "Coffre « perso » supprimé partout depuis un autre appareil : supprimé de cet \
+             appareil."
+        );
+        assert!(env.config("b").vaults.is_empty());
     }
 
     #[test]

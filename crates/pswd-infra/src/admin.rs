@@ -97,12 +97,13 @@ impl ServerClient {
         self.get_json("/v1/server")
     }
 
-    /// Supprime du serveur le coffre privé `vault` du compte ; les autres appareils du compte le
-    /// verront retiré.
+    /// Supprime partout le coffre privé `vault` du compte, ou le coffre commun dont il est le
+    /// dernier membre : les appareils de ses membres en suppriment leur copie.
     ///
     /// # Errors
     ///
-    /// Si le coffre est commun, inconnu ou déjà retiré, ou si le serveur est injoignable.
+    /// Si le coffre est commun et a d'autres membres, s'il est inconnu ou déjà retiré, ou si le
+    /// serveur est injoignable.
     pub fn delete_own_vault(&self, vault: Uuid) -> Result<(), PortError> {
         let response = self.request(&Method::DELETE, &format!("/v1/vaults/{vault}"), None)?;
         done(
@@ -110,7 +111,7 @@ impl ServerClient {
             &[
                 (
                     StatusCode::BAD_REQUEST,
-                    "un coffre commun se quitte : il ne se supprime pas du serveur",
+                    "un coffre commun qui a d'autres membres se quitte : il ne se supprime pas du serveur",
                 ),
                 (StatusCode::NOT_FOUND, UNKNOWN_VAULT),
             ],
@@ -427,16 +428,22 @@ mod tests {
     }
 
     #[test]
-    fn an_account_deletes_its_own_private_vault() {
-        let (arthur, _) = server();
+    fn an_account_deletes_its_own_vaults() {
+        let (arthur, camille) = server();
         let private = published(&arthur, "perso", false);
         let shared = published(&arthur, "famille", true);
+        let invitation = arthur
+            .invite(shared, account(&arthur, "Camille").id)
+            .unwrap();
+        camille.accept_invitation(invitation).unwrap();
         assert_eq!(
             arthur.delete_own_vault(shared),
             Err(refused(
-                "un coffre commun se quitte : il ne se supprime pas du serveur"
+                "un coffre commun qui a d'autres membres se quitte : il ne se supprime pas du serveur"
             ))
         );
+        camille.leave(shared).unwrap();
+        arthur.delete_own_vault(shared).unwrap();
         arthur.delete_own_vault(private).unwrap();
         assert!(arthur.delete_own_vault(private).unwrap_err().is_removed());
         assert_eq!(

@@ -181,8 +181,10 @@ pub enum ApiError {
     NotFound,
     /// Le compte a quitté le coffre commun ou en a été retiré.
     Gone,
-    /// Le coffre a été supprimé du serveur.
+    /// Le coffre a été supprimé du serveur par un administrateur.
     Deleted,
+    /// Le coffre a été supprimé partout par un de ses membres.
+    DeletedEverywhere,
     /// Coffre privé à partager ou à quitter, coffre commun à supprimer, ou compte inconnu.
     BadRequest,
     /// Compte déjà membre ou invité, coffre qui a encore des membres, ou dernier administrateur.
@@ -203,6 +205,7 @@ impl From<StorageError> for ApiError {
             StorageError::NotFound => Self::NotFound,
             StorageError::Gone => Self::Gone,
             StorageError::Deleted => Self::Deleted,
+            StorageError::DeletedEverywhere => Self::DeletedEverywhere,
             StorageError::NotShared | StorageError::UnknownAccount | StorageError::SharedVault => {
                 Self::BadRequest
             }
@@ -223,10 +226,11 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match self {
             Self::NotFound => StatusCode::NOT_FOUND,
-            // Les appareils suppriment leur copie d'un coffre quitté, gardent celle d'un coffre
-            // supprimé : la raison accompagne le 410.
+            // Les appareils suppriment leur copie d'un coffre quitté ou supprimé partout, gardent
+            // celle d'un coffre supprimé par un administrateur : la raison accompagne le 410.
             Self::Gone => return gone("left"),
             Self::Deleted => return gone("deleted"),
+            Self::DeletedEverywhere => return gone("deleted_everywhere"),
             Self::Conflict => StatusCode::CONFLICT,
             Self::PreconditionFailed => StatusCode::PRECONDITION_FAILED,
             Self::PreconditionRequired => StatusCode::PRECONDITION_REQUIRED,

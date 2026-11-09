@@ -10,7 +10,7 @@ use super::sharing::{
     ACCOUNT_EXISTS, AccountSummary, DELETE_FORMER, DELETE_MEMBER, INSERT_FORMER, INSERT_MEMBER,
     LIST_MEMBERS, account, exists,
 };
-use super::vaults::summary;
+use super::vaults::{REMOVED_BY_ADMIN, REMOVED_EVERYWHERE, summary};
 use super::{Storage, StorageError};
 
 const LIST_ACCOUNTS: &str = "SELECT id, name, is_admin FROM accounts ORDER BY name, id";
@@ -36,16 +36,18 @@ const LIST_SERVER_VAULTS: &str = "SELECT id, name, shared, current_version FROM 
 const VAULT_EXISTS: &str = "SELECT EXISTS (SELECT 1 FROM vaults WHERE id = ?1 AND NOT removed)";
 const VAULT_SHARED: &str = "SELECT shared FROM vaults WHERE id = ?1 AND NOT removed";
 const HAS_MEMBERS: &str = "SELECT EXISTS (SELECT 1 FROM vault_members WHERE vault_id = ?1)";
+const OTHER_MEMBERS: &str =
+    "SELECT EXISTS (SELECT 1 FROM vault_members WHERE vault_id = ?1 AND account_id != ?2)";
 /// Les membres deviennent d'anciens membres ; le contenu, les versions et les invitations sont
 /// effacés.
-const REMOVE_VAULT: [&str; 5] = [
+const REMOVE_VAULT: [&str; 4] = [
     "INSERT OR IGNORE INTO former_members (vault_id, account_id)
      SELECT vault_id, account_id FROM vault_members WHERE vault_id = ?1",
     "DELETE FROM vault_members WHERE vault_id = ?1",
     "DELETE FROM invitations WHERE vault_id = ?1",
     "DELETE FROM vault_versions WHERE vault_id = ?1",
-    "UPDATE vaults SET removed = 1, current_version = NULL WHERE id = ?1",
 ];
+const MARK_REMOVED: &str = "UPDATE vaults SET removed = ?2, current_version = NULL WHERE id = ?1";
 const DELETE_INVITATION_TO: &str =
     "DELETE FROM invitations WHERE vault_id = ?1 AND account_id = ?2";
 const INSERT_RESTORED: &str =
@@ -240,24 +242,28 @@ impl Storage {
     pub fn delete_vault(&mut self, vault: Uuid) -> Result<(), StorageError> {
         let tx = self.conn.transaction_with_behavior(Immediate)?;
         ensure_vault_exists(&tx, vault)?;
-        remove_vault(&tx, vault)?;
+        remove_vault(&tx, vault, REMOVED_BY_ADMIN)?;
         tx.commit()?;
         Ok(())
     }
 
-    /// `account` supprime son coffre privé, comme [`Storage::delete_vault`].
+    /// `account` supprime partout son coffre privé, ou le coffre commun dont il est le dernier
+    /// membre, comme [`Storage::delete_vault`] ; les appareils de ses membres en suppriment leur
+    /// copie.
     ///
     /// # Errors
     ///
-    /// [`StorageError::NotFound`], [`StorageError::Gone`] ou [`StorageError::Deleted`] si `account`
-    /// n'est pas membre,
-    /// [`StorageError::SharedVault`] pour un coffre commun, qui se quitte.
-    pub fn delete_private_vault(&mut self, vault: Uuid, account: Uuid) -> Result<(), StorageError> {
+    /// [`StorageError::NotFound`], [`StorageError::Gone`], [`StorageError::Deleted`] ou
+    /// [`StorageError::DeletedEverywhere`] si `account` n'est pas membre,
+    /// [`StorageError::SharedVault`] pour un coffre commun qui a d'autres membres : il se quitte.
+    pub fn delete_own_vault(&mut self, vault: Uuid, account: Uuid) -> Result<(), StorageError> {
         let tx = self.conn.transaction_with_behavior(Immediate)?;
-        if super::vaults::shared_if_member(&tx, vault, account)? {
+        if super::vaults::shared_if_member(&tx, vault, account)?
+            && exists(&tx, OTHER_MEMBERS, params![vault, account])?
+        {
             return Err(StorageError::SharedVault);
         }
-        remove_vault(&tx, vault)?;
+        remove_vault(&tx, vault, REMOVED_EVERYWHERE)?;
         tx.commit()?;
         Ok(())
     }
@@ -412,10 +418,11 @@ fn ensure_vault_exists(conn: &Connection, vault: Uuid) -> Result<(), StorageErro
     }
 }
 
-fn remove_vault(conn: &Connection, vault: Uuid) -> Result<(), StorageError> {
+fn remove_vault(conn: &Connection, vault: Uuid, removed: i64) -> Result<(), StorageError> {
     for statement in REMOVE_VAULT {
         conn.execute(statement, params![vault])?;
     }
+    conn.execute(MARK_REMOVED, params![vault, removed])?;
     Ok(())
 }
 
@@ -755,31 +762,51 @@ mod tests {
     }
 
     #[test]
-    fn a_member_deletes_only_a_private_vault() {
+    fn a_member_deletes_a_private_vault_everywhere() {
         let mut base = base();
         let perso = base
             .storage
             .create_vault(base.camille, "perso", false)
             .unwrap();
         assert!(matches!(
-            base.storage
-                .delete_private_vault(base.famille, base.camille),
-            Err(StorageError::SharedVault)
-        ));
-        assert!(matches!(
-            base.storage.delete_private_vault(perso, base.arthur),
+            base.storage.delete_own_vault(perso, base.arthur),
             Err(StorageError::NotFound)
         ));
-        base.storage
-            .delete_private_vault(perso, base.camille)
-            .unwrap();
+        base.storage.delete_own_vault(perso, base.camille).unwrap();
         assert!(matches!(
             base.storage.fetch(perso, base.camille),
-            Err(StorageError::Deleted)
+            Err(StorageError::DeletedEverywhere)
         ));
         assert!(matches!(
-            base.storage.delete_private_vault(perso, base.camille),
-            Err(StorageError::Deleted)
+            base.storage.delete_own_vault(perso, base.camille),
+            Err(StorageError::DeletedEverywhere)
+        ));
+    }
+
+    #[test]
+    fn only_the_last_member_deletes_a_shared_vault() {
+        let mut base = base();
+        assert!(matches!(
+            base.storage.delete_own_vault(base.famille, base.camille),
+            Err(StorageError::SharedVault)
+        ));
+        base.storage.leave(base.famille, base.arthur).unwrap();
+        let invitation = base
+            .storage
+            .invite(base.famille, base.camille, base.dominique, NOW)
+            .unwrap();
+        base.storage
+            .delete_own_vault(base.famille, base.camille)
+            .unwrap();
+        for account in [base.arthur, base.camille] {
+            assert!(matches!(
+                base.storage.fetch(base.famille, account),
+                Err(StorageError::DeletedEverywhere)
+            ));
+        }
+        assert!(matches!(
+            base.storage.accept_invitation(invitation, base.dominique),
+            Err(StorageError::NotFound)
         ));
     }
 
@@ -1003,7 +1030,7 @@ mod tests {
         base.storage.break_for_tests("vault_members");
         for result in [
             base.storage.attach(famille, base.dominique),
-            base.storage.delete_private_vault(famille, base.arthur),
+            base.storage.delete_own_vault(famille, base.arthur),
         ] {
             assert!(matches!(result, Err(StorageError::Database(_))));
         }
