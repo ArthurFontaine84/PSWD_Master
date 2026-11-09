@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ignored-vaults"
+description = "Enables the ignored_vaults command without any pre-configured scope."
+commands.allow = ["ignored_vaults"]
+
+[[permission]]
+identifier = "deny-ignored-vaults"
+description = "Denies the ignored_vaults command without any pre-configured scope."
+commands.deny = ["ignored_vaults"]

@@ -13,7 +13,7 @@ use crate::editing::{EntryInput, HistoryItem};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
 use crate::files;
-use crate::server::{Disconnection, Exchange, ServerStatus};
+use crate::server::{Disconnection, Exchange, IgnoredVault, ServerStatus};
 use crate::settings::Settings;
 use crate::sharing::{Invitation, Member, Members};
 use crate::state::{AppState, Notifier, VaultInfo};
@@ -382,6 +382,28 @@ pub async fn delete_vault_everywhere<R: Runtime>(
     .await
 }
 
+/// Retire le coffre publié `name` de cet appareil ; il reste sur le serveur. Le nom est retapé.
+#[tauri::command]
+pub async fn forget_vault<R: Runtime>(
+    app: AppHandle<R>,
+    name: String,
+    confirmation: String,
+) -> Result<(), UiError> {
+    in_background(app, move |state| state.forget(&name, &confirmation)).await
+}
+
+/// Coffres du serveur retirés de cet appareil.
+#[tauri::command]
+pub async fn ignored_vaults<R: Runtime>(app: AppHandle<R>) -> Result<Vec<IgnoredVault>, UiError> {
+    in_background(app, AppState::ignored_vaults).await
+}
+
+/// Télécharge de nouveau un coffre retiré de cet appareil, par un échange.
+#[tauri::command]
+pub async fn download_again<R: Runtime>(app: AppHandle<R>, id: Uuid) -> Result<Exchange, UiError> {
+    in_background(app, move |state| state.download_again(id)).await
+}
+
 #[tauri::command]
 pub async fn admin_accounts<R: Runtime>(app: AppHandle<R>) -> Result<Vec<AdminAccount>, UiError> {
     in_background(app, AppState::admin_accounts).await
@@ -630,6 +652,9 @@ mod tests {
             check_vault,
             account_status,
             delete_vault_everywhere,
+            forget_vault,
+            ignored_vaults,
+            download_again,
             admin_accounts,
             add_member,
             delete_account,
@@ -1061,16 +1086,24 @@ mod tests {
                 "notDeleted": [],
             }))
         );
+        let forget = json!({ "name": "perso", "confirmation": "perso" });
+        assert_eq!(app.call("forget_vault", forget.clone()), Ok(Value::Null));
+        let ignored = app.call("ignored_vaults", json!({})).unwrap();
+        assert_eq!(ignored[0]["name"], "perso");
+        let again = json!({ "id": ignored[0]["id"] });
+        let downloaded = app.call("download_again", again.clone()).unwrap();
+        assert_eq!(downloaded["downloaded"][0]["localName"], "perso");
         let key = app.call("add_device_key", json!({})).unwrap();
         assert_eq!(key.as_str().unwrap().split('-').count(), 13, "{key}");
         assert_eq!(
             app.call("disconnect_server", json!({ "keepLocal": true })),
             Ok(json!({ "revokeError": null, "removed": [], "kept": [] }))
         );
-        assert_eq!(
-            app.call("add_device_key", json!({})),
-            Err(json!({ "code": "notConnected", "detail": null }))
-        );
+        let not_connected = Err(json!({ "code": "notConnected", "detail": null }));
+        assert_eq!(app.call("add_device_key", json!({})), not_connected);
+        assert_eq!(app.call("forget_vault", forget), not_connected);
+        assert_eq!(app.call("ignored_vaults", json!({})), not_connected);
+        assert_eq!(app.call("download_again", again), not_connected);
     }
 
     #[test]

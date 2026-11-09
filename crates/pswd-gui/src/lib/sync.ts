@@ -22,6 +22,8 @@ export function syncMessage(report: SyncReport): string {
       return texts.syncRemoved;
     case "left":
       return texts.syncLeft;
+    case "deleted":
+      return texts.syncDeleted;
     case "offline":
       return texts.syncOffline(detail);
     case "conflict":
@@ -40,7 +42,8 @@ export function syncProblem(report: SyncReport): string | null {
 
 /**
  * Un seul coffre échangé est nommé ; plusieurs sont comptés en une phrase. Les problèmes et ce
- * qui demande l'attention (coffre renommé, supprimé du serveur ou quitté) restent un par un.
+ * qui demande l'attention (coffre renommé, supprimé, absent du serveur ou quitté) restent un par
+ * un.
  */
 export function exchangeOutcome(exchange: Exchange): Outcome {
   const each = [
@@ -62,6 +65,7 @@ export function exchangeOutcome(exchange: Exchange): Outcome {
     ...(each.length > 1 ? [texts.exchangeSummary(counts), ...renamed] : each),
     ...(exchange.removed.length > 0 ? [texts.absentFromAccount(exchange.removed)] : []),
     ...exchange.left.map((name) => texts.leftElsewhere(name)),
+    ...exchange.deleted.map((name) => texts.deletedElsewhere(name)),
   ];
   const problems = [
     ...exchange.notDownloaded.map(({ name, reason }) => texts.notDownloaded(name, reason)),
@@ -69,6 +73,7 @@ export function exchangeOutcome(exchange: Exchange): Outcome {
     ...exchange.needsUnlock.map((name) => texts.needsUnlock(name)),
     ...exchange.notUpdated.map(({ name, reason }) => texts.notUpdated(name, reason)),
     ...exchange.notLeft.map(({ name, reason }) => texts.notLeft(name, reason)),
+    ...exchange.notDeleted.map(({ name, reason }) => texts.notDeleted(name, reason)),
   ];
   if (done.length === 0 && problems.length === 0) {
     done.push(texts.nothingToExchange);

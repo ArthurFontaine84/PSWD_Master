@@ -18,6 +18,8 @@ const nothing: Exchange = {
   removed: [],
   left: [],
   notLeft: [],
+  deleted: [],
+  notDeleted: [],
 };
 
 describe("syncProblem", () => {
@@ -35,6 +37,9 @@ describe("syncProblem", () => {
     );
     expect(syncProblem(report("left"))).toBe(
       "Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil.",
+    );
+    expect(syncProblem(report("deleted"))).toBe(
+      "Ce coffre a été supprimé partout depuis un autre appareil : il a été supprimé de cet appareil.",
     );
     expect(syncProblem(report("conflict"))).toBe(
       "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",
@@ -81,6 +86,8 @@ describe("exchangeOutcome", () => {
       removed: ["ancien"],
       left: ["club"],
       notLeft: [{ name: "asso", reason: "accès refusé" }],
+      deleted: ["vieux"],
+      notDeleted: [{ name: "garde", reason: "fichier verrouillé" }],
     };
     expect(exchangeOutcome(exchange)).toEqual({
       done: [
@@ -88,6 +95,7 @@ describe("exchangeOutcome", () => {
         "Coffre « travail » enregistré sous le nom « travail-0123abcd » : ce nom était déjà pris.",
         "Coffre « ancien » absent de votre compte sur le serveur : gardé sur cet appareil. Pour le publier, ouvrez-le puis appuyez sur « Synchroniser ».",
         "Coffre « club » supprimé de cet appareil : vous n'êtes plus membre de ce coffre.",
+        "Coffre « vieux » supprimé de cet appareil : il a été supprimé partout depuis un autre appareil.",
       ],
       problems: [
         "Coffre « famille » du serveur non téléchargé : disque plein.",
@@ -95,6 +103,7 @@ describe("exchangeOutcome", () => {
         "Le coffre « voiture » a été modifié ici et sur le serveur : déverrouillez-le pour terminer la synchro.",
         "Coffre « jeux » non synchronisé : fichier introuvable.",
         "Vous n'êtes plus membre du coffre « asso », mais il n'a pas pu être supprimé de cet appareil : accès refusé.",
+        "Le coffre « garde » a été supprimé partout, mais n'a pas pu être supprimé de cet appareil : fichier verrouillé.",
       ],
     });
   });

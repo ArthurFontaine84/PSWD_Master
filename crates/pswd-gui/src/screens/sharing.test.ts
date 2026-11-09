@@ -4,6 +4,7 @@ import {
   acceptInvitation,
   createVault,
   deleteInvitation,
+  deleteVaultEverywhere,
   inviteMember,
   leaveVault,
   listAccounts,
@@ -18,6 +19,7 @@ import {
   vaultMembers,
   type Exchange,
   type Invitation,
+  type Members,
   type ServerStatus,
 } from "../lib/api";
 import Toast from "../components/Toast.svelte";
@@ -42,6 +44,7 @@ vi.mock("../lib/api", () => ({
   acceptInvitation: vi.fn(),
   deleteInvitation: vi.fn(),
   leaveVault: vi.fn(),
+  deleteVaultEverywhere: vi.fn(),
 }));
 
 const arthur = { id: "a1", name: "Arthur" };
@@ -60,6 +63,8 @@ const nothing: Exchange = {
   removed: [],
   left: [],
   notLeft: [],
+  deleted: [],
+  notDeleted: [],
 };
 const shared: ServerStatus = {
   address: "pswd.local:8443",
@@ -81,6 +86,7 @@ beforeEach(() => {
   vi.mocked(listEntries).mockResolvedValue([]);
   vi.mocked(listTags).mockResolvedValue([]);
   vi.mocked(onVaultSynced).mockResolvedValue(vi.fn());
+  vi.mocked(vaultMembers).mockResolvedValue({ members: [arthur, camille], invitations: [] });
 });
 
 function list() {
@@ -284,8 +290,52 @@ describe("leaving a shared vault", () => {
   it("can be cancelled", async () => {
     await manage("famille");
     await fireEvent.click(screen.getByRole("menuitem", { name: "Quitter ce coffre" }));
-    await fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Annuler" }));
     expect(leaveVault).not.toHaveBeenCalled();
     expect(screen.getByText("Choisissez une entrée dans la liste.")).toBeInTheDocument();
+  });
+
+  it("is not offered as a deletion from this device only", async () => {
+    await manage("famille");
+    expect(screen.queryByRole("menuitem", { name: "Supprimer ce coffre" })).not.toBeInTheDocument();
+  });
+
+  it("is still offered when the members cannot be read", async () => {
+    vi.mocked(vaultMembers).mockRejectedValue({ code: "serverUnreachable", detail: null });
+    await manage("famille");
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Quitter ce coffre" }));
+    expect(await screen.findByRole("button", { name: "Quitter" })).toBeEnabled();
+  });
+
+  it("becomes a deletion everywhere for the last member", async () => {
+    let resolve: (members: Members) => void = () => undefined;
+    vi.mocked(vaultMembers).mockReturnValue(new Promise((done) => (resolve = done)));
+    vi.mocked(deleteVaultEverywhere)
+      .mockRejectedValueOnce({ code: "serverUnreachable", detail: null })
+      .mockResolvedValue();
+    const onDeleted = vi.fn();
+    render(OpenVault, { vault: { name: "famille", entries: 0 }, onLocked: vi.fn(), onExpired: vi.fn(), onDeleted });
+    await vi.waitFor(() => {
+      expect(serverStatus).toHaveBeenCalled();
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Gérer le coffre" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Quitter ce coffre" }));
+    expect(screen.getByText("Chargement…")).toBeInTheDocument();
+    resolve({ members: [arthur], invitations: [] });
+    expect(await screen.findByText(/Vous êtes le dernier membre du coffre « famille »/)).toBeInTheDocument();
+    expect(vaultMembers).toHaveBeenCalledWith("famille");
+    expect(screen.queryByRole("button", { name: "Quitter" })).not.toBeInTheDocument();
+    const confirm = screen.getByRole("button", { name: "Supprimer" });
+    expect(confirm).toBeDisabled();
+    await fireEvent.input(screen.getByLabelText("Nom du coffre"), { target: { value: "famille" } });
+    await fireEvent.click(confirm);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Serveur injoignable.");
+    expect(onDeleted).not.toHaveBeenCalled();
+    await fireEvent.click(confirm);
+    await vi.waitFor(() => {
+      expect(onDeleted).toHaveBeenCalledWith("Coffre « famille » supprimé.");
+    });
+    expect(deleteVaultEverywhere).toHaveBeenCalledWith("famille", "famille");
+    expect(leaveVault).not.toHaveBeenCalled();
   });
 });

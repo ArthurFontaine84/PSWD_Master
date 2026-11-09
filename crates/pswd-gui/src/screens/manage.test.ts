@@ -7,6 +7,7 @@ import {
   changePassword,
   deleteVault,
   deleteVaultEverywhere,
+  forgetVault,
   getSettings,
   importEntries,
   listEntries,
@@ -43,6 +44,7 @@ vi.mock("../lib/api", () => ({
   importEntries: vi.fn(),
   deleteVault: vi.fn(),
   deleteVaultEverywhere: vi.fn(),
+  forgetVault: vi.fn(),
   backupFileName: vi.fn(),
   backupToFile: vi.fn(),
   backupFileContents: vi.fn(),
@@ -186,31 +188,29 @@ describe("deleting the vault", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Erreur de fichier : occupé");
     await fireEvent.click(confirm());
     await vi.waitFor(() => {
-      expect(onDeleted).toHaveBeenCalled();
+      expect(onDeleted).toHaveBeenCalledWith("Coffre « perso » supprimé.");
     });
     expect(deleteVault).toHaveBeenCalledWith("perso", "perso");
     await fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
     expect(screen.getByText("Choisissez une entrée dans la liste.")).toBeInTheDocument();
   });
 
-  it("offers to delete a private vault from the server too", async () => {
-    vi.mocked(deleteVaultEverywhere).mockResolvedValue();
-    const shared = { address: "pswd.local:8443", trouble: null, vaults: [{ name: "perso", state: "synced" as const, shared: true }] };
-    vi.mocked(serverStatus).mockResolvedValueOnce(shared);
-    const { unmount } = render(OpenVault, {
-      vault: { name: "perso", entries: 0 },
-      onLocked: vi.fn(),
-      onExpired: vi.fn(),
-      onDeleted: vi.fn(),
+  it("deletes a vault absent from the server on this device only", async () => {
+    vi.mocked(serverStatus).mockResolvedValue({
+      address: "pswd.local:8443",
+      trouble: null,
+      vaults: [{ name: "perso", state: "removed", shared: false }],
     });
+    await manage();
     await vi.waitFor(() => {
       expect(serverStatus).toHaveBeenCalled();
     });
-    await fireEvent.click(screen.getByRole("button", { name: "Gérer le coffre" }));
-    await fireEvent.click(await screen.findByRole("menuitem", { name: "Supprimer ce coffre" }));
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Supprimer ce coffre" }));
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
-    unmount();
+  });
 
+  it("deletes a published private vault everywhere by default", async () => {
+    vi.mocked(deleteVaultEverywhere).mockResolvedValue();
     vi.mocked(serverStatus).mockResolvedValue({
       address: "pswd.local:8443",
       trouble: null,
@@ -218,17 +218,42 @@ describe("deleting the vault", () => {
     });
     const { onDeleted } = await manage();
     await fireEvent.click(screen.getByRole("menuitem", { name: "Supprimer ce coffre" }));
-    const local = await screen.findByRole("radio", { name: "Sur cet appareil seulement" });
-    expect(local).toBeChecked();
-    await fireEvent.click(screen.getByRole("radio", { name: "Sur cet appareil et sur le serveur" }));
-    expect(screen.getByText(/aussi effacés du serveur/)).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: "Supprimer partout" })).toBeChecked();
+    expect(screen.getByText(/puis de vos autres appareils à leur prochain échange/)).toBeInTheDocument();
     await type("Nom du coffre", "perso");
     await fireEvent.click(screen.getByRole("button", { name: "Supprimer" }));
     await vi.waitFor(() => {
-      expect(onDeleted).toHaveBeenCalled();
+      expect(onDeleted).toHaveBeenCalledWith("Coffre « perso » supprimé.");
     });
     expect(deleteVaultEverywhere).toHaveBeenCalledWith("perso", "perso");
     expect(deleteVault).not.toHaveBeenCalled();
+    expect(forgetVault).not.toHaveBeenCalled();
+  });
+
+  it("can remove a published private vault from this device only", async () => {
+    vi.mocked(forgetVault)
+      .mockRejectedValueOnce({ code: "unpublishedChanges", detail: "perso" })
+      .mockResolvedValue();
+    vi.mocked(serverStatus).mockResolvedValue({
+      address: "pswd.local:8443",
+      trouble: null,
+      vaults: [{ name: "perso", state: "synced", shared: false }],
+    });
+    const { onDeleted } = await manage();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Supprimer ce coffre" }));
+    await fireEvent.click(await screen.findByRole("radio", { name: "Retirer de cet appareil" }));
+    expect(screen.getByText(/Le coffre reste sur le serveur et sur vos autres appareils/)).toBeInTheDocument();
+    await type("Nom du coffre", "perso");
+    await fireEvent.click(screen.getByRole("button", { name: "Retirer" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Le coffre « perso » a des modifications que le serveur n'a pas encore : synchronisez-le d'abord.",
+    );
+    await fireEvent.click(screen.getByRole("button", { name: "Retirer" }));
+    await vi.waitFor(() => {
+      expect(onDeleted).toHaveBeenCalledWith("Coffre « perso » retiré de cet appareil ; il reste sur le serveur.");
+    });
+    expect(forgetVault).toHaveBeenCalledWith("perso", "perso");
+    expect(deleteVaultEverywhere).not.toHaveBeenCalled();
   });
 
   it("is closed by the back button", async () => {

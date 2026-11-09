@@ -223,13 +223,12 @@
           onAdmin={(address, publicAddress) => (screen = { kind: "admin", address, publicAddress })}
         />
       {:else}
-        {@const name = screen.vault.name}
         <OpenVault
           vault={screen.vault}
           onLocked={() => (screen = { kind: "list" })}
           onExpired={showLocked}
-          onDeleted={() => {
-            showToast(texts.vaultDeleted(name));
+          onDeleted={(message) => {
+            showToast(message);
             screen = { kind: "list" };
           }}
         />

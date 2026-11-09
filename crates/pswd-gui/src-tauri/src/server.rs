@@ -6,8 +6,10 @@ use pswd_app::{AppError, KeptReason, Update, VaultState};
 use pswd_core::{ConnectionKey, Secret, Timestamp};
 use serde::Serialize;
 
+use uuid::Uuid;
+
 use crate::error::UiError;
-use crate::state::AppState;
+use crate::state::{AppState, confirm};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ServerStatus {
@@ -83,6 +85,13 @@ struct Failure {
     name: String,
     /// Message de l'erreur, en français.
     reason: String,
+}
+
+/// Coffre du serveur retiré de cet appareil, à télécharger de nouveau sur demande.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IgnoredVault {
+    id: Uuid,
+    name: String,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
@@ -185,11 +194,49 @@ impl AppState {
 
     /// À appeler pendant [`AppState::exclusive`].
     fn exchange_now(&self) -> Result<Exchange, AppError> {
-        let exchange = Exchange::from(self.observe(self.vaults.exchange())?);
+        self.exchanged(self.vaults.exchange())
+    }
+
+    /// Un coffre ouvert que l'échange vient de supprimer est fermé.
+    fn exchanged(&self, done: Result<pswd_app::Exchange, AppError>) -> Result<Exchange, AppError> {
+        let exchange = Exchange::from(self.observe(done)?);
         for name in exchange.left.iter().chain(&exchange.deleted) {
             self.close_without_publishing(name);
         }
         Ok(exchange)
+    }
+
+    /// Retire de cet appareil le coffre publié `name`, qui reste sur le serveur ; le nom est
+    /// retapé pour confirmer. Le coffre ouvert n'est fermé qu'une fois retiré : refusé, il reste
+    /// ouvert, à synchroniser.
+    pub fn forget(&self, name: &str, confirmation: &str) -> Result<(), UiError> {
+        confirm(name, confirmation)?;
+        let _one_at_a_time = self.exclusive();
+        let forgotten = self.vaults.forget(name);
+        self.observe(forgotten).map_err(server_error)?;
+        self.close_without_publishing(name);
+        Ok(())
+    }
+
+    /// Coffres du serveur retirés de cet appareil.
+    pub fn ignored_vaults(&self) -> Result<Vec<IgnoredVault>, UiError> {
+        let ignored = self
+            .observe(self.vaults.ignored_vaults())
+            .map_err(server_error)?;
+        Ok(ignored
+            .into_iter()
+            .map(|vault| IgnoredVault {
+                id: vault.id,
+                name: vault.name,
+            })
+            .collect())
+    }
+
+    /// Télécharge de nouveau le coffre `id`, retiré de cet appareil, par un échange.
+    pub fn download_again(&self, id: Uuid) -> Result<Exchange, UiError> {
+        let _one_at_a_time = self.exclusive();
+        self.exchanged(self.vaults.download_again(id))
+            .map_err(server_error)
     }
 
     /// Clé de connexion d'un appareil de plus pour le même compte, à montrer une seule fois.
@@ -794,6 +841,47 @@ mod tests {
                 "removed": [],
                 "kept": [{ "name": "perso", "reason": "serveur injoignable" }],
             })
+        );
+    }
+
+    #[test]
+    fn a_vault_removed_from_the_device_comes_back_on_demand() {
+        let dir = TempDir::new().unwrap();
+        let state = device(&dir);
+        create(&state, "perso");
+        create(&state, "travail");
+        connect_admin(&state);
+        state.exchange().unwrap();
+        add_note(&state, "Wi-Fi");
+        state.unlock("travail", &secret(PASSWORD)).unwrap();
+        let code = |error: UiError| sent(&error)["code"].clone();
+        assert_eq!(
+            code(state.forget("perso", "autre").unwrap_err()),
+            "confirmationMismatch"
+        );
+        assert_eq!(
+            code(state.forget("perso", "perso").unwrap_err()),
+            "unpublishedChanges"
+        );
+
+        state.forget("travail", " travail ").unwrap();
+        assert_eq!(state.current(), None);
+        let names: Vec<String> = state.vaults.config().unwrap().vaults.into_keys().collect();
+        assert_eq!(names, ["perso"]);
+        let ignored = state.ignored_vaults().unwrap();
+        assert_eq!(sent(&ignored)[0]["name"], "travail");
+        let downloaded = sent(&state.download_again(ignored[0].id).unwrap());
+        assert_eq!(downloaded["downloaded"][0]["localName"], "travail");
+        assert!(state.ignored_vaults().unwrap().is_empty());
+
+        go_offline(&dir);
+        assert_eq!(
+            code(state.ignored_vaults().unwrap_err()),
+            "serverUnreachable"
+        );
+        assert_eq!(
+            code(state.download_again(ignored[0].id).unwrap_err()),
+            "serverUnreachable"
         );
     }
 }

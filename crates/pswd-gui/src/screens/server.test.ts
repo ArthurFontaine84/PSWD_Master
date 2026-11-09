@@ -5,6 +5,8 @@ import {
   addDeviceKey,
   connectServer,
   disconnectServer,
+  downloadAgain,
+  ignoredVaults,
   refreshServer,
   serverStatus,
   syncServer,
@@ -23,6 +25,8 @@ vi.mock("../lib/api", () => ({
   syncServer: vi.fn(),
   addDeviceKey: vi.fn(),
   disconnectServer: vi.fn(),
+  ignoredVaults: vi.fn(),
+  downloadAgain: vi.fn(),
 }));
 
 const disconnected: ServerStatus = { address: null, trouble: null, vaults: [] };
@@ -39,11 +43,14 @@ const nothing: Exchange = {
   removed: [],
   left: [],
   notLeft: [],
+  deleted: [],
+  notDeleted: [],
 };
 
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(accountStatus).mockResolvedValue(account("Camille", false));
+  vi.mocked(ignoredVaults).mockResolvedValue([]);
   render(Toast);
 });
 
@@ -142,6 +149,39 @@ describe("Server, before connecting", () => {
 });
 
 describe("Server, once connected", () => {
+  it("lists the vaults removed from this device and downloads them again", async () => {
+    vi.mocked(ignoredVaults)
+      .mockResolvedValueOnce([{ id: "v1", name: "perso" }])
+      .mockResolvedValue([]);
+    vi.mocked(downloadAgain)
+      .mockRejectedValueOnce({ code: "serverUnreachable", detail: null })
+      .mockResolvedValue({ ...nothing, downloaded: [{ name: "perso", localName: "perso" }] });
+    show(connected);
+    expect(await screen.findByRole("heading", { name: "Coffres retirés de cet appareil" })).toBeInTheDocument();
+    const again = screen.getByRole("button", { name: "Télécharger de nouveau « perso »" });
+    expect(again).toHaveTextContent("Télécharger");
+    await fireEvent.click(again);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Serveur injoignable.");
+    await fireEvent.click(again);
+    expect(await screen.findByText("Coffre « perso » téléchargé.")).toBeInTheDocument();
+    expect(downloadAgain).toHaveBeenCalledWith("v1");
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Coffres retirés de cet appareil" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("does not list the vaults removed from this device without the server", async () => {
+    vi.mocked(ignoredVaults).mockRejectedValue({ code: "serverUnreachable", detail: null });
+    show(connected);
+    await vi.waitFor(() => {
+      expect(ignoredVaults).toHaveBeenCalled();
+    });
+    expect(screen.queryByRole("heading", { name: "Coffres retirés de cet appareil" })).not.toBeInTheDocument();
+    show({ ...connected, trouble: { since: 0, reason: "serveur injoignable" } });
+    expect(await screen.findAllByText(/Échanges impossibles depuis/)).not.toHaveLength(0);
+    expect(ignoredVaults).toHaveBeenCalledTimes(1);
+  });
+
   it("synchronizes and reports each failure", async () => {
     show(connected);
     vi.mocked(syncServer).mockResolvedValue({

@@ -42,7 +42,8 @@
     onLocked: () => void;
     /** Le coffre s'est verrouillé pendant une opération. */
     onExpired: () => void;
-    onDeleted: () => void;
+    /** Le coffre a été supprimé ou retiré de l'appareil ; `message` le dit. */
+    onDeleted: (message: string) => void;
   }
 
   const { vault, onLocked, onExpired, onDeleted }: Props = $props();
@@ -79,9 +80,10 @@
   let syncing = $state(false);
   /** Dernier problème de synchro, effacé par la synchro suivante réussie. */
   let syncNotice = $state<string | null>(null);
-  /** Coffre commun publié sur le serveur : ses membres se gèrent ici. */
+  /** Coffre commun publié sur le serveur : ses membres se gèrent ici, et il se quitte au lieu
+   * d'être supprimé (supprimé ici, il serait téléchargé de nouveau). */
   let sharing = $state(false);
-  /** Coffre privé publié sur le serveur : il peut aussi y être supprimé. */
+  /** Coffre privé publié sur le serveur : supprimé partout, ou retiré de l'appareil. */
   let privateOnServer = $state(false);
 
   // Sans état lisible, le coffre reste utilisable en local, sans bouton de synchro.
@@ -106,7 +108,7 @@
     if (report.vault !== vault.name) {
       return;
     }
-    if (report.state === "left") {
+    if (report.state === "left" || report.state === "deleted") {
       showToast(syncMessage(report));
       onLocked();
       return;
@@ -307,10 +309,11 @@
               <button type="button" role="menuitem" class="danger-item" onclick={() => show("leave")}>
                 {texts.leaveVault}
               </button>
+            {:else}
+              <button type="button" role="menuitem" class="danger-item" onclick={() => show("delete")}>
+                {texts.deleteVault}
+              </button>
             {/if}
-            <button type="button" role="menuitem" class="danger-item" onclick={() => show("delete")}>
-              {texts.deleteVault}
-            </button>
           </div>
         {/if}
       </div>
@@ -387,7 +390,7 @@
           {:else if panel === "members"}
             <Members name={vault.name} onClose={() => (panel = null)} />
           {:else if panel === "leave"}
-            <LeaveVault name={vault.name} onLeft={left} onClose={() => (panel = null)} />
+            <LeaveVault name={vault.name} onLeft={left} {onDeleted} onClose={() => (panel = null)} />
           {:else if panel === "delete"}
             <DeleteVault name={vault.name} onServer={privateOnServer} {onDeleted} onClose={() => (panel = null)} />
           {:else if editor}

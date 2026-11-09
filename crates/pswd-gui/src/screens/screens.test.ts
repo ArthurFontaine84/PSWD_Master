@@ -41,6 +41,8 @@ const nothing: Exchange = {
   removed: [],
   left: [],
   notLeft: [],
+  deleted: [],
+  notDeleted: [],
 };
 
 const created = { vault: { name: "perso", entries: 0 }, recoveryKey: "AAAA-BBBB" };

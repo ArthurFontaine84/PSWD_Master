@@ -76,6 +76,7 @@ impl From<AppError> for UiError {
             AppError::NotConnected => Self::code("notConnected"),
             AppError::AlreadyConnected => Self::code("alreadyConnected"),
             AppError::NotPublished(name) => Self::new("notPublished", name),
+            AppError::Unpublished(name) => Self::new("unpublishedChanges", name),
             // EXTENSION(anglais): les autres erreurs reçoivent leur code au fil des écrans ; en
             // attendant, le message français sert de détail.
             other => Self::new("unexpected", other.to_string()),
@@ -244,6 +245,11 @@ mod tests {
                 AppError::NotPublished("famille".to_owned()),
                 "notPublished",
                 Some("famille"),
+            ),
+            (
+                AppError::Unpublished("perso".to_owned()),
+                "unpublishedChanges",
+                Some("perso"),
             ),
             (
                 AppError::Csv(CsvError::Internal),

@@ -49,6 +49,8 @@ const errors = {
   serverError: (detail: string) => `Échange avec le serveur impossible : ${detail}.`,
   serverUnreachable: () => "Serveur injoignable.",
   notPublished: (detail: string) => `Le coffre « ${detail} » n'est pas publié sur le serveur de cet appareil.`,
+  unpublishedChanges: (detail: string) =>
+    `Le coffre « ${detail} » a des modifications que le serveur n'a pas encore : synchronisez-le d'abord.`,
   unexpected: (detail: string) => `Erreur : ${detail}`,
 } satisfies Record<string, Message>;
 
@@ -245,6 +247,10 @@ export const fr = {
     `Coffre « ${name} » supprimé de cet appareil : vous n'êtes plus membre de ce coffre.`,
   notLeft: (name: string, reason: string) =>
     `Vous n'êtes plus membre du coffre « ${name} », mais il n'a pas pu être supprimé de cet appareil : ${reason}.`,
+  deletedElsewhere: (name: string) =>
+    `Coffre « ${name} » supprimé de cet appareil : il a été supprimé partout depuis un autre appareil.`,
+  notDeleted: (name: string, reason: string) =>
+    `Le coffre « ${name} » a été supprimé partout, mais n'a pas pu être supprimé de cet appareil : ${reason}.`,
   addDevice: "Ajouter un appareil",
   deviceKeyTitle: "Clé pour un nouvel appareil",
   deviceKeyExplanation: (address: string) =>
@@ -303,11 +309,20 @@ export const fr = {
   leaveExplanation: (name: string) =>
     `Le coffre « ${name} » sera supprimé de cet appareil et de vos autres appareils ; les autres membres le gardent. Pour le rejoindre plus tard, il faudra une nouvelle invitation.`,
   vaultLeft: (name: string) => `Vous avez quitté le coffre « ${name} ».`,
-  deleteWhere: "Supprimer",
-  deleteLocalOnly: "Sur cet appareil seulement",
-  deleteEverywhere: "Sur cet appareil et sur le serveur",
+  lastMemberExplanation: (name: string) =>
+    `Vous êtes le dernier membre du coffre « ${name} » : il sera supprimé du serveur et de tous vos appareils, sans retour possible. Une sauvegarde permet de le restaurer plus tard. Pour confirmer, retapez son nom.`,
+  deleteWhere: "Que faire de ce coffre ?",
+  deleteEverywhere: "Supprimer partout",
   deleteEverywhereExplanation:
-    "Le coffre et ses versions seront aussi effacés du serveur. Vos autres appareils garderont leur copie, qu'ils pourront republier.",
+    "Le coffre et ses versions seront effacés du serveur, puis de vos autres appareils à leur prochain échange. Un appareil qui a des modifications pas encore publiées garde sa copie.",
+  forgetVault: "Retirer de cet appareil",
+  forgetVaultExplanation:
+    "Le coffre reste sur le serveur et sur vos autres appareils ; il ne sera plus téléchargé ici. L'écran « Serveur » permet de le télécharger de nouveau.",
+  forget: "Retirer",
+  confirmVaultName: "Pour confirmer, retapez le nom du coffre.",
+  ignoredVaults: "Coffres retirés de cet appareil",
+  downloadAgain: "Télécharger",
+  downloadAgainLabel: (name: string) => `Télécharger de nouveau « ${name} »`,
   account: (name: string, isAdmin: boolean) => `Compte : ${name}${isAdmin ? " (administrateur)" : ""}.`,
   administration: "Administration",
   adminTitle: "Administration du serveur",
@@ -382,6 +397,7 @@ export const fr = {
   syncRemoved:
     "Coffre absent de votre compte sur le serveur : il n'existe que sur cet appareil. Pour le publier, appuyez sur « Synchroniser ».",
   syncLeft: "Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil.",
+  syncDeleted: "Ce coffre a été supprimé partout depuis un autre appareil : il a été supprimé de cet appareil.",
   passwordChangedElsewhere: "Le mot de passe maître de ce coffre a été changé sur un autre appareil.",
   syncOffline: (detail: string) => `Synchro impossible : ${detail}. Les modifications seront publiées plus tard.`,
   syncConflict: "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",

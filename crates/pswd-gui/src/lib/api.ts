@@ -139,6 +139,15 @@ export interface Exchange {
   /** Coffres communs dont le compte n'est plus membre ; supprimés de cet appareil. */
   left: string[];
   notLeft: VaultFailure[];
+  /** Coffres supprimés partout depuis un autre appareil, inchangés ici ; supprimés de cet appareil. */
+  deleted: string[];
+  notDeleted: VaultFailure[];
+}
+
+/** Coffre du serveur retiré de cet appareil. */
+export interface IgnoredVault {
+  id: string;
+  name: string;
 }
 
 export interface Disconnection {
@@ -155,6 +164,7 @@ export type SyncState =
   | "notConnected"
   | "removed"
   | "left"
+  | "deleted"
   | "offline"
   | "conflict"
   | "rejected"
@@ -435,9 +445,23 @@ export function accountStatus(): Promise<AccountStatus> {
   return invoke<AccountStatus>("account_status");
 }
 
-/** Supprime le coffre privé du serveur, puis de cet appareil. */
+/** Supprime le coffre du serveur, de cet appareil, puis des autres au prochain échange. */
 export async function deleteVaultEverywhere(name: string, confirmation: string): Promise<void> {
   await invoke("delete_vault_everywhere", { name, confirmation });
+}
+
+/** Retire le coffre de cet appareil ; il reste sur le serveur et n'est plus téléchargé ici. */
+export async function forgetVault(name: string, confirmation: string): Promise<void> {
+  await invoke("forget_vault", { name, confirmation });
+}
+
+export function ignoredVaults(): Promise<IgnoredVault[]> {
+  return invoke<IgnoredVault[]>("ignored_vaults");
+}
+
+/** Télécharge de nouveau un coffre retiré de cet appareil, par un échange. */
+export function downloadAgain(id: string): Promise<Exchange> {
+  return invoke<Exchange>("download_again", { id });
 }
 
 export function adminAccounts(): Promise<AdminAccount[]> {

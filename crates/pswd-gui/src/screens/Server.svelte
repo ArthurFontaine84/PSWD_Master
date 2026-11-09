@@ -4,9 +4,12 @@
     addDeviceKey,
     connectServer,
     disconnectServer,
+    downloadAgain,
+    ignoredVaults,
     serverStatus,
     syncServer,
     type AccountStatus,
+    type IgnoredVault,
     type ServerStatus,
   } from "../lib/api";
   import { errorMessage, isServerUnreachable } from "../lib/errors";
@@ -22,11 +25,13 @@
 
   const { onClose }: Props = $props();
 
-  type Task = "connect" | "sync" | "key" | "disconnect";
+  type Task = "connect" | "sync" | "key" | "disconnect" | "download";
 
   let status = $state<ServerStatus | null>(null);
   /** Compte de l'appareil ; inconnu tant que le serveur n'a pas répondu. */
   let account = $state<AccountStatus | null>(null);
+  /** Coffres du serveur retirés de cet appareil ; vide si le serveur n'a pas répondu. */
+  let ignored = $state<IgnoredVault[]>([]);
   let problem = $state<string | null>(null);
   /** Échecs coffre par coffre du dernier échange ou de la déconnexion. */
   let problems = $state<string[]>([]);
@@ -50,6 +55,7 @@
     // Serveur injoignable : l'écran reste utilisable, sans le compte.
     const reachable = status.address !== null && status.trouble === null;
     account = reachable ? await accountStatus().catch(() => null) : null;
+    ignored = reachable ? await ignoredVaults().catch(() => []) : [];
   }
 
   void load();
@@ -105,6 +111,13 @@
   async function synchronize() {
     await run("sync", async () => {
       report(exchangeOutcome(await syncServer()));
+      await load();
+    });
+  }
+
+  async function download(id: string) {
+    await run("download", async () => {
+      report(exchangeOutcome(await downloadAgain(id)));
       await load();
     });
   }
@@ -215,6 +228,24 @@
     {#if account !== null}
       <p>{texts.account(account.accountName, account.isAdmin)}</p>
     {/if}
+    {#if ignored.length > 0}
+      <h3>{texts.ignoredVaults}</h3>
+      <ul class="ignored">
+        {#each ignored as vault (vault.id)}
+          <li>
+            <span>{vault.name}</span>
+            <button
+              type="button"
+              aria-label={texts.downloadAgainLabel(vault.name)}
+              disabled={running !== null}
+              onclick={() => download(vault.id)}
+            >
+              {texts.downloadAgain}
+            </button>
+          </li>
+        {/each}
+      </ul>
+    {/if}
     {#if problem}
       <p role="alert">{problem}</p>
     {/if}
@@ -240,5 +271,23 @@
 
   .trouble {
     color: var(--danger);
+  }
+
+  .ignored {
+    margin: 0 0 var(--space-m);
+    padding: 0;
+    list-style: none;
+  }
+
+  .ignored li {
+    display: flex;
+    gap: var(--space-s);
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-s) 0;
+  }
+
+  .ignored span {
+    overflow-wrap: anywhere;
   }
 </style>
