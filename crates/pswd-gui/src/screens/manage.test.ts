@@ -596,7 +596,7 @@ describe("forgotten master password", () => {
   it("sets a new one with the recovery key", async () => {
     vi.mocked(recoverVault).mockResolvedValue({ name: "perso", entries: 3 });
     const onUnlocked = vi.fn();
-    render(Unlock, { name: "perso", onUnlocked, onCancel: vi.fn() });
+    render(Unlock, { name: "perso", onUnlocked, onCancel: vi.fn(), onGone: vi.fn() });
     await fireEvent.click(screen.getByRole("button", { name: "Mot de passe oublié ?" }));
     expect(screen.getByRole("heading")).toHaveTextContent("Récupérer « perso »");
     expectVerbatim(field("Clé de récupération"));
@@ -619,7 +619,7 @@ describe("forgotten master password", () => {
       .mockRejectedValueOnce({ code: "wrongRecoveryKey", detail: null })
       .mockResolvedValue({ name: "perso", entries: 0 });
     const onUnlocked = vi.fn();
-    render(Unlock, { name: "perso", onUnlocked, onCancel: vi.fn() });
+    render(Unlock, { name: "perso", onUnlocked, onCancel: vi.fn(), onGone: vi.fn() });
     await fireEvent.click(screen.getByRole("button", { name: "Mot de passe oublié ?" }));
     const buttons = screen.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent);
     expect(buttons).toEqual(["Afficher le mot de passe", "Afficher le mot de passe", "Annuler", "Enregistrer"]);

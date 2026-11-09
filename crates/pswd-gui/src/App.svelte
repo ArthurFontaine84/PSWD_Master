@@ -34,7 +34,7 @@
     | { kind: "list"; notice?: string }
     | { kind: "create" }
     | { kind: "recovery"; vault: VaultInfo; recoveryKey: string }
-    | { kind: "unlock"; name: string; dot: VaultDot | null }
+    | { kind: "unlock"; name: string; dot: VaultDot | null; shared: boolean }
     | { kind: "open"; vault: VaultInfo }
     | { kind: "backup" }
     | { kind: "restore" }
@@ -174,7 +174,7 @@
       {#if screen.kind === "list"}
         <VaultList
           notice={screen.notice}
-          onOpen={(name, dot) => (screen = { kind: "unlock", name, dot })}
+          onOpen={(name, dot, shared) => (screen = { kind: "unlock", name, dot, shared })}
           onBackup={() => (screen = { kind: "backup" })}
           onRestore={() => (screen = { kind: "restore" })}
         />
@@ -190,8 +190,10 @@
         <Unlock
           name={screen.name}
           dot={screen.dot}
+          shared={screen.shared}
           onUnlocked={(vault) => (screen = { kind: "open", vault })}
           onCancel={() => (screen = { kind: "list" })}
+          onGone={() => (screen = { kind: "list" })}
         />
       {:else if screen.kind === "backup"}
         <Backup

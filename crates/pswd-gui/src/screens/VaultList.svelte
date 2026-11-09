@@ -25,7 +25,8 @@
   interface Props {
     notice?: string;
     /** `dot` : la pastille du coffre au moment de l'ouvrir, `null` sans pastille. */
-    onOpen: (name: string, dot: VaultDot | null) => void;
+    /** `shared` : coffre commun. */
+    onOpen: (name: string, dot: VaultDot | null, shared: boolean) => void;
     onBackup: () => void;
     onRestore: () => void;
   }
@@ -253,7 +254,7 @@
           {@const dot = vaultDot(server, status?.state)}
           <li in:fly={{ y: 12, duration: motion(300), delay: motion(Math.min(index, 8) * 40) }}>
             <div class="vault">
-              <button type="button" class="open" onclick={() => onOpen(name, dot)}>
+              <button type="button" class="open" onclick={() => onOpen(name, dot, status?.shared === true)}>
                 <span class="badge"><Icon name="lock" /></span>
                 <span class="name" title={name}>{name}</span>
                 {#if status?.shared}

@@ -2,13 +2,16 @@ import { fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createVault,
+  deleteVaultEverywhere,
   deviceKind,
+  leaveVault,
   listInvitations,
   listVaults,
   refreshServer,
   serverStatus,
   syncServer,
   unlockVault,
+  vaultMembers,
   type Exchange,
   type ServerStatus,
 } from "../lib/api";
@@ -27,6 +30,9 @@ vi.mock("../lib/api", () => ({
   serverStatus: vi.fn(),
   syncServer: vi.fn(),
   listInvitations: vi.fn(),
+  vaultMembers: vi.fn(),
+  leaveVault: vi.fn(),
+  deleteVaultEverywhere: vi.fn(),
 }));
 
 const nothing: Exchange = {
@@ -81,7 +87,7 @@ describe("VaultList", () => {
     expect(screen.getByText("Chargement…")).toBeInTheDocument();
     expect(await screen.findByText("travail")).toHaveAttribute("title", "travail");
     await fireEvent.click(screen.getByRole("button", { name: "travail" }));
-    expect(onOpen).toHaveBeenCalledWith("travail", null);
+    expect(onOpen).toHaveBeenCalledWith("travail", null, false);
   });
 
   it("shows the notice, the empty list and the errors", async () => {
@@ -135,9 +141,23 @@ describe("VaultList", () => {
       ["Absent de votre compte sur le serveur : gardé sur cet appareil", "red"],
     ]);
     await fireEvent.click(screen.getByRole("button", { name: "vieux" }));
-    expect(onOpen).toHaveBeenCalledWith("vieux", "removed");
+    expect(onOpen).toHaveBeenCalledWith("vieux", "removed", false);
     await fireEvent.click(screen.getByRole("button", { name: "perso" }));
-    expect(onOpen).toHaveBeenCalledWith("perso", "synced");
+    expect(onOpen).toHaveBeenCalledWith("perso", "synced", false);
+  });
+
+  it("tells whether the vault opened is shared", async () => {
+    vi.mocked(listVaults).mockResolvedValue(["famille"]);
+    vi.mocked(serverStatus).mockResolvedValue({
+      address: "pswd.local:8443",
+      trouble: null,
+      vaults: [{ name: "famille", state: "synced", shared: true }],
+    });
+    const onOpen = vi.fn();
+    render(VaultList, { onOpen, onBackup: vi.fn(), onRestore: vi.fn() });
+    await screen.findByRole("button", { name: "Synchronisé" });
+    await fireEvent.click(screen.getByRole("button", { name: /^famille/ }));
+    expect(onOpen).toHaveBeenCalledWith("famille", "synced", true);
   });
 
   it("tells the text of a dot when it is touched, without opening the vault", async () => {
@@ -424,7 +444,7 @@ describe("Unlock", () => {
   it("unlocks with the password and clears it", async () => {
     vi.mocked(unlockVault).mockResolvedValue({ name: "perso", entries: 3 });
     const onUnlocked = vi.fn();
-    render(Unlock, { name: "perso", onUnlocked, onCancel: vi.fn() });
+    render(Unlock, { name: "perso", onUnlocked, onCancel: vi.fn(), onGone: vi.fn() });
     expect(screen.getByRole("heading")).toHaveTextContent("Déverrouiller « perso »");
     await fireEvent.input(field("Mot de passe maître"), { target: { value: "Maître-2026!" } });
     await fireEvent.click(screen.getByRole("button", { name: "Déverrouiller" }));
@@ -441,27 +461,28 @@ describe("Unlock", () => {
       dot: "needsUnlock",
       onUnlocked: vi.fn(),
       onCancel: vi.fn(),
+      onGone: vi.fn(),
     });
     const state = screen.getByText("Modifié ici et sur le serveur : à déverrouiller pour finir la synchro");
     expect(state.querySelector(".dot")).toHaveClass("orange");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     unmount();
-    render(Unlock, { name: "perso", onUnlocked: vi.fn(), onCancel: vi.fn() });
+    render(Unlock, { name: "perso", onUnlocked: vi.fn(), onCancel: vi.fn(), onGone: vi.fn() });
     expect(document.querySelector(".dot")).toBeNull();
   });
 
   it("tells that a vault deleted from the server only lives here", () => {
-    const { unmount } = render(Unlock, { name: "perso", dot: "removed", onUnlocked: vi.fn(), onCancel: vi.fn() });
+    const { unmount } = render(Unlock, { name: "perso", dot: "removed", onUnlocked: vi.fn(), onCancel: vi.fn(), onGone: vi.fn() });
     expect(screen.getByText("Absent de votre compte sur le serveur : gardé sur cet appareil").querySelector(".dot")).toHaveClass("red");
     expect(screen.getByRole("status")).toHaveTextContent("Ce coffre n'est pas (ou plus) sur votre compte du serveur");
     unmount();
-    render(Unlock, { name: "perso", dot: "synced", onUnlocked: vi.fn(), onCancel: vi.fn() });
+    render(Unlock, { name: "perso", dot: "synced", onUnlocked: vi.fn(), onCancel: vi.fn(), onGone: vi.fn() });
     expect(screen.getByText("Synchronisé").querySelector(".dot")).toHaveClass("green");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("shows the typed password only on request", async () => {
-    render(Unlock, { name: "perso", onUnlocked: vi.fn(), onCancel: vi.fn() });
+    render(Unlock, { name: "perso", onUnlocked: vi.fn(), onCancel: vi.fn(), onGone: vi.fn() });
     const password = field("Mot de passe maître");
     const reveal = screen.getByRole("button", { name: "Afficher le mot de passe" });
     expect(password).toHaveAttribute("type", "password");
@@ -474,10 +495,64 @@ describe("Unlock", () => {
     expect(unlockVault).not.toHaveBeenCalled();
   });
 
+  it("lets a member leave a published shared vault without its password", async () => {
+    render(Toast);
+    const members = [
+      { id: "a1", name: "Arthur" },
+      { id: "a2", name: "Camille" },
+    ];
+    vi.mocked(vaultMembers).mockResolvedValue({ members, invitations: [] });
+    vi.mocked(leaveVault).mockResolvedValue();
+    const onGone = vi.fn();
+    render(Unlock, { name: "famille", dot: "outdated", shared: true, onUnlocked: vi.fn(), onCancel: vi.fn(), onGone });
+    await fireEvent.click(screen.getByRole("button", { name: "Quitter ce coffre" }));
+    expect(screen.queryByLabelText("Mot de passe maître", { exact: false })).not.toBeInTheDocument();
+    await fireEvent.click(await screen.findByRole("button", { name: "Annuler" }));
+    expect(field("Mot de passe maître")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Quitter ce coffre" }));
+    await fireEvent.click(await screen.findByRole("button", { name: "Quitter" }));
+    expect(await screen.findByText("Vous avez quitté le coffre « famille ».")).toBeInTheDocument();
+    expect(leaveVault).toHaveBeenCalledWith("famille");
+    expect(onGone).toHaveBeenCalled();
+    expect(unlockVault).not.toHaveBeenCalled();
+  });
+
+  it("lets the last member delete a shared vault without its password", async () => {
+    render(Toast);
+    vi.mocked(vaultMembers).mockResolvedValue({ members: [{ id: "a1", name: "Arthur" }], invitations: [] });
+    vi.mocked(deleteVaultEverywhere).mockResolvedValue();
+    const onGone = vi.fn();
+    render(Unlock, { name: "famille", dot: "synced", shared: true, onUnlocked: vi.fn(), onCancel: vi.fn(), onGone });
+    await fireEvent.click(screen.getByRole("button", { name: "Quitter ce coffre" }));
+    await fireEvent.input(await screen.findByLabelText("Nom du coffre"), { target: { value: "famille" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Supprimer" }));
+    expect(await screen.findByText("Coffre « famille » supprimé.")).toBeInTheDocument();
+    expect(deleteVaultEverywhere).toHaveBeenCalledWith("famille", "famille");
+    expect(onGone).toHaveBeenCalled();
+  });
+
+  it("offers to leave only a published shared vault, outside recovery", async () => {
+    const leave = () => screen.queryByRole("button", { name: "Quitter ce coffre" });
+    const props = { onUnlocked: vi.fn(), onCancel: vi.fn(), onGone: vi.fn() };
+    const absent = render(Unlock, { name: "famille", dot: "removed", shared: true, ...props });
+    expect(leave()).not.toBeInTheDocument();
+    absent.unmount();
+    const offline = render(Unlock, { name: "famille", dot: "unreachable", shared: true, ...props });
+    expect(leave()).not.toBeInTheDocument();
+    offline.unmount();
+    const personal = render(Unlock, { name: "perso", dot: "synced", ...props });
+    expect(leave()).not.toBeInTheDocument();
+    personal.unmount();
+    render(Unlock, { name: "famille", dot: "needsUnlock", shared: true, ...props });
+    expect(leave()).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Mot de passe oublié ?" }));
+    expect(leave()).not.toBeInTheDocument();
+  });
+
   it("explains a wrong password and can be cancelled", async () => {
     vi.mocked(unlockVault).mockRejectedValue({ code: "wrongPassword", detail: null });
     const onCancel = vi.fn();
-    render(Unlock, { name: "perso", onUnlocked: vi.fn(), onCancel });
+    render(Unlock, { name: "perso", onUnlocked: vi.fn(), onCancel, onGone: vi.fn() });
     await fireEvent.click(screen.getByRole("button", { name: "Déverrouiller" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Mot de passe maître incorrect.");
     await fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
