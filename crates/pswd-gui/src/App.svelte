@@ -8,6 +8,7 @@
     deviceKind,
     getSettings,
     onVaultLocked,
+    type AccountStatus,
     type VaultInfo,
   } from "./lib/api";
   import { throttle } from "./lib/activity";
@@ -39,7 +40,7 @@
     | { kind: "backup" }
     | { kind: "restore" }
     | { kind: "server" }
-    | { kind: "admin"; address: string; publicAddress: string | null }
+    | { kind: "admin"; account: AccountStatus }
     | { kind: "settings" };
 
   /** Intervalle minimal entre deux signaux d'activité envoyés au backend. */
@@ -215,14 +216,15 @@
         <Server onClose={() => (screen = { kind: "list" })} />
       {:else if screen.kind === "admin"}
         <Admin
-          address={screen.address}
-          publicAddress={screen.publicAddress}
+          address={screen.account.address}
+          publicAddress={screen.account.publicAddress}
+          accountId={screen.account.accountId}
           onClose={() => (screen = { kind: "settings" })}
         />
       {:else if screen.kind === "settings"}
         <Settings
           onClose={() => (screen = { kind: "list" })}
-          onAdmin={(address, publicAddress) => (screen = { kind: "admin", address, publicAddress })}
+          onAdmin={(account) => (screen = { kind: "admin", account })}
         />
       {:else}
         <OpenVault

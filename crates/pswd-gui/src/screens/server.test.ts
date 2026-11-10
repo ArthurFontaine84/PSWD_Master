@@ -55,7 +55,7 @@ beforeEach(() => {
 });
 
 function account(accountName: string, isAdmin: boolean): AccountStatus {
-  return { address: "pswd.local:8443", accountName, isAdmin, publicAddress: null };
+  return { address: "pswd.local:8443", accountId: "a1", accountName, isAdmin, publicAddress: null };
 }
 
 function field(label: string): HTMLInputElement {

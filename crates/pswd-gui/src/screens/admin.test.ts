@@ -68,9 +68,10 @@ beforeEach(() => {
   vi.mocked(vaultVersions).mockResolvedValue([]);
 });
 
+/** Le panneau, vu depuis un appareil du compte d'Arthur. */
 function show(publicAddress: string | null = null) {
   const onClose = vi.fn();
-  render(Admin, { address: "pswd.local:8443", publicAddress, onClose });
+  render(Admin, { address: "pswd.local:8443", publicAddress, accountId: "a1", onClose });
   return onClose;
 }
 
@@ -92,21 +93,48 @@ describe("Admin, accounts", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("revokes a device and changes roles", async () => {
+  it("revokes a device", async () => {
     show();
-    await fireEvent.click(await screen.findByRole("button", { name: "Révoquer PC" }));
+    const revoke = await screen.findByRole("button", { name: "Révoquer PC" });
+    expect(revoke).toHaveTextContent(/^Révoquer$/);
+    await fireEvent.click(revoke);
     expect(revokeDevice).toHaveBeenCalledWith("d1");
     expect(await screen.findByText(/Appareil « PC » révoqué/)).toBeInTheDocument();
+  });
+
+  it("changes roles, but keeps the last administrator", async () => {
+    const lastAdmin = () => card("Arthur").queryByText("Dernier administrateur");
+    const removeRole = () => card("Arthur").queryByRole("button", { name: "Retirer le rôle d'administrateur" });
+    show();
+    await screen.findByText("Camille");
+    expect(lastAdmin()).toBeInTheDocument();
+    expect(removeRole()).not.toBeInTheDocument();
+
+    vi.mocked(adminAccounts).mockResolvedValue([arthur, { ...camille, isAdmin: true }]);
     await fireEvent.click(card("Camille").getByRole("button", { name: "Nommer administrateur" }));
     expect(setAdmin).toHaveBeenCalledWith("a2", true);
     expect(await screen.findByText("Camille est maintenant administrateur.")).toBeInTheDocument();
-    const removeRole = () => card("Arthur").findByRole("button", { name: "Retirer le rôle d'administrateur" });
-    await fireEvent.click(await removeRole());
+    expect(lastAdmin()).not.toBeInTheDocument();
+
+    vi.mocked(setAdmin).mockRejectedValueOnce({ code: "serverError", detail: "refusé" });
+    await fireEvent.click(removeRole() as HTMLElement);
+    expect(await screen.findByRole("alert")).toHaveTextContent("refusé");
+
+    vi.mocked(adminAccounts).mockResolvedValue([{ ...arthur, isAdmin: false }, { ...camille, isAdmin: true }]);
+    await fireEvent.click(removeRole() as HTMLElement);
     expect(setAdmin).toHaveBeenLastCalledWith("a1", false);
     expect(await screen.findByText("Arthur n'est plus administrateur.")).toBeInTheDocument();
-    vi.mocked(setAdmin).mockRejectedValueOnce({ code: "serverError", detail: "dernier administrateur" });
-    await fireEvent.click(await removeRole());
-    expect(await screen.findByRole("alert")).toHaveTextContent("dernier administrateur");
+    expect(card("Camille").getByText("Dernier administrateur")).toBeInTheDocument();
+    expect(card("Arthur").getByRole("button", { name: "Nommer administrateur" })).toBeInTheDocument();
+  });
+
+  it("does not delete the account of this device", async () => {
+    vi.mocked(adminAccounts).mockResolvedValue([arthur, { ...camille, isAdmin: true }]);
+    show();
+    await screen.findByText("Camille");
+    expect(card("Arthur").getByRole("button", { name: "Retirer le rôle d'administrateur" })).toBeInTheDocument();
+    expect(card("Arthur").queryByRole("button", { name: "Supprimer le compte" })).not.toBeInTheDocument();
+    expect(card("Camille").getByRole("button", { name: "Supprimer le compte" })).toBeInTheDocument();
   });
 
   it("deletes an account once its name is typed again", async () => {
@@ -115,14 +143,26 @@ describe("Admin, accounts", () => {
     await fireEvent.click(card("Camille").getByRole("button", { name: "Supprimer le compte" }));
     const confirm = screen.getByRole("button", { name: "Supprimer" });
     expect(confirm).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Retour" })).not.toBeInTheDocument();
     await fireEvent.input(screen.getByLabelText("Nom du compte"), { target: { value: "Camille" } });
     await fireEvent.click(confirm);
     expect(deleteAccount).toHaveBeenCalledWith("a2", "Camille", "Camille");
     expect(await screen.findByText("Compte « Camille » supprimé.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retour" })).toBeInTheDocument();
 
     await fireEvent.click(card("Camille").getByRole("button", { name: "Supprimer le compte" }));
     await fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
     expect(screen.getByRole("button", { name: "Créer sa clé" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retour" })).toBeInTheDocument();
+  });
+
+  it("shows the back button again when the deletion is left for another tab", async () => {
+    show();
+    await screen.findByText("Camille");
+    await fireEvent.click(card("Camille").getByRole("button", { name: "Supprimer le compte" }));
+    expect(screen.queryByRole("button", { name: "Retour" })).not.toBeInTheDocument();
+    await openTab("Clés");
+    expect(screen.getByRole("button", { name: "Retour" })).toBeInTheDocument();
   });
 
   it("creates the key of a new member and shows it once", async () => {
@@ -215,17 +255,31 @@ describe("Admin, vaults", () => {
     await openTab("Coffres");
     await fireEvent.click(await screen.findByRole("button", { name: "Gérer le coffre famille" }));
     expect(await screen.findByText(/^Version 3 — 1 mars 2026 à \d+:00 — 2 Kio$/)).toBeInTheDocument();
+    expect(screen.getByText("(actuelle)")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restaurer la version 3" })).not.toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Restaurer la version 2" }));
     expect(restoreVersion).toHaveBeenCalledWith("v1", 2);
     expect(await screen.findByText(/nouveau coffre « famille-v2 »/)).toBeInTheDocument();
-    await fireEvent.click(await screen.findByRole("button", { name: "Retirer Camille" }));
-    expect(removeMember).toHaveBeenCalledWith("v1", "a2");
-    expect(await screen.findByText("Camille a été retiré du coffre « famille ».")).toBeInTheDocument();
-    vi.mocked(removeMember).mockRejectedValue({ code: "serverError", detail: "injoignable" });
-    await fireEvent.click(await screen.findByRole("button", { name: "Retirer Arthur" }));
+    expect(screen.queryByRole("button", { name: "Retirer Arthur" })).not.toBeInTheDocument();
+    vi.mocked(removeMember).mockRejectedValueOnce({ code: "serverError", detail: "injoignable" });
+    const remove = await screen.findByRole("button", { name: "Retirer Camille" });
+    expect(remove).toHaveTextContent(/^Retirer$/);
+    await fireEvent.click(remove);
     expect(await screen.findByRole("alert")).toHaveTextContent("injoignable");
+    await fireEvent.click(await screen.findByRole("button", { name: "Retirer Camille" }));
+    expect(removeMember).toHaveBeenLastCalledWith("v1", "a2");
+    expect(await screen.findByText("Camille a été retiré du coffre « famille ».")).toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Tous les coffres" }));
     expect(await screen.findByRole("button", { name: "Gérer le coffre vieux" })).toBeInTheDocument();
+  });
+
+  it("does not remove the owner of a private vault", async () => {
+    vi.mocked(serverVaults).mockResolvedValue([{ ...abandonne, version: 1, members: [{ id: "a2", name: "Camille" }] }]);
+    show();
+    await openTab("Coffres");
+    await fireEvent.click(await screen.findByRole("button", { name: "Gérer le coffre vieux" }));
+    expect(await screen.findByText("Camille")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retirer Camille" })).not.toBeInTheDocument();
   });
 
   it("attaches an account to a vault without member", async () => {
@@ -244,7 +298,9 @@ describe("Admin, vaults", () => {
     await openTab("Coffres");
     await fireEvent.click(await screen.findByRole("button", { name: "Gérer le coffre famille" }));
     await fireEvent.click(screen.getByRole("button", { name: "Supprimer du serveur" }));
+    expect(screen.queryByRole("button", { name: "Retour" })).not.toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Annuler" }));
+    expect(screen.getByRole("button", { name: "Retour" })).toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Supprimer du serveur" }));
     const confirm = screen.getByRole("button", { name: "Supprimer" });
     expect(confirm).toBeDisabled();
@@ -254,6 +310,7 @@ describe("Admin, vaults", () => {
     expect(deleteServerVault).toHaveBeenCalledWith("v1", "famille", "famille");
     expect(await screen.findByText("Coffre « famille » supprimé du serveur.")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Gérer le coffre vieux" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retour" })).toBeInTheDocument();
   });
 
   it("explains a vault that cannot be read", async () => {

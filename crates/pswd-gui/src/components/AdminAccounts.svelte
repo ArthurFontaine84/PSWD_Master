@@ -8,9 +8,13 @@
   interface Props {
     /** Adresse du serveur, à transmettre avec la clé d'un nouveau membre. */
     address: string;
+    /** Compte de l'appareil : il ne peut pas être supprimé d'ici. */
+    accountId: string;
+    /** La confirmation d'une suppression s'ouvre (`true`) ou se ferme. */
+    onConfirming: (open: boolean) => void;
   }
 
-  const { address }: Props = $props();
+  const { address, accountId, onConfirming }: Props = $props();
 
   let accounts = $state<AdminAccount[] | null>(null);
   let problem = $state<string | null>(null);
@@ -21,6 +25,12 @@
   /** Compte dont la suppression attend que son nom soit retapé. */
   let deleting = $state<AdminAccount | null>(null);
   let confirmation = $state("");
+  const admins = $derived(accounts?.filter(({ isAdmin }) => isAdmin).length ?? 0);
+
+  $effect(() => {
+    onConfirming(deleting !== null);
+    return () => onConfirming(false);
+  });
 
   async function load() {
     try {
@@ -143,21 +153,32 @@
             {#each account.devices as device (device.id)}
               <li class="row">
                 <span>{texts.deviceAdded(device.name, device.createdAt)}</span>
-                <button type="button" disabled={busy} onclick={() => revoke(device.id, device.name)}>
-                  {texts.revoke(device.name)}
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-label={texts.revokeDevice(device.name)}
+                  onclick={() => revoke(device.id, device.name)}
+                >
+                  {texts.revoke}
                 </button>
               </li>
             {/each}
           </ul>
         {/if}
-        <div class="actions">
-          <button type="button" disabled={busy} onclick={() => toggleAdmin(account)}>
-            {account.isAdmin ? texts.removeAdmin : texts.makeAdmin}
-          </button>
-          <button type="button" class="danger" disabled={busy} onclick={() => startDeletion(account)}>
-            {texts.deleteAccount}
-          </button>
-        </div>
+        {#if account.isAdmin && admins === 1}
+          <p class="muted">{texts.lastAdministrator}</p>
+        {:else}
+          <div class="actions">
+            <button type="button" disabled={busy} onclick={() => toggleAdmin(account)}>
+              {account.isAdmin ? texts.removeAdmin : texts.makeAdmin}
+            </button>
+            {#if account.id !== accountId}
+              <button type="button" class="danger" disabled={busy} onclick={() => startDeletion(account)}>
+                {texts.deleteAccount}
+              </button>
+            {/if}
+          </div>
+        {/if}
       </li>
     {/each}
   </ul>

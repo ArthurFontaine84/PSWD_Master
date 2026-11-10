@@ -18,6 +18,9 @@ use crate::state::{AppState, confirm};
 pub struct AccountStatus {
     /// Adresse locale du serveur, donnée avec les clés de connexion.
     address: String,
+    /// Le panneau d'administration n'offre pas, pour ce compte, les actions qui couperaient
+    /// l'appareil du serveur ou du coffre.
+    account_id: Uuid,
     account_name: String,
     /// Le panneau d'administration est proposé.
     is_admin: bool,
@@ -143,6 +146,7 @@ impl AppState {
         let address = self.vaults.server()?.map(|server| server.local_address);
         Ok(AccountStatus {
             address: address.unwrap_or_default(),
+            account_id: info.account_id,
             account_name: info.account_name,
             is_admin: info.is_admin,
             public_address: info.public_address,
@@ -327,10 +331,20 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (arthur, camille, test_server) = server(&dir);
         arthur.set_public_address("maison").unwrap();
+        let status = sent(&camille.account_status().unwrap());
+        let accounts = sent(&arthur.admin_accounts().unwrap());
+        let camille_id = accounts
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|account| account["name"] == "Camille")
+            .unwrap()["id"]
+            .clone();
         assert_eq!(
-            sent(&camille.account_status().unwrap()),
+            status,
             json!({
                 "address": test_server.address,
+                "accountId": camille_id,
                 "accountName": "Camille",
                 "isAdmin": false,
                 "publicAddress": "maison",

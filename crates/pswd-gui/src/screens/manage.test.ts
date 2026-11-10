@@ -557,15 +557,17 @@ describe("settings", () => {
     expect(screen.queryByRole("button", { name: "Administration" })).not.toBeInTheDocument();
     unmount();
 
-    vi.mocked(accountStatus).mockResolvedValue({
+    const admin = {
       address: "pswd.local:8443",
+      accountId: "a1",
       accountName: "Arthur",
       isAdmin: true,
       publicAddress: "maison:8443",
-    });
+    };
+    vi.mocked(accountStatus).mockResolvedValue(admin);
     render(Settings, { onClose: vi.fn(), onAdmin });
     await fireEvent.click(await screen.findByRole("button", { name: "Administration" }));
-    expect(onAdmin).toHaveBeenCalledWith("pswd.local:8443", "maison:8443");
+    expect(onAdmin).toHaveBeenCalledWith(admin);
   });
 
   it("reports settings out of bounds, and an unreadable configuration", async () => {

@@ -4,6 +4,14 @@
   import { texts } from "../lib/i18n";
   import AdminVault from "./AdminVault.svelte";
 
+  interface Props {
+    /** Compte de l'appareil : il quitte un coffre au lieu de s'en retirer. */
+    accountId: string;
+    onConfirming: (open: boolean) => void;
+  }
+
+  const { accountId, onConfirming }: Props = $props();
+
   let vaults = $state<Vault[] | null>(null);
   let problem = $state<string | null>(null);
   /** Identifiant du coffre ouvert dans le volet de gestion. */
@@ -23,7 +31,7 @@
 
 {#if shown !== undefined}
   {#key shown}
-    <AdminVault vault={shown} onChanged={load} onClose={() => (selected = null)} />
+    <AdminVault vault={shown} {accountId} onChanged={load} {onConfirming} onClose={() => (selected = null)} />
   {/key}
 {:else}
   {#if problem}

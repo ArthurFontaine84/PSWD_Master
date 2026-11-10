@@ -193,6 +193,7 @@ export interface Invitation {
 export interface AccountStatus {
   /** Adresse locale du serveur, donnée avec les clés de connexion. */
   address: string;
+  accountId: string;
   accountName: string;
   /** Le panneau d'administration est proposé. */
   isAdmin: boolean;

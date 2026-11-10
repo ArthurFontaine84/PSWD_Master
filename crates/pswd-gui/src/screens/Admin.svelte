@@ -9,15 +9,23 @@
     /** Adresse locale du serveur. */
     address: string;
     publicAddress: string | null;
+    /** Compte de l'appareil. */
+    accountId: string;
     onClose: () => void;
   }
 
-  const { address, publicAddress, onClose }: Props = $props();
+  const { address, publicAddress, accountId, onClose }: Props = $props();
 
   const tabs = ["accounts", "vaults", "keys", "server"] as const;
   type Tab = (typeof tabs)[number];
 
   let tab = $state<Tab>("accounts");
+  /** Une confirmation a son propre « Annuler » : le « Retour » du panneau est masqué. */
+  let confirming = $state(false);
+
+  function confirm(open: boolean) {
+    confirming = open;
+  }
 </script>
 
 <section class="panel" aria-labelledby="admin-title">
@@ -37,18 +45,20 @@
   </div>
   <div role="tabpanel" aria-label={texts.adminTabs[tab]}>
     {#if tab === "accounts"}
-      <AdminAccounts {address} />
+      <AdminAccounts {address} {accountId} onConfirming={confirm} />
     {:else if tab === "vaults"}
-      <AdminVaults />
+      <AdminVaults {accountId} onConfirming={confirm} />
     {:else if tab === "keys"}
       <AdminKeys />
     {:else}
       <AdminServer {publicAddress} />
     {/if}
   </div>
-  <div class="actions">
-    <button type="button" onclick={onClose}>{texts.back}</button>
-  </div>
+  {#if !confirming}
+    <div class="actions">
+      <button type="button" onclick={onClose}>{texts.back}</button>
+    </div>
+  {/if}
 </section>
 
 <style>

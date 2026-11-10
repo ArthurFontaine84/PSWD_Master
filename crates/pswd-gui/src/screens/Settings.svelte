@@ -15,7 +15,7 @@
   interface Props {
     onClose: () => void;
     /** Ouvre le panneau d'administration du serveur. */
-    onAdmin: (address: string, publicAddress: string | null) => void;
+    onAdmin: (account: AccountStatus) => void;
   }
 
   const { onClose, onAdmin }: Props = $props();
@@ -86,7 +86,7 @@
   {#if account?.isAdmin}
     {@const admin = account}
     <div class="actions">
-      <button type="button" onclick={() => onAdmin(admin.address, admin.publicAddress)}>
+      <button type="button" onclick={() => onAdmin(admin)}>
         {texts.administration}
       </button>
     </div>

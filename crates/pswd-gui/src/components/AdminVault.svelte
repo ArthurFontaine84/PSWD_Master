@@ -17,12 +17,16 @@
 
   interface Props {
     vault: AdminVault;
+    /** Compte de l'appareil : il quitte le coffre au lieu de s'en retirer. */
+    accountId: string;
     /** Le coffre a changé : la liste est à relire. */
     onChanged: () => void;
+    /** La confirmation de la suppression s'ouvre (`true`) ou se ferme. */
+    onConfirming: (open: boolean) => void;
     onClose: () => void;
   }
 
-  const { vault, onChanged, onClose }: Props = $props();
+  const { vault, accountId, onChanged, onConfirming, onClose }: Props = $props();
 
   let versions = $state<VaultVersion[] | null>(null);
   let accounts = $state<AdminAccount[]>([]);
@@ -31,6 +35,11 @@
   let busy = $state(false);
   let deleting = $state(false);
   let confirmation = $state("");
+
+  $effect(() => {
+    onConfirming(deleting);
+    return () => onConfirming(false);
+  });
 
   async function load() {
     try {
@@ -134,9 +143,17 @@
       {#each vault.members as member (member.id)}
         <li>
           <span>{member.name}</span>
-          <button type="button" disabled={busy} onclick={() => remove(member.id, member.name)}>
-            {texts.removeMember(member.name)}
-          </button>
+          <!-- Le propriétaire d'un coffre privé reste ; son propre compte quitte le coffre (#12). -->
+          {#if vault.shared && member.id !== accountId}
+            <button
+              type="button"
+              disabled={busy}
+              aria-label={texts.removeMember(member.name)}
+              onclick={() => remove(member.id, member.name)}
+            >
+              {texts.remove}
+            </button>
+          {/if}
         </li>
       {/each}
     </ul>
@@ -153,14 +170,18 @@
       {#each versions as version (version.version)}
         <li>
           <span>{texts.versionLine(version.version, version.createdAt, version.size)}</span>
-          <button
-            type="button"
-            disabled={busy}
-            aria-label={texts.restoreVersion(version.version)}
-            onclick={() => restore(version.version)}
-          >
-            {texts.restore}
-          </button>
+          {#if version.version === vault.version}
+            <span class="muted">{texts.currentVersion}</span>
+          {:else}
+            <button
+              type="button"
+              disabled={busy}
+              aria-label={texts.restoreVersion(version.version)}
+              onclick={() => restore(version.version)}
+            >
+              {texts.restore}
+            </button>
+          {/if}
         </li>
       {/each}
     </ul>
