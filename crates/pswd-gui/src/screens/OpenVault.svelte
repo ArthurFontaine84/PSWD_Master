@@ -7,6 +7,7 @@
   import EntryForm from "../components/EntryForm.svelte";
   import EntryList from "../components/EntryList.svelte";
   import Icon from "../components/Icon.svelte";
+  import Paged from "../components/Paged.svelte";
   import ImportEntries from "../components/ImportEntries.svelte";
   import LeaveVault from "../components/LeaveVault.svelte";
   import Members from "../components/Members.svelte";
@@ -32,7 +33,7 @@
   import { errorMessage, isVaultLocked } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { verbatim } from "../lib/keyboard";
-  import { pageCount, pageOf, pageSizeFor, remSize, watchWide } from "../lib/layout";
+  import { ENTRY_LIST } from "../lib/layout";
   import { motion } from "../lib/motion";
   import { syncMessage, syncProblem } from "../lib/sync";
   import { showToast } from "../lib/toast.svelte";
@@ -64,15 +65,7 @@
   type Panel = "password" | "import" | "delete" | "members" | "leave";
   /** Action de gestion ouverte à la place du détail. */
   let panel = $state<Panel | null>(null);
-  /** Écran large : les entrées sont paginées pour que liste et détail tiennent sans défiler. */
-  let wide = $state(false);
-  let windowHeight = $state(0);
   let page = $state(0);
-  const pageSize = $derived(pageSizeFor(windowHeight / remSize()));
-  const pages = $derived(wide ? pageCount(entries.length, pageSize) : 1);
-  /** Page ramenée dans les bornes quand la liste raccourcit. */
-  const shownPage = $derived(Math.min(page, pages - 1));
-  const visible = $derived(wide ? pageOf(entries, shownPage, pageSize) : entries);
   /** Change dès que le volet de détail montre autre chose : son contenu arrive animé. */
   const paneKey = $derived(`${panel ?? ""}:${editor?.mode ?? ""}:${selected ?? ""}`);
   /** L'appareil est connecté à un serveur : le bouton « Synchroniser » est proposé. */
@@ -234,7 +227,6 @@
 
   onMount(() => {
     const stopBack = onBack(back);
-    const stopWide = watchWide((value) => (wide = value));
     const stopSynced = onVaultSynced(synced);
     // Vérification muette (SPEC §7) : elle ne repousse pas le verrouillage.
     const checking = setInterval(() => {
@@ -245,7 +237,6 @@
     return () => {
       clearInterval(checking);
       stopBack();
-      stopWide();
       void stopSynced.then((stop) => {
         stop();
       });
@@ -262,7 +253,7 @@
   }
 </script>
 
-<svelte:window onkeydown={shortcut} onclick={closeMenuOutside} bind:innerHeight={windowHeight} />
+<svelte:window onkeydown={shortcut} onclick={closeMenuOutside} />
 
 <section class="vault" class:has-selection={selected !== null || editor !== null || panel !== null} aria-labelledby="vault-title">
   <header>
@@ -349,36 +340,11 @@
         <p role="alert">{problem}</p>
       {/if}
       <p class="count">{texts.entryCount(entries.length)}</p>
-      {#key shownPage}
-        <div in:fly={{ x: 12, duration: motion(200) }}>
+      <Paged items={entries} layout={ENTRY_LIST} label={texts.pagination} bind:page>
+        {#snippet children(visible)}
           <EntryList entries={visible} {selected} onSelect={select} />
-        </div>
-      {/key}
-      {#if pages > 1}
-        <nav class="pager" aria-label={texts.pagination}>
-          <button
-            type="button"
-            class="icon-button"
-            aria-label={texts.previousPage}
-            title={texts.previousPage}
-            disabled={shownPage === 0}
-            onclick={() => (page = shownPage - 1)}
-          >
-            <Icon name="previous" />
-          </button>
-          <span>{texts.pageOf(shownPage + 1, pages)}</span>
-          <button
-            type="button"
-            class="icon-button"
-            aria-label={texts.nextPage}
-            title={texts.nextPage}
-            disabled={shownPage === pages - 1}
-            onclick={() => (page = shownPage + 1)}
-          >
-            <Icon name="chevron" />
-          </button>
-        </nav>
-      {/if}
+        {/snippet}
+      </Paged>
     </div>
     <div class="detail-pane">
       {#key paneKey}
@@ -492,17 +458,6 @@
   .filters input {
     flex: 1;
     min-width: 12rem;
-  }
-
-  .pager {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-m);
-    margin-top: var(--space-m);
-    color: var(--text-muted);
-    font-size: 0.875rem;
-    font-weight: 600;
   }
 
   .count,

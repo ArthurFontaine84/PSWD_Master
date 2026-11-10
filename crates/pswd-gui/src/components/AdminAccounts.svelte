@@ -3,7 +3,10 @@
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { verbatim } from "../lib/keyboard";
+  import { ACCOUNT_LIST } from "../lib/layout";
+  import { byName } from "../lib/search";
   import { showToast } from "../lib/toast.svelte";
+  import Paged from "./Paged.svelte";
 
   interface Props {
     /** Adresse du serveur, à transmettre avec la clé d'un nouveau membre. */
@@ -26,6 +29,15 @@
   let deleting = $state<AdminAccount | null>(null);
   let confirmation = $state("");
   const admins = $derived(accounts?.filter(({ isAdmin }) => isAdmin).length ?? 0);
+  let query = $state("");
+  let page = $state(0);
+  const found = $derived(byName(accounts ?? [], query));
+
+  // Une nouvelle recherche repart de la première page.
+  $effect(() => {
+    void query;
+    page = 0;
+  });
 
   $effect(() => {
     onConfirming(deleting !== null);
@@ -137,51 +149,59 @@
     <p>{texts.loading}</p>
   {/if}
 {:else}
-  <ul class="cards" aria-label={texts.adminTabs.accounts}>
-    {#each accounts as account (account.id)}
-      <li>
-        <h3>
-          {account.name}
-          {#if account.isAdmin}
-            <span class="state">{texts.administrator}</span>
-          {/if}
-        </h3>
-        {#if account.devices.length === 0}
-          <p class="muted">{texts.noDevice}</p>
-        {:else}
-          <ul aria-label={texts.devices}>
-            {#each account.devices as device (device.id)}
-              <li class="row">
-                <span>{texts.deviceAdded(device.name, device.createdAt)}</span>
-                <button
-                  type="button"
-                  disabled={busy}
-                  aria-label={texts.revokeDevice(device.name)}
-                  onclick={() => revoke(device.id, device.name)}
-                >
-                  {texts.revoke}
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-        {#if account.isAdmin && admins === 1}
-          <p class="muted">{texts.lastAdministrator}</p>
-        {:else}
-          <div class="actions">
-            <button type="button" disabled={busy} onclick={() => toggleAdmin(account)}>
-              {account.isAdmin ? texts.removeAdmin : texts.makeAdmin}
-            </button>
-            {#if account.id !== accountId}
-              <button type="button" class="danger" disabled={busy} onclick={() => startDeletion(account)}>
-                {texts.deleteAccount}
-              </button>
+  <input type="search" bind:value={query} aria-label={texts.searchAccount} placeholder={texts.searchAccount} />
+  {#if found.length === 0}
+    <p class="muted">{texts.noAccountFound}</p>
+  {/if}
+  <Paged items={found} layout={ACCOUNT_LIST} label={texts.accountPages} bind:page>
+    {#snippet children(visible)}
+      <ul class="cards" aria-label={texts.adminTabs.accounts}>
+        {#each visible as account (account.id)}
+          <li>
+            <h3>
+              {account.name}
+              {#if account.isAdmin}
+                <span class="state">{texts.administrator}</span>
+              {/if}
+            </h3>
+            {#if account.devices.length === 0}
+              <p class="muted">{texts.noDevice}</p>
+            {:else}
+              <ul aria-label={texts.devices}>
+                {#each account.devices as device (device.id)}
+                  <li class="row">
+                    <span>{texts.deviceAdded(device.name, device.createdAt)}</span>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      aria-label={texts.revokeDevice(device.name)}
+                      onclick={() => revoke(device.id, device.name)}
+                    >
+                      {texts.revoke}
+                    </button>
+                  </li>
+                {/each}
+              </ul>
             {/if}
-          </div>
-        {/if}
-      </li>
-    {/each}
-  </ul>
+            {#if account.isAdmin && admins === 1}
+              <p class="muted">{texts.lastAdministrator}</p>
+            {:else}
+              <div class="actions">
+                <button type="button" disabled={busy} onclick={() => toggleAdmin(account)}>
+                  {account.isAdmin ? texts.removeAdmin : texts.makeAdmin}
+                </button>
+                {#if account.id !== accountId}
+                  <button type="button" class="danger" disabled={busy} onclick={() => startDeletion(account)}>
+                    {texts.deleteAccount}
+                  </button>
+                {/if}
+              </div>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/snippet}
+  </Paged>
   <form onsubmit={add} novalidate>
     <h3>{texts.addMember}</h3>
     <label>
@@ -195,11 +215,23 @@
 {/if}
 
 <style>
+  input[type="search"] {
+    margin-bottom: var(--space-m);
+  }
+
   .cards {
     display: grid;
     gap: var(--space-m);
     padding: 0;
+    margin: 0;
     list-style: none;
+  }
+
+  /* Deux cartes par ligne, comme le prévoit ACCOUNT_LIST. */
+  @media (min-width: 48rem) {
+    .cards {
+      grid-template-columns: 1fr 1fr;
+    }
   }
 
   .cards > li {

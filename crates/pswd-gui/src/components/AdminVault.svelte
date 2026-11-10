@@ -13,7 +13,9 @@
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { verbatim } from "../lib/keyboard";
+  import { VERSION_LIST } from "../lib/layout";
   import { showToast } from "../lib/toast.svelte";
+  import Paged from "./Paged.svelte";
 
   interface Props {
     vault: AdminVault;
@@ -166,25 +168,29 @@
   {:else if versions.length === 0}
     <p class="muted">{texts.noVersion}</p>
   {:else}
-    <ul aria-label={texts.versionsTitle}>
-      {#each versions as version (version.version)}
-        <li>
-          <span>{texts.versionLine(version.version, version.createdAt, version.size)}</span>
-          {#if version.version === vault.version}
-            <span class="muted">{texts.currentVersion}</span>
-          {:else}
-            <button
-              type="button"
-              disabled={busy}
-              aria-label={texts.restoreVersion(version.version)}
-              onclick={() => restore(version.version)}
-            >
-              {texts.restore}
-            </button>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+    <Paged items={versions} layout={VERSION_LIST} label={texts.versionPages}>
+      {#snippet children(visible)}
+        <ul aria-label={texts.versionsTitle}>
+          {#each visible as version (version.version)}
+            <li>
+              <span>{texts.versionLine(version.version, version.createdAt, version.size)}</span>
+              {#if version.version === vault.version}
+                <span class="muted">{texts.currentVersion}</span>
+              {:else}
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-label={texts.restoreVersion(version.version)}
+                  onclick={() => restore(version.version)}
+                >
+                  {texts.restore}
+                </button>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/snippet}
+    </Paged>
   {/if}
   <div class="actions">
     <button type="button" onclick={onClose}>{texts.allVaults}</button>

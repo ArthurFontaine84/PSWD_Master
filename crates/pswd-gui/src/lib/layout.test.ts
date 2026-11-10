@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { pageCount, pageOf, pageSizeFor, remSize, watchWide, WIDE_QUERY } from "./layout";
+import { ENTRY_LIST, pageCount, pageOf, pageSizeFor, remSize, watchWide, WIDE_QUERY } from "./layout";
 
 function mediaQuery(matches: boolean) {
   let listener: ((event: MediaQueryListEvent) => void) | undefined;
@@ -38,9 +38,15 @@ describe("watchWide", () => {
 
 describe("pagination", () => {
   it("fits a page in the window height", () => {
-    expect(pageSizeFor(1080 / 16)).toBe(8);
-    expect(pageSizeFor(800 / 16)).toBe(5);
-    expect(pageSizeFor(400 / 16)).toBe(3);
+    expect(pageSizeFor(1080 / 16, ENTRY_LIST)).toBe(8);
+    expect(pageSizeFor(800 / 16, ENTRY_LIST)).toBe(5);
+    expect(pageSizeFor(400 / 16, ENTRY_LIST)).toBe(3);
+  });
+
+  it("fills every column of a row", () => {
+    const cards = { reserved: 10, row: 5, minRows: 2, columns: 2 };
+    expect(pageSizeFor(32, cards)).toBe(8);
+    expect(pageSizeFor(12, cards)).toBe(4);
   });
 
   it("measures a rem in pixels", () => {

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/svelte";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   addMember,
   adminAccounts,
@@ -320,6 +320,99 @@ describe("Admin, vaults", () => {
     await fireEvent.click(await screen.findByRole("button", { name: "Gérer le coffre vieux" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("coffre inconnu");
     expect(screen.queryByRole("button", { name: "Rattacher" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Admin, searching", () => {
+  it("finds an account by its name", async () => {
+    show();
+    await screen.findByText("Camille");
+    await fireEvent.input(screen.getByRole("searchbox", { name: "Rechercher un compte" }), {
+      target: { value: "cam" },
+    });
+    expect(screen.getByRole("heading", { name: "Camille" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Arthur/ })).not.toBeInTheDocument();
+    await fireEvent.input(screen.getByRole("searchbox"), { target: { value: "zoé" } });
+    expect(screen.getByText("Aucun compte ne porte ce nom.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Ajouter un membre" })).toBeInTheDocument();
+  });
+
+  it("finds a vault by its name", async () => {
+    show();
+    await openTab("Coffres");
+    await fireEvent.input(await screen.findByRole("searchbox", { name: "Rechercher un coffre" }), {
+      target: { value: "VIEUX" },
+    });
+    expect(screen.getByRole("button", { name: "Gérer le coffre vieux" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Gérer le coffre famille" })).not.toBeInTheDocument();
+    await fireEvent.input(screen.getByRole("searchbox"), { target: { value: "perso" } });
+    expect(screen.getByText("Aucun coffre ne porte ce nom.")).toBeInTheDocument();
+  });
+});
+
+describe("Admin, pages on a wide screen", () => {
+  /** Fenêtre large mais basse : le minimum de lignes par page s'applique. */
+  function wideScreen() {
+    const query = { matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+    vi.stubGlobal("matchMedia", vi.fn(() => query));
+    vi.stubGlobal("innerHeight", 400);
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const numbered = (count: number) => Array.from({ length: count }, (_, index) => String(index + 1));
+
+  it("shows four accounts per page, and starts again from the first page on a new search", async () => {
+    wideScreen();
+    const others = numbered(9).map((n) => ({ ...camille, id: `c${n}`, name: `Compte ${n}` }));
+    vi.mocked(adminAccounts).mockResolvedValue([arthur, ...others]);
+    show();
+    expect(await screen.findByText("Page 1 / 3")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Compte 3" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Compte 4" })).not.toBeInTheDocument();
+    const next = screen.getByRole("button", { name: "Page suivante" });
+    await fireEvent.click(next);
+    await fireEvent.click(next);
+    expect(screen.getByText("Page 3 / 3")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Compte 9" })).toBeInTheDocument();
+    await fireEvent.input(screen.getByRole("searchbox"), { target: { value: "compte" } });
+    expect(screen.getByText("Page 1 / 3")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Compte 1" })).toBeInTheDocument();
+    await fireEvent.input(screen.getByRole("searchbox"), { target: { value: "compte 1" } });
+    expect(screen.queryByRole("navigation", { name: "Pages des comptes" })).not.toBeInTheDocument();
+  });
+
+  it("shows four vaults per page, and starts again from the first page on a new search", async () => {
+    wideScreen();
+    vi.mocked(serverVaults).mockResolvedValue(numbered(5).map((n) => ({ ...famille, id: `v${n}`, name: `coffre ${n}` })));
+    show();
+    await openTab("Coffres");
+    const pages = await screen.findByRole("navigation", { name: "Pages des coffres" });
+    expect(pages).toHaveTextContent("Page 1 / 2");
+    expect(screen.queryByRole("button", { name: "Gérer le coffre coffre 5" })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Page suivante" }));
+    expect(screen.getByRole("button", { name: "Gérer le coffre coffre 5" })).toBeInTheDocument();
+    await fireEvent.input(screen.getByRole("searchbox"), { target: { value: "coffre" } });
+    expect(pages).toHaveTextContent("Page 1 / 2");
+  });
+
+  it("shows three versions per page", async () => {
+    wideScreen();
+    vi.mocked(serverVaults).mockResolvedValue([{ ...famille, version: 4 }]);
+    vi.mocked(vaultVersions).mockResolvedValue(
+      [4, 3, 2, 1].map((version) => ({ version, createdAt: MARCH_1, size: 1024 })),
+    );
+    show();
+    await openTab("Coffres");
+    await fireEvent.click(await screen.findByRole("button", { name: "Gérer le coffre famille" }));
+    const pages = await screen.findByRole("navigation", { name: "Pages des versions" });
+    expect(pages).toHaveTextContent("Page 1 / 2");
+    expect(screen.getByRole("button", { name: "Restaurer la version 2" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restaurer la version 1" })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Page suivante" }));
+    expect(screen.getByRole("button", { name: "Restaurer la version 1" })).toBeInTheDocument();
   });
 });
 

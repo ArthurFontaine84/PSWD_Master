@@ -28,7 +28,7 @@
   }
 </script>
 
-<section class="panel" aria-labelledby="admin-title">
+<section class="panel admin" aria-labelledby="admin-title">
   <h2 id="admin-title">{texts.adminTitle}</h2>
   <div class="tabs" role="tablist" aria-label={texts.adminTitle}>
     {#each tabs as name (name)}
@@ -62,6 +62,11 @@
 </section>
 
 <style>
+  /* Plus large que les autres cartes : les listes y tiennent sur deux colonnes. */
+  .admin {
+    max-width: 60rem;
+  }
+
   .tabs {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(6rem, 1fr));

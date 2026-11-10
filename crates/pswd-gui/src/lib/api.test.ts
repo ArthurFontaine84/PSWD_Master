@@ -48,6 +48,9 @@ import {
   leaveVault,
   accountStatus,
   deleteVaultEverywhere,
+  forgetVault,
+  ignoredVaults,
+  downloadAgain,
   adminAccounts,
   addMember,
   deleteAccount,
@@ -137,6 +140,9 @@ describe("api", () => {
     await checkVault();
     await accountStatus();
     await deleteVaultEverywhere("perso", "perso");
+    await forgetVault("perso", "perso");
+    await ignoredVaults();
+    await downloadAgain("v1");
     await adminAccounts();
     await addMember("Camille");
     await deleteAccount("a2", "Camille", "Camille");
@@ -198,6 +204,9 @@ describe("api", () => {
       ["check_vault"],
       ["account_status"],
       ["delete_vault_everywhere", { name: "perso", confirmation: "perso" }],
+      ["forget_vault", { name: "perso", confirmation: "perso" }],
+      ["ignored_vaults"],
+      ["download_again", { id: "v1" }],
       ["admin_accounts"],
       ["add_member", { name: "Camille" }],
       ["delete_account", { id: "a2", name: "Camille", confirmation: "Camille" }],

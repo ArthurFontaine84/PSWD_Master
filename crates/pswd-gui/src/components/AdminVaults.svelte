@@ -2,7 +2,10 @@
   import { serverVaults, type AdminVault as Vault } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
+  import { VAULT_LIST } from "../lib/layout";
+  import { byName } from "../lib/search";
   import AdminVault from "./AdminVault.svelte";
+  import Paged from "./Paged.svelte";
 
   interface Props {
     /** Compte de l'appareil : il quitte un coffre au lieu de s'en retirer. */
@@ -17,6 +20,15 @@
   /** Identifiant du coffre ouvert dans le volet de gestion. */
   let selected = $state<string | null>(null);
   const shown = $derived(vaults?.find(({ id }) => id === selected));
+  let query = $state("");
+  let page = $state(0);
+  const found = $derived(byName(vaults ?? [], query));
+
+  // Une nouvelle recherche repart de la première page.
+  $effect(() => {
+    void query;
+    page = 0;
+  });
 
   async function load() {
     try {
@@ -44,37 +56,69 @@
   {:else if vaults.length === 0}
     <p class="muted">{texts.noServerVault}</p>
   {:else}
-    <ul aria-label={texts.adminTabs.vaults}>
-      {#each vaults as vault (vault.id)}
-        <li>
-          <button type="button" class="vault" aria-label={texts.manageVault(vault.name)} onclick={() => (selected = vault.id)}>
-            <strong>{vault.name}</strong>
-            <small>
-              {vault.shared ? texts.shared : texts.privateVault} ·
-              {vault.version === null ? texts.neverPublished : texts.version(vault.version)}
-            </small>
-            <small>
-              {vault.members.length === 0 ? texts.noMember : vault.members.map(({ name }) => name).join(", ")}
-            </small>
-          </button>
-        </li>
-      {/each}
-    </ul>
+    <input type="search" bind:value={query} aria-label={texts.searchServerVault} placeholder={texts.searchServerVault} />
+    {#if found.length === 0}
+      <p class="muted">{texts.noServerVaultFound}</p>
+    {/if}
+    <Paged items={found} layout={VAULT_LIST} label={texts.vaultPages} bind:page>
+      {#snippet children(visible)}
+        <ul aria-label={texts.adminTabs.vaults}>
+          {#each visible as vault (vault.id)}
+            <li>
+              <button
+                type="button"
+                class="vault"
+                aria-label={texts.manageVault(vault.name)}
+                onclick={() => (selected = vault.id)}
+              >
+                <strong>{vault.name}</strong>
+                <small>
+                  {vault.shared ? texts.shared : texts.privateVault} ·
+                  {vault.version === null ? texts.neverPublished : texts.version(vault.version)}
+                </small>
+                <small>
+                  {vault.members.length === 0 ? texts.noMember : vault.members.map(({ name }) => name).join(", ")}
+                </small>
+              </button>
+            </li>
+          {/each}
+        </ul>
+      {/snippet}
+    </Paged>
   {/if}
 {/if}
 
 <style>
+  input {
+    margin-bottom: var(--space-m);
+  }
+
   ul {
     display: grid;
     gap: var(--space-s);
     padding: 0;
+    margin: 0;
     list-style: none;
+  }
+
+  /* Deux cartes par ligne, comme le prévoit VAULT_LIST. */
+  @media (min-width: 48rem) {
+    ul {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  li {
+    display: grid;
   }
 
   .vault {
     display: grid;
     width: 100%;
     gap: 0.25rem;
+    justify-content: stretch;
+    justify-items: start;
+    align-content: start;
     text-align: left;
     overflow-wrap: anywhere;
   }
