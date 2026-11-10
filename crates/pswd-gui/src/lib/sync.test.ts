@@ -7,6 +7,7 @@ function report(state: SyncState, detail: string | null = null): SyncReport {
 }
 
 const nothing: Exchange = {
+  renamed: [],
   downloaded: [],
   notDownloaded: [],
   published: [],
@@ -41,6 +42,9 @@ describe("syncProblem", () => {
     expect(syncProblem(report("deleted"))).toBe(
       "Ce coffre a été supprimé partout depuis un autre appareil : il a été supprimé de cet appareil.",
     );
+    expect(syncProblem(report("nameTaken"))).toBe(
+      "Le serveur a déjà un coffre de ce nom : celui-ci sera renommé puis publié au retour à la liste des coffres.",
+    );
     expect(syncProblem(report("conflict"))).toBe(
       "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",
     );
@@ -72,9 +76,10 @@ describe("exchangeOutcome", () => {
 
   it("lists what was exchanged, then what failed", () => {
     const exchange: Exchange = {
+      renamed: [{ name: "banque", newName: "banque-2" }],
       downloaded: [
         { name: "perso", localName: "perso" },
-        { name: "travail", localName: "travail-0123abcd" },
+        { name: "travail", localName: "travail-2" },
       ],
       notDownloaded: [{ name: "famille", reason: "disque plein" }],
       published: ["notes"],
@@ -91,8 +96,9 @@ describe("exchangeOutcome", () => {
     };
     expect(exchangeOutcome(exchange)).toEqual({
       done: [
+        "Le serveur a déjà un coffre « banque » : celui de cet appareil devient « banque-2 ». S'il s'agit du même coffre, supprimez « banque-2 ».",
         "2 coffres téléchargés, 1 publié, 1 envoyé au serveur, 1 mis à jour depuis le serveur.",
-        "Coffre « travail » enregistré sous le nom « travail-0123abcd » : ce nom était déjà pris.",
+        "Coffre « travail » enregistré sous le nom « travail-2 » : ce nom était déjà pris.",
         "Coffre « ancien » absent de votre compte sur le serveur : gardé sur cet appareil. Pour le publier, ouvrez-le puis appuyez sur « Synchroniser ».",
         "Coffre « club » supprimé de cet appareil : vous n'êtes plus membre de ce coffre.",
         "Coffre « vieux » supprimé de cet appareil : il a été supprimé partout depuis un autre appareil.",
@@ -111,8 +117,8 @@ describe("exchangeOutcome", () => {
   it("names a single exchanged vault", () => {
     const one = (exchange: Partial<Exchange>) => exchangeOutcome({ ...nothing, ...exchange }).done;
     expect(one({ downloaded: [{ name: "perso", localName: "perso" }] })).toEqual(["Coffre « perso » téléchargé."]);
-    expect(one({ downloaded: [{ name: "travail", localName: "travail-0123abcd" }] })).toEqual([
-      "Coffre « travail » téléchargé sous le nom « travail-0123abcd » : ce nom était déjà pris.",
+    expect(one({ downloaded: [{ name: "travail", localName: "travail-2" }] })).toEqual([
+      "Coffre « travail » téléchargé sous le nom « travail-2 » : ce nom était déjà pris.",
     ]);
     expect(one({ published: ["notes"] })).toEqual(["Coffre « notes » publié."]);
     expect(one({ sent: ["banque"] })).toEqual(["Coffre « banque » envoyé au serveur."]);

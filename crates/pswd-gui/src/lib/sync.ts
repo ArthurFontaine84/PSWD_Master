@@ -24,6 +24,8 @@ export function syncMessage(report: SyncReport): string {
       return texts.syncLeft;
     case "deleted":
       return texts.syncDeleted;
+    case "nameTaken":
+      return texts.syncNameTaken;
     case "offline":
       return texts.syncOffline(detail);
     case "conflict":
@@ -62,6 +64,7 @@ export function exchangeOutcome(exchange: Exchange): Outcome {
     received: exchange.received.length,
   };
   const done = [
+    ...exchange.renamed.map(({ name, newName }) => texts.gaveWay(name, newName)),
     ...(each.length > 1 ? [texts.exchangeSummary(counts), ...renamed] : each),
     ...(exchange.removed.length > 0 ? [texts.absentFromAccount(exchange.removed)] : []),
     ...exchange.left.map((name) => texts.leftElsewhere(name)),

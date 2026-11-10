@@ -42,6 +42,11 @@ impl<T: Terminal, C> App<T, C> {
     fn exchange(&mut self) -> Result<bool, CliError> {
         let exchange = self.vaults.exchange()?;
         let mut lines = Vec::new();
+        for (name, new_name) in exchange.renamed {
+            lines.push(format!(
+                "Coffre « {name} » renommé « {new_name} » : le serveur a déjà un coffre de ce nom."
+            ));
+        }
         for (server_name, result) in exchange.downloaded {
             lines.push(match result {
                 Ok(name) if name == server_name => format!("Coffre « {name} » téléchargé."),
@@ -235,6 +240,9 @@ fn describe(outcome: &SyncOutcome) -> String {
         SyncOutcome::Deleted => "coffre supprimé partout depuis un autre appareil : il a été \
                                  supprimé de cet appareil"
             .to_owned(),
+        SyncOutcome::NameTaken => "le serveur a déjà un coffre de ce nom : celui-ci sera renommé \
+                                   puis publié par pswd sync"
+            .to_owned(),
         SyncOutcome::Done(SyncStatus::Synced) => "coffre à jour".to_owned(),
         SyncOutcome::Done(SyncStatus::Offline(error)) => {
             format!("hors ligne ({error}) ; les modifications seront publiées plus tard")
@@ -252,7 +260,7 @@ fn describe(outcome: &SyncOutcome) -> String {
 mod tests {
     use std::fs;
 
-    use pswd_core::ports::PortError;
+    use pswd_core::ports::{PortError, RemoteStore};
     use pswd_core::{ConnectionKeyError, EntryContent, EntryKind, FileError, Timestamp};
 
     use crate::cli::Command;
@@ -316,18 +324,56 @@ mod tests {
     }
 
     #[test]
-    fn a_taken_name_is_reported_at_download() {
+    fn a_local_vault_gives_its_name_to_the_vault_of_the_server() {
         let env = TestEnv::with_vault();
         env.connect_admin("a");
         output(&env, "b", &[PASSWORD, PASSWORD], init());
+        assert_eq!(
+            env.connect_same_account("a", "b"),
+            "Appareil connecté au serveur.\nCoffre « perso » renommé « perso-2 » : le serveur a \
+             déjà un coffre de ce nom.\nCoffre « perso » téléchargé.\nCoffre « perso-2 » publié."
+        );
+    }
+
+    #[test]
+    fn a_second_vault_of_the_server_with_the_same_name_is_numbered() {
+        let env = TestEnv::with_vault();
+        env.connect_admin("a");
+        let a = env.vaults("a");
+        let client = a.server().unwrap().unwrap().client().unwrap();
+        let file = fs::read(env.config("a").vault("perso").unwrap().vault_file()).unwrap();
+        let twin = client.create_vault("perso", false).unwrap();
+        client.vault(twin).push(&file, None).unwrap();
         let shown = env.connect_same_account("a", "b");
-        let lines: Vec<&str> = shown.lines().collect();
-        assert_eq!(lines.len(), 3, "{shown}");
         assert!(
-            lines[1].starts_with("Coffre « perso » téléchargé sous le nom « perso-"),
+            shown.ends_with(
+                "Coffre « perso » téléchargé.\nCoffre « perso » téléchargé sous le nom « perso-2 » \
+                 (nom déjà pris sur cet appareil)."
+            ),
             "{shown}"
         );
-        assert_eq!(lines[2], "Coffre « perso » publié.");
+    }
+
+    #[test]
+    fn a_vault_created_under_a_name_of_the_server_waits_for_the_exchange() {
+        let env = TestEnv::new();
+        env.connect_admin("a");
+        env.connect_same_account("a", "b");
+        output(&env, "a", &[PASSWORD, PASSWORD], init());
+        output(&env, "a", &[], Command::Sync);
+        output(&env, "b", &[PASSWORD, PASSWORD], init());
+        let shown = output(&env, "b", &[PASSWORD], open());
+        assert!(
+            shown.ends_with(
+                "⚠ Synchro : le serveur a déjà un coffre de ce nom : celui-ci sera renommé puis \
+                 publié par pswd sync."
+            ),
+            "{shown}"
+        );
+        assert!(
+            output(&env, "b", &[], Command::Sync)
+                .starts_with("Coffre « perso » renommé « perso-2 »")
+        );
     }
 
     #[test]

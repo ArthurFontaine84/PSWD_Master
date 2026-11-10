@@ -229,6 +229,8 @@ export const fr = {
   renamedOnDownload: (name: string, localName: string) =>
     `Coffre « ${name} » enregistré sous le nom « ${localName} » : ce nom était déjà pris.`,
   vaultArrived: (name: string) => `Nouveau coffre « ${name} » reçu du serveur.`,
+  gaveWay: (name: string, newName: string) =>
+    `Le serveur a déjà un coffre « ${name} » : celui de cet appareil devient « ${newName} ». S'il s'agit du même coffre, supprimez « ${newName} ».`,
   newInvitation: (vaultName: string, invitedBy: string) =>
     `Nouvelle invitation : ${invitedBy} vous invite dans le coffre « ${vaultName} ».`,
   downloaded: (name: string, localName: string) =>
@@ -409,6 +411,8 @@ export const fr = {
     "Coffre absent de votre compte sur le serveur : il n'existe que sur cet appareil. Pour le publier, appuyez sur « Synchroniser ».",
   syncLeft: "Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil.",
   syncDeleted: "Ce coffre a été supprimé partout depuis un autre appareil : il a été supprimé de cet appareil.",
+  syncNameTaken:
+    "Le serveur a déjà un coffre de ce nom : celui-ci sera renommé puis publié au retour à la liste des coffres.",
   passwordChangedElsewhere: "Le mot de passe maître de ce coffre a été changé sur un autre appareil.",
   syncOffline: (detail: string) => `Synchro impossible : ${detail}. Les modifications seront publiées plus tard.`,
   syncConflict: "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",

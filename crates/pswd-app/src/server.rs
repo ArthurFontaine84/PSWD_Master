@@ -17,9 +17,6 @@ use crate::{AppError, VaultSession, Vaults};
 /// Port pris quand l'adresse n'en donne pas.
 pub const DEFAULT_PORT: u16 = 8443;
 
-/// Nombre de caractères de l'identifiant ajoutés au nom d'un coffre téléchargé déjà pris.
-const SHORT_ID_LEN: usize = 8;
-
 /// État d'un coffre vis-à-vis du serveur de l'appareil.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaultState {
@@ -49,6 +46,9 @@ pub enum SyncOutcome {
     /// Le coffre a été supprimé partout depuis un autre appareil, et cette copie n'avait rien de
     /// plus : elle a été supprimée.
     Deleted,
+    /// Un coffre du serveur porte déjà ce nom : ce coffre n'est pas publié. Le prochain échange
+    /// le renomme puis le publie (il n'est pas renommé tant qu'il est ouvert).
+    NameTaken,
     /// Jamais [`SyncStatus::Removed`] : ce cas devient [`SyncOutcome::Removed`],
     /// [`SyncOutcome::Left`] ou [`SyncOutcome::Deleted`].
     Done(SyncStatus),
@@ -68,6 +68,9 @@ pub enum Update {
 /// Résultat d'un échange avec le serveur, coffre par coffre.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Exchange {
+    /// Coffres de l'appareil renommés pour laisser leur nom à un coffre du serveur : ancien et
+    /// nouveau nom. Ils sont publiés sous le nouveau.
+    pub renamed: Vec<(String, String)>,
     /// Pour chaque coffre du serveur que l'appareil n'avait pas : son nom ici.
     pub downloaded: VaultResults<String>,
     /// Coffres locaux publiés sur le serveur.
@@ -181,6 +184,7 @@ impl Vaults {
         let server_id = server.server_id();
         let mut exchange = Exchange::default();
         self.forget_ignored_gone(&listed)?;
+        self.give_way(&server_id, &listed, &mut exchange)?;
         self.download(&client, &server_id, &listed, &mut exchange)?;
         for (name, vault) in self.config()?.vaults {
             let link = vault.remote.clone().filter(|link| link.server == server_id);
@@ -245,12 +249,42 @@ impl Vaults {
                 removed: false,
                 synced: synced_state(vault.version(), &file.file),
             };
-            let added = local_name(&self.config()?, &remote.name, remote.id).and_then(|name| {
-                self.add_vault_file(&name, &file.file, remote.shared, Some(link))
-                    .map(|()| name)
-            });
+            let name = local_name(&self.config()?, &remote.name, listed);
+            let added = self
+                .add_vault_file(&name, &file.file, remote.shared, Some(link))
+                .map(|()| name);
             exchange.downloaded.push((remote.name.clone(), added));
         }
+        Ok(())
+    }
+
+    /// Un coffre de l'appareil qui n'est pas sur ce serveur cède son nom à un coffre du serveur
+    /// (SPEC §11) : renommé `<nom>-2` (ou le premier numéro libre), il est ensuite publié sous
+    /// ce nom. Un nom désigne ainsi le même coffre sur tous les appareils.
+    fn give_way(
+        &self,
+        server_id: &str,
+        listed: &[RemoteVaultInfo],
+        exchange: &mut Exchange,
+    ) -> Result<(), AppError> {
+        for (name, vault) in self.config()?.vaults {
+            let here = vault.remote.is_some_and(|link| link.server == server_id);
+            if here || !listed.iter().any(|remote| remote.name == name) {
+                continue;
+            }
+            let new_name = free_name(&name, &self.config()?, listed);
+            self.rename_here(&name, &new_name)?;
+            exchange.renamed.push((name, new_name));
+        }
+        Ok(())
+    }
+
+    /// Renomme le coffre `name` sur cet appareil seulement.
+    fn rename_here(&self, name: &str, new_name: &str) -> Result<(), AppError> {
+        let mut config_file = self.config_file();
+        let mut config = config_file.load()?;
+        config.rename_vault(name, new_name)?;
+        config_file.save(&config)?;
         Ok(())
     }
 
@@ -428,6 +462,24 @@ impl Vaults {
         Ok(id)
     }
 
+    /// Comme [`Vaults::reserve`], sauf si un coffre du serveur porte déjà ce nom : `None`.
+    fn reserve_unless_taken(
+        &self,
+        client: &ServerClient,
+        server: &ServerConfig,
+        name: &str,
+        shared: bool,
+    ) -> Result<Option<Uuid>, AppError> {
+        if client
+            .list_vaults()?
+            .iter()
+            .any(|remote| remote.name == name)
+        {
+            return Ok(None);
+        }
+        self.reserve(client, server, name, shared).map(Some)
+    }
+
     /// Synchronise le coffre ouvert `name` avec le serveur, après l'y avoir publié s'il n'y est
     /// pas encore. Un coffre supprimé du serveur n'est pas republié : voir
     /// [`Vaults::republish`].
@@ -448,8 +500,9 @@ impl Vaults {
                 return Ok(SyncOutcome::Removed);
             }
             Some(link) if link.server == server_id => link.id,
-            _ => match self.reserve(&client, &server, name, vault.shared) {
-                Ok(id) => id,
+            _ => match self.reserve_unless_taken(&client, &server, name, vault.shared) {
+                Ok(Some(id)) => id,
+                Ok(None) => return Ok(SyncOutcome::NameTaken),
                 Err(AppError::Port(error)) => {
                     return Ok(SyncOutcome::Done(SyncStatus::Offline(error)));
                 }
@@ -720,20 +773,42 @@ fn file_hash(file: &[u8]) -> String {
         })
 }
 
-/// Nom d'un coffre téléchargé : celui du serveur, ou, s'il est pris, suivi du début de
-/// l'identifiant.
-fn local_name(config: &Config, name: &str, id: Uuid) -> Result<String, AppError> {
-    if config.ensure_available(name).is_ok() {
-        return Ok(name.to_owned());
+/// Nom d'un coffre téléchargé : celui du serveur, ou, s'il est déjà pris ici par un autre coffre
+/// du serveur, le premier `<nom>-<numéro>` libre.
+fn local_name(config: &Config, name: &str, listed: &[RemoteVaultInfo]) -> String {
+    if config.vaults.contains_key(name) {
+        free_name(name, config, listed)
+    } else {
+        name.to_owned()
     }
-    let short: String = id.simple().to_string().chars().take(SHORT_ID_LEN).collect();
+}
+
+/// Premier nom `<nom>-2`, `<nom>-3`… qui n'est pris ni sur cet appareil, ni sur le serveur.
+fn free_name(name: &str, config: &Config, listed: &[RemoteVaultInfo]) -> String {
+    let taken = |candidate: &str| {
+        config.vaults.contains_key(candidate)
+            || listed.iter().any(|remote| remote.name == candidate)
+    };
+    let mut number = 2;
+    loop {
+        let candidate = numbered(name, number);
+        if !taken(&candidate) {
+            return candidate;
+        }
+        number += 1;
+    }
+}
+
+/// `<nom>-<numéro>`, le nom raccourci pour ne pas dépasser 64 caractères. Il reste valide : le
+/// nom ne commence pas par une espace, et avec un suffixe de `k` caractères, `64 − k` caractères
+/// de 4 octets au plus font au total `256 − 3k` octets, donc 255 au plus.
+fn numbered(name: &str, number: u32) -> String {
+    let suffix = format!("-{number}");
     let prefix: String = name
         .chars()
-        .take(MAX_VAULT_NAME_LEN - SHORT_ID_LEN - 1)
+        .take(MAX_VAULT_NAME_LEN - suffix.len())
         .collect();
-    let alternative = format!("{prefix}-{short}");
-    config.ensure_available(&alternative)?;
-    Ok(alternative)
+    format!("{}{suffix}", prefix.trim_end())
 }
 
 /// L'appareil n'a rien que le serveur n'ait déjà : le coffre y est publié, et la copie locale
@@ -1023,60 +1098,119 @@ mod tests {
     }
 
     #[test]
-    fn a_taken_name_is_followed_by_the_identifier() {
+    fn a_local_vault_gives_its_name_to_the_vault_of_the_server() {
+        let dir = TempDir::new().unwrap();
+        let a = device(&dir, "a");
+        add_note(&mut create(&a, "banque"), "depuis a");
+        connect_admin(&a);
+        a.exchange().unwrap();
+
+        let b = device(&dir, "b");
+        add_note(&mut create(&b, "banque"), "depuis b");
+        connect_same_account(&a, &b);
+        let exchange = b.exchange().unwrap();
+        assert_eq!(
+            exchange.renamed,
+            [("banque".to_owned(), "banque-2".to_owned())]
+        );
+        assert_eq!(
+            exchange.downloaded,
+            [("banque".to_owned(), Ok("banque".to_owned()))]
+        );
+        assert_eq!(exchange.published, [done("banque-2")]);
+        assert_eq!(titles(&open(&b, "banque")), ["depuis a"]);
+        assert_eq!(titles(&open(&b, "banque-2")), ["depuis b"]);
+
+        let exchange = a.exchange().unwrap();
+        assert_eq!(
+            exchange.downloaded,
+            [("banque-2".to_owned(), Ok("banque-2".to_owned()))]
+        );
+        assert_eq!(titles(&open(&a, "banque-2")), ["depuis b"]);
+        for device in [&a, &b] {
+            assert_eq!(
+                states(device),
+                [
+                    state_of("banque", VaultState::Synced),
+                    state_of("banque-2", VaultState::Synced)
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn the_new_name_is_free_here_and_on_the_server() {
+        let dir = TempDir::new().unwrap();
+        let a = device(&dir, "a");
+        create(&a, "perso");
+        create(&a, "perso-2");
+        connect_admin(&a);
+        a.exchange().unwrap();
+
+        let b = device(&dir, "b");
+        create(&b, "perso");
+        create(&b, "perso-3");
+        connect_same_account(&a, &b);
+        let exchange = b.exchange().unwrap();
+        assert_eq!(
+            exchange.renamed,
+            [("perso".to_owned(), "perso-4".to_owned())]
+        );
+        assert_eq!(names(&b), ["perso", "perso-2", "perso-3", "perso-4"]);
+    }
+
+    #[test]
+    fn a_second_vault_of_the_server_with_the_same_name_is_numbered() {
         let dir = TempDir::new().unwrap();
         let a = device(&dir, "a");
         create(&a, "perso");
         connect_admin(&a);
         a.exchange().unwrap();
-        let id = link(&a, "perso").unwrap().id;
+        let client = a.server().unwrap().unwrap().client().unwrap();
+        let file = fs::read(a.config().unwrap().vault("perso").unwrap().vault_file()).unwrap();
+        let twin = client.create_vault("perso", false).unwrap();
+        client.vault(twin).push(&file, None).unwrap();
 
         let b = device(&dir, "b");
-        create(&b, "perso");
         connect_same_account(&a, &b);
-        let expected = format!("perso-{}", &id.simple().to_string()[..8]);
         let exchange = b.exchange().unwrap();
+        assert_eq!(exchange.renamed, []);
+        assert_eq!(exchange.downloaded.len(), 2);
+        assert_eq!(names(&b), ["perso", "perso-2"]);
+        assert_eq!(b.exchange().unwrap(), Exchange::default());
+    }
+
+    #[test]
+    fn an_open_vault_is_not_published_under_a_name_of_the_server() {
+        let dir = TempDir::new().unwrap();
+        let a = device(&dir, "a");
+        create(&a, "perso");
+        connect_admin(&a);
+        a.exchange().unwrap();
+
+        let b = device(&dir, "b");
+        let mut session = create(&b, "perso");
+        connect_same_account(&a, &b);
+        assert_eq!(b.sync("perso", &mut session), Ok(SyncOutcome::NameTaken));
+        assert_eq!(link(&b, "perso"), None);
+        assert_eq!(a.server_vaults().unwrap().len(), 1);
         assert_eq!(
-            exchange.downloaded,
-            [("perso".to_owned(), Ok(expected.clone()))]
-        );
-        assert_eq!(exchange.published, [done("perso")]);
-        assert_eq!(
-            states(&b),
-            [
-                state_of("perso", VaultState::Synced),
-                state_of(&expected, VaultState::Synced)
-            ]
+            b.exchange().unwrap().renamed,
+            [("perso".to_owned(), "perso-2".to_owned())]
         );
     }
 
     #[test]
-    fn downloaded_names_stay_valid() {
-        let id = Uuid::parse_str("0123456789abcdef0123456789abcdef").unwrap();
-        let mut config = Config::default();
+    fn numbered_names_stay_valid() {
+        assert_eq!(numbered("perso", 2), "perso-2");
         let long = "a".repeat(MAX_VAULT_NAME_LEN);
-        let vault = |path: &str| VaultConfig {
-            path: PathBuf::from(path),
-            shared: false,
-            remote: None,
-        };
-        for name in ["perso", long.as_str()] {
-            config.add_vault(name, vault(name)).unwrap();
+        assert_eq!(numbered(&long, 10), format!("{}-10", "a".repeat(61)));
+        let space_cut = format!("{} b", "a".repeat(61));
+        assert_eq!(numbered(&space_cut, 2), format!("{}-2", "a".repeat(61)));
+        let heavy = "🔒".repeat(MAX_VAULT_NAME_LEN - 1);
+        for number in [2, 10, 1000] {
+            assert!(pswd_core::is_valid_vault_name(&numbered(&heavy, number)));
         }
-        assert_eq!(local_name(&config, "travail", id), Ok("travail".to_owned()));
-        assert_eq!(
-            local_name(&config, "perso", id),
-            Ok("perso-01234567".to_owned())
-        );
-        assert_eq!(
-            local_name(&config, &long, id),
-            Ok(format!("{}-01234567", "a".repeat(55)))
-        );
-        config.add_vault("perso-01234567", vault("x")).unwrap();
-        assert_eq!(
-            local_name(&config, "perso", id),
-            Err(ConfigError::VaultExists("perso-01234567".to_owned()).into())
-        );
     }
 
     #[test]
@@ -1562,15 +1696,15 @@ mod tests {
     fn a_vault_out_of_the_account_is_reported_once_and_kept() {
         let dir = TempDir::new().unwrap();
         let (_a, b, _server) = two_devices(&dir);
-        let out_of_the_account = |vaults: &Vaults| {
+        let out_of_the_account = |vaults: &Vaults, name: &str| {
             vaults
                 .update_config(|config| {
-                    let vault = config.vaults.get_mut("perso").unwrap();
+                    let vault = config.vaults.get_mut(name).unwrap();
                     vault.remote.as_mut().unwrap().id = Uuid::new_v4();
                 })
                 .unwrap();
         };
-        out_of_the_account(&b);
+        out_of_the_account(&b, "perso");
         assert_eq!(states(&b), [state_of("perso", VaultState::Removed)]);
         let exchange = b.exchange().unwrap();
         assert_eq!(exchange.removed, ["perso"]);
@@ -1582,15 +1716,23 @@ mod tests {
 
         let mut session = open(&b, "perso");
         assert_eq!(b.sync("perso", &mut session), Ok(SyncOutcome::Removed));
+        // Le vrai « perso » du serveur garde son nom : celui-ci le lui laisse au prochain échange.
         assert_eq!(
             b.republish("perso", &mut session),
-            Ok(SyncOutcome::Done(SyncStatus::Synced))
+            Ok(SyncOutcome::NameTaken)
         );
-        assert_eq!(states(&b)[0], state_of("perso", VaultState::Synced));
+        assert_eq!(link(&b, "perso"), None);
+        assert_eq!(names(&b), ["perso", "perso-2"]);
+        let exchange = b.exchange().unwrap();
+        assert_eq!(
+            exchange.renamed,
+            [("perso".to_owned(), "perso-3".to_owned())]
+        );
+        assert_eq!(exchange.published, [done("perso-3")]);
 
-        out_of_the_account(&b);
-        assert_eq!(b.sync("perso", &mut session), Ok(SyncOutcome::Removed));
-        assert!(link(&b, "perso").unwrap().removed);
+        out_of_the_account(&b, "perso-3");
+        assert_eq!(b.sync("perso-3", &mut session), Ok(SyncOutcome::Removed));
+        assert!(link(&b, "perso-3").unwrap().removed);
     }
 
     #[test]

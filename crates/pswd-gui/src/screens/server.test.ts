@@ -32,6 +32,7 @@ vi.mock("../lib/api", () => ({
 const disconnected: ServerStatus = { address: null, trouble: null, vaults: [] };
 const connected: ServerStatus = { address: "pswd.local:8443", trouble: null, vaults: [] };
 const nothing: Exchange = {
+  renamed: [],
   downloaded: [],
   notDownloaded: [],
   published: [],

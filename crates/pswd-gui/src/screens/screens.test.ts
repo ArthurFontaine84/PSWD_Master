@@ -36,6 +36,7 @@ vi.mock("../lib/api", () => ({
 }));
 
 const nothing: Exchange = {
+  renamed: [],
   downloaded: [],
   notDownloaded: [],
   published: [],
@@ -310,6 +311,23 @@ describe("VaultList automatic exchange", () => {
       expect(screen.queryByRole("button", { name: "perso" })).not.toBeInTheDocument();
     });
     expect(screen.getByRole("status")).toHaveTextContent("Nouveau coffre « club » reçu du serveur.");
+  });
+
+  it("announces a vault that gave its name away, not as a vault received", async () => {
+    render(Toast);
+    vi.mocked(listVaults).mockResolvedValue(["banque"]);
+    vi.mocked(refreshServer).mockResolvedValue(connected);
+    vi.mocked(listInvitations).mockResolvedValue([]);
+    show();
+    expect(await screen.findByRole("button", { name: "banque" })).toBeInTheDocument();
+
+    vi.mocked(listVaults).mockResolvedValue(["banque", "banque-2"]);
+    vi.mocked(refreshServer).mockResolvedValue({ ...connected, renamed: [{ name: "banque", newName: "banque-2" }] });
+    await fireEvent.focus(window);
+    expect(await screen.findByRole("button", { name: "banque-2" })).toBeInTheDocument();
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Le serveur a déjà un coffre « banque » : celui de cet appareil devient « banque-2 ».");
+    expect(status).not.toHaveTextContent("Nouveau coffre");
   });
 
   it("shows the vaults once they become readable, and keeps the error until then", async () => {

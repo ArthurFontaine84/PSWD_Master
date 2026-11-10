@@ -52,6 +52,7 @@ const camille = { id: "a2", name: "Camille" };
 const dominique = { id: "a3", name: "Dominique" };
 const invitation: Invitation = { id: "i1", vaultName: "famille", invitedBy: "Arthur" };
 const nothing: Exchange = {
+  renamed: [],
   downloaded: [],
   notDownloaded: [],
   published: [],

@@ -96,7 +96,11 @@
       return;
     }
     show(status);
-    await reloadNames();
+    const renamed = status.renamed ?? [];
+    if (renamed.length > 0) {
+      showToast(renamed.map(({ name, newName }) => texts.gaveWay(name, newName)).join(" "));
+    }
+    await reloadNames(renamed.map(({ newName }) => newName));
     if (connected && status.trouble === null) {
       await loadInvitations(true);
     }
@@ -120,8 +124,11 @@
     }
   }
 
-  /** Les cartes ne sont redessinées que si les noms ont changé ; un nouveau coffre est signalé. */
-  async function reloadNames() {
+  /**
+   * Les cartes ne sont redessinées que si les noms ont changé ; un nouveau coffre est signalé,
+   * mais pas un coffre de l'appareil qui vient d'être renommé (`renamed` : ses nouveaux noms).
+   */
+  async function reloadNames(renamed: string[]) {
     const fresh = listVaults();
     const [before, after] = await Promise.all([vaults.catch(() => null), fresh.catch(() => null)]);
     const unchanged =
@@ -132,7 +139,10 @@
       return;
     }
     vaults = fresh;
-    const arrived = before === null || after === null ? [] : after.filter((name) => !before.includes(name));
+    const arrived =
+      before === null || after === null
+        ? []
+        : after.filter((name) => !before.includes(name) && !renamed.includes(name));
     if (arrived.length > 0) {
       showToast(arrived.map((name) => texts.vaultArrived(name)).join(" "));
     }

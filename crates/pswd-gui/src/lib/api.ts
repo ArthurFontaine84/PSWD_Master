@@ -104,6 +104,8 @@ export interface ServerStatus {
   /** Le serveur enregistré ne répond plus ; `null` si le dernier contact a réussi. */
   trouble: ServerTrouble | null;
   vaults: VaultStatus[];
+  /** Coffres renommés par l'échange automatique qui vient d'avoir lieu ; absent si aucun. */
+  renamed?: Renamed[];
 }
 
 /** Échec du dernier contact avec le serveur. */
@@ -121,7 +123,14 @@ export interface VaultFailure {
 }
 
 /** Résultat d'un échange avec le serveur, sans mot de passe. */
+/** Coffre de cet appareil renommé pour laisser son nom à un coffre du serveur (SPEC §11). */
+export interface Renamed {
+  name: string;
+  newName: string;
+}
+
 export interface Exchange {
+  renamed: Renamed[];
   /** `name` sur le serveur, `localName` sur cet appareil (différent si le nom était pris). */
   downloaded: { name: string; localName: string }[];
   notDownloaded: VaultFailure[];
@@ -165,6 +174,7 @@ export type SyncState =
   | "removed"
   | "left"
   | "deleted"
+  | "nameTaken"
   | "offline"
   | "conflict"
   | "rejected"

@@ -16,6 +16,9 @@ pub enum SyncState {
     /// Supprimé partout depuis un autre appareil, sans modification ici : il a été fermé et
     /// supprimé.
     Deleted,
+    /// Un coffre du serveur porte déjà ce nom : pas publié ; renommé puis publié au prochain
+    /// échange de la liste.
+    NameTaken,
     Offline,
     /// Le coffre a changé sur le serveur à chaque essai.
     Conflict,
@@ -49,6 +52,7 @@ impl SyncReport {
             Ok(SyncOutcome::NotConnected) => (SyncState::NotConnected, None),
             Ok(SyncOutcome::Left) => (SyncState::Left, None),
             Ok(SyncOutcome::Deleted) => (SyncState::Deleted, None),
+            Ok(SyncOutcome::NameTaken) => (SyncState::NameTaken, None),
             Ok(SyncOutcome::Removed | SyncOutcome::Done(SyncStatus::Removed)) => {
                 (SyncState::Removed, None)
             }
@@ -92,6 +96,7 @@ mod tests {
             (Ok(SyncOutcome::NotConnected), report("notConnected", None)),
             (Ok(SyncOutcome::Left), report("left", None)),
             (Ok(SyncOutcome::Deleted), report("deleted", None)),
+            (Ok(SyncOutcome::NameTaken), report("nameTaken", None)),
             (Ok(SyncOutcome::Removed), report("removed", None)),
             (
                 Ok(SyncOutcome::Done(SyncStatus::Removed)),

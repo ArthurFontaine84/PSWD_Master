@@ -1071,6 +1071,7 @@ mod tests {
         assert_eq!(
             app.call("sync_server", json!({})),
             Ok(json!({
+                "renamed": [],
                 "downloaded": [],
                 "notDownloaded": [],
                 "published": [],

@@ -237,6 +237,19 @@ impl Config {
             .map(|(name, _)| name.as_str())
     }
 
+    /// Renomme un coffre : seul son nom change, son dossier et son lien avec le serveur restent.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::UnknownVault`] si le coffre n'existe pas, et comme
+    /// [`Config::ensure_available`] pour le nouveau nom.
+    pub fn rename_vault(&mut self, name: &str, new_name: &str) -> Result<(), ConfigError> {
+        self.ensure_available(new_name)?;
+        let vault = self.remove_vault(name)?;
+        self.vaults.insert(new_name.to_owned(), vault);
+        Ok(())
+    }
+
     /// Retire un coffre : son nom redevient libre.
     ///
     /// # Errors
@@ -585,6 +598,32 @@ theme = \"dark\"
         assert_eq!(config.remove_vault("perso"), Ok(vault("perso")));
         assert_eq!(config.vaults.keys().collect::<Vec<_>>(), ["travail"]);
         assert_eq!(config.add_vault("perso", vault("autre")), Ok(()));
+    }
+
+    #[test]
+    fn renamed_vault_keeps_its_folder_and_frees_its_name() {
+        let mut config = Config::default();
+        config.add_vault("banque", vault("dossier-a")).unwrap();
+        config.add_vault("perso", vault("dossier-b")).unwrap();
+        config.rename_vault("banque", "Banque 2").unwrap();
+        assert_eq!(config.vault("Banque 2"), Ok(&vault("dossier-a")));
+        assert_eq!(
+            config.vaults.keys().collect::<Vec<_>>(),
+            ["Banque 2", "perso"]
+        );
+        assert_eq!(
+            config.rename_vault("perso", "Banque 2"),
+            Err(ConfigError::VaultExists("Banque 2".to_owned()))
+        );
+        assert_eq!(
+            config.rename_vault("perso", " perso"),
+            Err(ConfigError::InvalidVaultName(" perso".to_owned()))
+        );
+        assert_eq!(
+            config.rename_vault("inconnu", "autre"),
+            Err(ConfigError::UnknownVault("inconnu".to_owned()))
+        );
+        assert_eq!(config.vault("perso"), Ok(&vault("dossier-b")));
     }
 
     #[test]

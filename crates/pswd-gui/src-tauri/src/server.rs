@@ -18,6 +18,9 @@ pub struct ServerStatus {
     /// Le serveur enregistré ne répond plus ; `None` si le dernier contact a réussi.
     trouble: Option<ServerTrouble>,
     vaults: Vec<VaultStatus>,
+    /// Coffres renommés par l'échange automatique qui vient d'avoir lieu ; absent si aucun.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    renamed: Vec<Renamed>,
 }
 
 /// Échec du dernier contact avec le serveur.
@@ -49,6 +52,8 @@ struct VaultStatus {
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Exchange {
+    /// Coffres de cet appareil renommés pour laisser leur nom à un coffre du serveur.
+    renamed: Vec<Renamed>,
     downloaded: Vec<Downloaded>,
     not_downloaded: Vec<Failure>,
     published: Vec<String>,
@@ -69,6 +74,13 @@ pub struct Exchange {
     /// cet appareil.
     deleted: Vec<String>,
     not_deleted: Vec<Failure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Renamed {
+    name: String,
+    new_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -147,6 +159,7 @@ impl AppState {
             address,
             trouble,
             vaults,
+            renamed: Vec::new(),
         })
     }
 
@@ -185,11 +198,12 @@ impl AppState {
         };
         let exchanged = self.vaults.server()?.map(|_| self.exchange_now());
         drop(one_at_a_time);
-        let status = match exchanged {
-            Some(Err(AppError::Port(_))) => self.status(Vec::new),
-            _ => self.server_status(),
+        let (status, renamed) = match exchanged {
+            Some(Err(AppError::Port(_))) => (self.status(Vec::new), Vec::new()),
+            Some(Ok(exchange)) => (self.server_status(), exchange.renamed),
+            _ => (self.server_status(), Vec::new()),
         };
-        status.map(Some)
+        status.map(|status| Some(ServerStatus { renamed, ..status }))
     }
 
     /// À appeler pendant [`AppState::exclusive`].
@@ -272,6 +286,11 @@ impl AppState {
 impl From<pswd_app::Exchange> for Exchange {
     fn from(done: pswd_app::Exchange) -> Self {
         let mut exchange = Self {
+            renamed: done
+                .renamed
+                .into_iter()
+                .map(|(name, new_name)| Renamed { name, new_name })
+                .collect(),
             removed: done.removed,
             ..Self::default()
         };
@@ -508,6 +527,29 @@ mod tests {
         assert_eq!(refreshed["address"], server.address.as_str());
         assert_eq!(refreshed["trouble"], Value::Null);
         assert_eq!(refreshed["vaults"][0]["state"], "synced");
+        assert_eq!(refreshed.get("renamed"), None);
+    }
+
+    #[test]
+    fn refresh_reports_a_vault_that_gave_its_name_away() {
+        let (dir, other) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+        let pc = device(&dir);
+        create(&pc, "perso");
+        connect_admin(&pc);
+        pc.exchange().unwrap();
+        let phone = device(&other);
+        create(&phone, "perso");
+        connect_same_account(&pc, &phone);
+        let refreshed = sent(&phone.refresh().unwrap().unwrap());
+        assert_eq!(
+            refreshed["renamed"],
+            json!([{ "name": "perso", "newName": "perso-2" }])
+        );
+        assert_eq!(refreshed["vaults"][1]["name"], "perso-2");
+        assert_eq!(
+            sent(&phone.refresh().unwrap().unwrap()).get("renamed"),
+            None
+        );
     }
 
     #[test]
@@ -601,6 +643,7 @@ mod tests {
         assert_eq!(
             sent(&pc.exchange().unwrap()),
             json!({
+                "renamed": [],
                 "downloaded": [],
                 "notDownloaded": [],
                 "published": ["perso"],
@@ -622,10 +665,15 @@ mod tests {
         create(&phone, "perso");
         connect_same_account(&pc, &phone);
         let exchange = sent(&phone.exchange().unwrap());
-        assert_eq!(exchange["downloaded"][0]["name"], "perso");
-        let local_name = exchange["downloaded"][0]["localName"].as_str().unwrap();
-        assert!(local_name.starts_with("perso-"), "{exchange}");
-        assert_eq!(exchange["published"], json!(["perso"]));
+        assert_eq!(
+            exchange["renamed"],
+            json!([{ "name": "perso", "newName": "perso-2" }])
+        );
+        assert_eq!(
+            exchange["downloaded"],
+            json!([{ "name": "perso", "localName": "perso" }])
+        );
+        assert_eq!(exchange["published"], json!(["perso-2"]));
     }
 
     #[test]
