@@ -1,21 +1,20 @@
+/// Longueur maximale d'un nom de coffre, en caractères.
 pub const MAX_VAULT_NAME_LEN: usize = 64;
 
-/// Noms de fichiers interdits par Windows, quelle que soit la casse.
-const RESERVED_NAMES: [&str; 22] = [
-    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8",
-    "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
-];
+/// Taille maximale d'un nom en octets : sa longueur tient sur un octet dans une sauvegarde
+/// (§7). Seul un nom de 64 caractères tous codés sur 4 octets (emoji) la dépasse.
+const MAX_VAULT_NAME_BYTES: usize = 255;
 
-/// Le nom d'un coffre sert de nom de dossier : lettres ASCII, chiffres, `-` et `_`, ni
-/// séparateur, ni `..`, ni nom réservé par Windows.
+/// Le nom d'un coffre est un texte libre, espaces et accents compris : il ne sert pas de nom
+/// de dossier. Il n'est ni vide, ni entouré d'espaces, n'a aucun caractère de contrôle et
+/// compte 64 caractères au plus. Deux noms ne sont égaux que s'ils sont identiques.
 #[must_use]
 pub fn is_valid_vault_name(name: &str) -> bool {
     !name.is_empty()
-        && name.len() <= MAX_VAULT_NAME_LEN
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        && !RESERVED_NAMES.contains(&name.to_ascii_lowercase().as_str())
+        && name.trim() == name
+        && name.len() <= MAX_VAULT_NAME_BYTES
+        && name.chars().count() <= MAX_VAULT_NAME_LEN
+        && !name.chars().any(char::is_control)
 }
 
 #[cfg(test)]
@@ -23,27 +22,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unsafe_folder_names_are_refused() {
+    fn invalid_names_are_refused() {
         let too_long = "a".repeat(MAX_VAULT_NAME_LEN + 1);
+        let too_heavy = "🔒".repeat(MAX_VAULT_NAME_LEN);
         for name in [
             "",
-            "a/b",
-            "a\\b",
-            "..",
-            "coffre perso",
-            "é",
-            "CON",
-            "lpt1",
+            " ",
+            " perso",
+            "perso ",
+            "per\nso",
+            "per\tso",
+            "per\u{7f}so",
             &too_long,
+            &too_heavy,
         ] {
             assert!(!is_valid_vault_name(name), "{name:?}");
         }
     }
 
     #[test]
-    fn safe_folder_names_are_accepted() {
-        let longest = "a".repeat(MAX_VAULT_NAME_LEN);
-        for name in ["Perso-2_x", "console", "Z", &longest] {
+    fn free_names_are_accepted() {
+        let longest = "é".repeat(MAX_VAULT_NAME_LEN);
+        let heaviest = "🔒".repeat(MAX_VAULT_NAME_LEN - 1);
+        for name in [
+            "Mon coffre",
+            "Été 2026",
+            "a/b",
+            "..",
+            "CON",
+            "Z",
+            &longest,
+            &heaviest,
+        ] {
             assert!(is_valid_vault_name(name), "{name:?}");
         }
     }

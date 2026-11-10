@@ -340,6 +340,17 @@ mod tests {
             .map(|v| v.name)
             .collect();
         assert_eq!(names, ["brouillon"]);
+
+        let mut saved = a.server().unwrap().unwrap();
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        saved.local_address = closed.local_addr().unwrap().to_string();
+        drop(closed);
+        a.server_file().save(&saved).unwrap();
+        assert_eq!(
+            a.delete_everywhere("brouillon"),
+            Err(PortError::unreachable("serveur injoignable").into())
+        );
+        assert!(a.config().unwrap().vault("brouillon").is_ok());
     }
 
     #[test]

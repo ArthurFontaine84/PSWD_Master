@@ -855,7 +855,7 @@ mod tests {
     fn invalid_vault_name_is_refused_by_the_server() {
         let (client, _) = admin();
         assert_eq!(
-            client.create_vault("coffre perso", false),
+            client.create_vault(" perso", false),
             Err(PortError::new("nom de coffre refusé par le serveur"))
         );
     }

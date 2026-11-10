@@ -33,8 +33,8 @@ impl fmt::Display for ConfigError {
             Self::VaultExists(name) => write!(f, "un coffre nommé {name} existe déjà"),
             Self::InvalidVaultName(name) => write!(
                 f,
-                "nom de coffre invalide : « {name} » (lettres, chiffres, - et _ ; \
-                 {MAX_VAULT_NAME_LEN} caractères au plus)"
+                "nom de coffre invalide : « {name} » ({MAX_VAULT_NAME_LEN} caractères au plus, \
+                 sans espace au début ni à la fin)"
             ),
         }
     }
@@ -87,10 +87,11 @@ impl Locations {
         &self.server_file
     }
 
-    /// Dossier proposé pour un nouveau coffre.
+    /// Dossier d'un coffre, désigné par son identifiant local : le nom du coffre est libre et
+    /// peut changer, le dossier non.
     #[must_use]
-    pub fn vault_dir(&self, name: &str) -> PathBuf {
-        self.vaults_dir.join(name)
+    pub fn vault_dir(&self, id: Uuid) -> PathBuf {
+        self.vaults_dir.join(id.simple().to_string())
     }
 }
 
@@ -191,7 +192,7 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// [`ConfigError::InvalidVaultName`] si le nom ne peut pas servir de nom de dossier,
+    /// [`ConfigError::InvalidVaultName`] si le nom est invalide (§7),
     /// [`ConfigError::VaultExists`] s'il est déjà pris.
     pub fn ensure_available(&self, name: &str) -> Result<(), ConfigError> {
         if !is_valid_vault_name(name) {
@@ -345,9 +346,12 @@ mod tests {
             locations.config_file(),
             Path::new("conf").join("config.toml")
         );
+        let id = Uuid::from_u128(0x1f);
         assert_eq!(
-            locations.vault_dir("perso"),
-            Path::new("data").join("vaults").join("perso")
+            locations.vault_dir(id),
+            Path::new("data")
+                .join("vaults")
+                .join("0000000000000000000000000000001f")
         );
         assert_eq!(
             locations.server_file(),
@@ -365,8 +369,10 @@ mod tests {
         );
         assert!(
             locations
-                .vault_dir("perso")
-                .ends_with(Path::new("pswd").join("vaults").join("perso"))
+                .vault_dir(Uuid::nil())
+                .parent()
+                .unwrap()
+                .ends_with(Path::new("pswd").join("vaults"))
         );
     }
 
@@ -411,12 +417,15 @@ theme = \"dark\"
         let mut config = Config::default();
         config.add_vault("perso", vault("perso")).unwrap();
         config.add_vault("travail", vault("travail")).unwrap();
+        config.add_vault("Été 2026", vault("ete")).unwrap();
+        config.add_vault("a.b", vault("ab")).unwrap();
         config.clipboard_clear_seconds = 30;
         file.save(&config).unwrap();
         assert_eq!(file.load().unwrap(), config);
         let text = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
         assert!(text.starts_with("auto_lock_minutes = 10\n"), "{text}");
         assert!(text.contains("[vaults.travail]"), "{text}");
+        assert!(text.contains("[vaults.\"Été 2026\"]"), "{text}");
     }
 
     #[test]
@@ -588,28 +597,17 @@ theme = \"dark\"
     }
 
     #[test]
-    fn vault_names_must_be_safe_folder_names() {
+    fn vault_names_are_checked() {
         let mut config = Config::default();
         let too_long = "a".repeat(MAX_VAULT_NAME_LEN + 1);
-        for name in [
-            "",
-            "a/b",
-            "a\\b",
-            "..",
-            "coffre perso",
-            "é",
-            "CON",
-            "lpt1",
-            &too_long,
-        ] {
+        for name in ["", " perso", "per\nso", &too_long] {
             assert_eq!(
                 config.add_vault(name, vault("x")),
                 Err(ConfigError::InvalidVaultName(name.to_owned())),
                 "{name:?}"
             );
         }
-        let longest = "a".repeat(MAX_VAULT_NAME_LEN);
-        for name in ["Perso-2_x", "console", &longest] {
+        for name in ["Mon coffre", "Été", "Ete", "Banque", "banque"] {
             assert_eq!(config.add_vault(name, vault("x")), Ok(()), "{name:?}");
         }
     }
@@ -644,8 +642,9 @@ theme = \"dark\"
                 "un coffre nommé perso existe déjà",
             ),
             (
-                ConfigError::InvalidVaultName("a/b".to_owned()),
-                "nom de coffre invalide : « a/b » (lettres, chiffres, - et _ ; 64 caractères au plus)",
+                ConfigError::InvalidVaultName(" perso".to_owned()),
+                "nom de coffre invalide : «  perso » (64 caractères au plus, sans espace au début \
+                 ni à la fin)",
             ),
         ];
         for (error, message) in messages {

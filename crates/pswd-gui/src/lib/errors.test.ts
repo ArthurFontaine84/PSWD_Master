@@ -26,8 +26,8 @@ describe("errorMessage", () => {
       ["vaultExists", "perso", "Un coffre nommé perso existe déjà."],
       [
         "invalidVaultName",
-        "a/b",
-        "Nom de coffre invalide : « a/b » (lettres, chiffres, - et _ ; 64 caractères au plus).",
+        " perso",
+        "Nom de coffre invalide : «  perso » (64 caractères au plus, sans espace au début ni à la fin).",
       ],
       ["passwordTooShort", null, "Le mot de passe maître doit contenir au moins 12 caractères."],
       [

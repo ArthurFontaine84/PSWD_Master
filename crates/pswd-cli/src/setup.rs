@@ -87,8 +87,8 @@ mod tests {
         let config = env.config("a");
         assert_eq!(config.vaults.keys().collect::<Vec<_>>(), ["perso"]);
         assert_eq!(
-            config.vault("perso").unwrap().path,
-            env.vault_dir("a", "perso")
+            config.vault("perso").unwrap().path.parent().unwrap(),
+            env.vaults_dir("a")
         );
         assert!(
             env.local_vault("a", "Maître-2026!")
@@ -118,9 +118,9 @@ mod tests {
             ))))
         );
         assert_eq!(
-            app.run(init("../ailleurs")),
+            app.run(init(" ailleurs")),
             Err(CliError::App(AppError::Config(
-                ConfigError::InvalidVaultName("../ailleurs".to_owned())
+                ConfigError::InvalidVaultName(" ailleurs".to_owned())
             )))
         );
     }
@@ -141,24 +141,7 @@ mod tests {
             Err(CliError::App(AppError::PasswordTooSimple))
         );
         assert!(env.config("a").vaults.is_empty());
-        assert!(!env.vault_dir("a", "perso").exists());
-    }
-
-    #[test]
-    fn unregistered_vault_file_is_never_replaced() {
-        let env = TestEnv::new();
-        let existing = env.vault_dir("a", "perso");
-        fs::create_dir_all(&existing).unwrap();
-        fs::write(existing.join("vault.enc"), b"ancien").unwrap();
-        let mut app = env.app("a", &["Maître-2026!", "Maître-2026!"]);
-        assert_eq!(
-            app.run(init("perso")),
-            Err(CliError::App(AppError::Session(
-                SessionError::LocalVaultExists
-            )))
-        );
-        assert_eq!(fs::read(existing.join("vault.enc")).unwrap(), b"ancien");
-        assert!(env.config("a").vaults.is_empty());
+        assert!(!env.vaults_dir("a").exists());
     }
 
     #[test]
@@ -176,7 +159,7 @@ mod tests {
             ),
             "{error}"
         );
-        assert!(!env.vault_dir("a", "perso").exists());
+        assert!(env.config("a").vaults.is_empty());
     }
 
     fn delete(name: &str) -> Command {
@@ -197,12 +180,13 @@ mod tests {
     #[test]
     fn delete_removes_the_vault_once_its_name_is_retyped() {
         let env = env_with_two_vaults();
+        let folder = env.vault_dir("a", "perso");
         let mut app = env.app("a", &[" perso "]);
         app.run(delete("perso")).unwrap();
         let output = app.terminal.output();
         assert!(output.starts_with("⚠ Le coffre « perso »"), "{output}");
         assert!(output.ends_with("Coffre « perso » supprimé."), "{output}");
-        assert!(!env.vault_dir("a", "perso").exists());
+        assert!(!folder.exists());
         let config = env.config("a");
         assert_eq!(config.vaults.keys().collect::<Vec<_>>(), ["travail"]);
     }

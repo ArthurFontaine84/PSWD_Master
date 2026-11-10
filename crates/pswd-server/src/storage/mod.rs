@@ -428,6 +428,7 @@ mod tests {
             (StorageError::NotFound, "coffre inconnu"),
             (StorageError::Gone, "coffre retiré"),
             (StorageError::Deleted, "coffre supprimé"),
+            (StorageError::DeletedEverywhere, "coffre supprimé partout"),
             (StorageError::NotShared, "coffre privé"),
             (StorageError::UnknownAccount, "compte inconnu"),
             (StorageError::AlreadyMember, "déjà membre ou déjà invité"),

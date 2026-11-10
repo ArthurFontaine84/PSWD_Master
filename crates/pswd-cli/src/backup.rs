@@ -69,9 +69,7 @@ mod tests {
     use std::path::PathBuf;
 
     use pswd_app::AppError;
-    use pswd_core::{
-        BackupFile, BackupFileError, EntryContent, EntryKind, SessionError, Timestamp,
-    };
+    use pswd_core::{BackupFile, BackupFileError, EntryContent, EntryKind, Timestamp};
     use pswd_infra::ConfigError;
 
     use crate::cli::Command;
@@ -302,31 +300,12 @@ mod tests {
     }
 
     #[test]
-    fn unregistered_vault_file_is_never_replaced() {
-        let env = TestEnv::with_vault();
-        let file = backup(&env, None);
-        let existing = env.vault_dir("b", "perso");
-        fs::create_dir_all(&existing).unwrap();
-        fs::write(existing.join("vault.enc"), b"ancien").unwrap();
-        let mut app = env.app("b", &[]);
-        assert_eq!(
-            app.run(restore(&file, Some("perso"))),
-            Err(CliError::App(AppError::Session(
-                SessionError::LocalVaultExists
-            )))
-        );
-        assert_eq!(fs::read(existing.join("vault.enc")).unwrap(), b"ancien");
-        assert!(env.config("b").vaults.is_empty());
-    }
-
-    #[test]
     fn local_write_failure_leaves_nothing_behind() {
         let env = TestEnv::with_vault();
         let file = backup(&env, None);
-        let vaults = env.vault_dir("b", "perso");
-        let vaults = vaults.parent().unwrap();
+        let vaults = env.vaults_dir("b");
         fs::create_dir_all(vaults.parent().unwrap()).unwrap();
-        fs::write(vaults, b"").unwrap();
+        fs::write(&vaults, b"").unwrap();
         let mut app = env.app("b", &[]);
         assert!(matches!(
             app.run(restore(&file, Some("perso"))),

@@ -393,12 +393,12 @@ describe("CreateVault", () => {
     vi.mocked(createVault).mockResolvedValue(created);
     const onCreated = vi.fn();
     render(CreateVault, { onCreated, onCancel: vi.fn() });
-    fill("perso", "Maître-2026!", "Maître-2026!");
+    fill("  Mon coffre ", "Maître-2026!", "Maître-2026!");
     await fireEvent.click(screen.getByRole("button", { name: "Créer" }));
     await vi.waitFor(() => {
       expect(onCreated).toHaveBeenCalledWith(created);
     });
-    expect(createVault).toHaveBeenCalledWith("perso", "Maître-2026!", false);
+    expect(createVault).toHaveBeenCalledWith("Mon coffre", "Maître-2026!", false);
     expect(field("Mot de passe maître").value).toBe("");
     expect(field("Confirmation").value).toBe("");
   });

@@ -279,7 +279,10 @@ mod tests {
     fn invalid_vaults_are_refused_when_added() {
         let file = vault_file(b"");
         let mut backup = BackupFile::new(at(0));
-        assert_eq!(backup.add("a/b", &file), Err(BackupFileError::InvalidName));
+        assert_eq!(
+            backup.add(" perso", &file),
+            Err(BackupFileError::InvalidName)
+        );
         assert_eq!(
             backup.add("perso", b"pas un coffre"),
             Err(BackupFileError::InvalidVault(
@@ -366,7 +369,7 @@ mod tests {
             ),
             (
                 "nom invalide",
-                Box::new(|f| f[20] = b'/'),
+                Box::new(|f| f[20] = b' '),
                 BackupFileError::InvalidName,
             ),
             (
@@ -467,7 +470,7 @@ mod tests {
         #[test]
         fn any_backup_round_trips(
             created_at in any::<i64>(),
-            vaults in btree_map("[A-Za-z0-9_-]{1,64}", proptest::collection::vec(any::<u8>(), 0..64), 0..8),
+            vaults in btree_map("[A-Za-z0-9_ éÉà🔒/-]{1,64}", proptest::collection::vec(any::<u8>(), 0..64), 0..8),
         ) {
             let files: Vec<(String, Vec<u8>)> = vaults
                 .into_iter()

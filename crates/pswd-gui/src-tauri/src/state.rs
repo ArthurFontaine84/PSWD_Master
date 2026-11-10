@@ -1350,12 +1350,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         open_with_entries(&state);
-        let file = dir
-            .path()
-            .join("data")
-            .join("vaults")
-            .join("perso")
-            .join("vault.enc.tmp");
+        let mut file = state
+            .vaults
+            .config()
+            .unwrap()
+            .vault("perso")
+            .unwrap()
+            .vault_file()
+            .into_os_string();
+        file.push(".tmp");
         std::fs::create_dir(&file).unwrap();
         let error = state
             .add_entry(wifi_input(&json!({ "mode": "clear" })))

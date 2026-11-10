@@ -347,7 +347,7 @@ mod tests {
     use pswd_app::Vaults;
     use pswd_core::crypto::KdfParams;
     use pswd_core::{Credentials, EntryContent, EntryKind, Timestamp};
-    use pswd_infra::{Locations, ServerFile};
+    use pswd_infra::{ConfigFile, Locations, ServerFile};
     use pswd_server::testing::TestServer;
     use serde_json::{Value, json};
     use tempfile::TempDir;
@@ -428,8 +428,14 @@ mod tests {
         file.save(&server).unwrap();
     }
 
+    /// Fichier du coffre `name`, lu dans la configuration de l'appareil.
     fn vault_file(dir: &Path, name: &str) -> PathBuf {
-        dir.join("data").join("vaults").join(name).join("vault.enc")
+        ConfigFile::new(dir.join("config").join("config.toml"))
+            .load()
+            .unwrap()
+            .vault(name)
+            .unwrap()
+            .vault_file()
     }
 
     #[test]
@@ -872,7 +878,7 @@ mod tests {
         assert_eq!(sent(&ignored)[0]["name"], "travail");
         let downloaded = sent(&state.download_again(ignored[0].id).unwrap());
         assert_eq!(downloaded["downloaded"][0]["localName"], "travail");
-        assert!(state.ignored_vaults().unwrap().is_empty());
+        assert_eq!(sent(&state.ignored_vaults().unwrap()), json!([]));
 
         go_offline(&dir);
         assert_eq!(

@@ -334,7 +334,7 @@ mod tests {
     fn failed_download_is_reported() {
         let env = TestEnv::with_vault();
         env.connect_admin("a");
-        let vaults_dir = env.vault_dir("b", "perso").parent().unwrap().to_owned();
+        let vaults_dir = env.vaults_dir("b");
         fs::create_dir_all(vaults_dir.parent().unwrap()).unwrap();
         fs::write(&vaults_dir, b"").unwrap();
         let shown = env.connect_same_account("a", "b");
@@ -529,6 +529,41 @@ mod tests {
              appareil."
         );
         assert!(env.config("b").vaults.is_empty());
+    }
+
+    #[test]
+    fn opening_a_vault_deleted_everywhere_deletes_it() {
+        let env = TestEnv::with_vault();
+        env.connect_admin("a");
+        env.connect_same_account("a", "b");
+        env.vaults("a").delete_everywhere("perso").unwrap();
+
+        let shown = output(&env, "b", &[PASSWORD], open());
+        assert!(
+            shown.ends_with(
+                "⚠ Synchro : coffre supprimé partout depuis un autre appareil : il a été supprimé \
+                 de cet appareil."
+            ),
+            "{shown}"
+        );
+        assert!(env.config("b").vaults.is_empty());
+    }
+
+    #[test]
+    fn a_vault_deleted_everywhere_but_not_here_is_reported() {
+        let env = TestEnv::with_vault();
+        env.connect_admin("a");
+        env.connect_same_account("a", "b");
+        env.vaults("a").delete_everywhere("perso").unwrap();
+        let file = env.config("b").vault("perso").unwrap().vault_file();
+        let mut temporary = file.into_os_string();
+        temporary.push(".tmp");
+        fs::create_dir(&temporary).unwrap();
+        let shown = output(&env, "b", &[], Command::Sync);
+        assert!(
+            shown.starts_with("⚠ Coffre « perso » supprimé partout mais pas ici : "),
+            "{shown}"
+        );
     }
 
     #[test]

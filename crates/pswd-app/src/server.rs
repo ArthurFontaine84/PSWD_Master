@@ -1499,6 +1499,18 @@ mod tests {
             b.forget("inconnu"),
             Err(ConfigError::UnknownVault("inconnu".to_owned()).into())
         );
+        b.update_config(|config| {
+            let elsewhere = config.vaults["perso"].remote.clone().map(|mut remote| {
+                remote.server = "autre serveur".to_owned();
+                remote
+            });
+            config.vaults.get_mut("local").unwrap().remote = elsewhere;
+        })
+        .unwrap();
+        assert_eq!(
+            b.forget("local"),
+            Err(AppError::NotPublished("local".to_owned()))
+        );
         go_offline(&b);
         assert_eq!(b.forget("perso"), Err(offline()));
     }

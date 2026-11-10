@@ -164,8 +164,8 @@ Fonction pure `merge(local: Vault, remote: Vault) -> Result<Vault, MergeError>` 
 
 **Emplacements** (dossiers standard de l'OS, crate `etcetera` : `AppData\Roaming` sous Windows, `~/.config` et `~/.local/share` ailleurs)
 - Config : `<config_dir>/pswd/config.toml`, contenant les coffres nommés (`[vaults.<nom>]` : chemin local), `auto_lock_minutes = 10`, `clipboard_clear_seconds = 20`, `background_lock_seconds = 60` (mobile, §12) et `theme = "auto"` (`auto`, `light` ou `dark`, réglé par PSWD Master).
-- Données : un dossier par coffre, `<data_dir>/pswd/vaults/<nom>/`, contenant `vault.enc` (`FileStore`). Plusieurs coffres coexistent ; aucun ne remplace un autre.
-- Nom d'un coffre : lettres ASCII, chiffres, `-` et `_`, 64 caractères au plus, hors noms réservés de Windows (`con`, `nul`…) ; il sert de nom de dossier. Un nom pris est refusé tant que le coffre existe. Il n'y a pas de coffre par défaut : chaque commande nomme son coffre.
+- Données : un dossier par coffre, `<data_dir>/pswd/vaults/<identifiant>/` (UUID v4 tiré à la création, sans tirets), contenant `vault.enc` (`FileStore`). Plusieurs coffres coexistent ; aucun ne remplace un autre. Le nom du coffre n'apparaît pas dans le chemin : il peut contenir n'importe quel caractère et changer sans déplacer de fichier (décidé le 2026-11-10, #15 des tests d'intégration ; les coffres créés avant restent sous `vaults/<nom>/` et fonctionnent tels quels, puisque `config.toml` garde le chemin de chaque coffre).
+- Nom d'un coffre : texte libre, espaces et accents compris (`pswd_core::is_valid_vault_name`) : ni vide, ni entouré d'espaces, sans caractère de contrôle, 64 caractères au plus (et 255 octets, pour tenir dans une sauvegarde). Les noms sont comparés à l'identique : « Été », « Ete », « Banque » et « banque » sont quatre noms distincts. PSWD Master retire les espaces au début et à la fin de la saisie et la met sous forme Unicode NFC (deux noms identiques à l'écran le sont aussi pour l'application). Un nom pris est refusé tant que le coffre existe. Il n'y a pas de coffre par défaut : chaque commande nomme son coffre.
 - Les restes de la v1 (dossiers `repo.git/`, jetons `pswd` du trousseau) ne sont plus utilisés et peuvent être supprimés à la main ; les entrées `url` et `default_vault` de `config.toml` doivent être retirées.
 
 **Sauvegarde** : un seul format sur tous les appareils, un fichier `.pswd` (sur mobile, une sauvegarde ne peut pas être un dossier). Il sert aussi à passer ses coffres d'un appareil à l'autre.
@@ -181,7 +181,7 @@ created_at     i64 (ms UTC)      date de la sauvegarde
 vault_count    u16               1 000 au plus
 pour chaque coffre, noms triés et distincts :
   name_len     u8
-  name         ASCII             nom de coffre valide (§7)
+  name         UTF-8             nom de coffre valide (§7)
   file_len     u32               64 Mio au plus
   file         vault.enc         vérifié (structure, version) à la lecture
 ```

@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use pswd_core::crypto::KdfParams;
 use pswd_core::ports::LocalStore;
@@ -7,6 +7,7 @@ use pswd_core::{
     BackupFile, Credentials, RecoveryKey, Secret, Session, SessionError, Timestamp, VaultFile,
 };
 use pswd_infra::{Config, ConfigFile, FileStore, Locations, RemoteLink, VaultConfig};
+use uuid::Uuid;
 
 use crate::password::check_master_password;
 use crate::utc::backup_day;
@@ -16,12 +17,22 @@ use crate::{AppError, VaultSession};
 #[derive(Debug, Clone)]
 pub struct Vaults {
     pub(crate) locations: Locations,
+    /// Identifiant du dossier d'un nouveau coffre.
+    folder_id: fn() -> Uuid,
 }
 
 impl Vaults {
     #[must_use]
     pub fn new(locations: Locations) -> Self {
-        Self { locations }
+        Self {
+            locations,
+            folder_id: Uuid::new_v4,
+        }
+    }
+
+    /// Dossier d'un nouveau coffre : le nom du coffre n'y apparaît pas, il peut donc changer.
+    fn new_vault_dir(&self) -> PathBuf {
+        self.locations.vault_dir((self.folder_id)())
     }
 
     pub(crate) fn config_file(&self) -> ConfigFile {
@@ -105,7 +116,7 @@ impl Vaults {
         config.ensure_available(name)?;
         check_master_password(password)?;
         let vault = VaultConfig {
-            path: self.locations.vault_dir(name),
+            path: self.new_vault_dir(),
             shared,
             remote: None,
         };
@@ -175,7 +186,7 @@ impl Vaults {
         let mut config = config_file.load()?;
         config.ensure_available(name)?;
         let vault = VaultConfig {
-            path: self.locations.vault_dir(name),
+            path: self.new_vault_dir(),
             shared,
             remote,
         };
@@ -314,6 +325,16 @@ mod tests {
         Vaults::new(Locations::new(&root.join("config"), &root.join("data")))
     }
 
+    /// Comme [`device`], mais chaque nouveau coffre y reçoit le même dossier, déjà connu.
+    fn device_with_known_folder(dir: &TempDir, name: &str) -> (Vaults, PathBuf) {
+        let vaults = Vaults {
+            folder_id: Uuid::nil,
+            ..device(dir, name)
+        };
+        let folder = vaults.locations.vault_dir(Uuid::nil());
+        (vaults, folder)
+    }
+
     fn create(vaults: &Vaults, name: &str) -> VaultSession {
         vaults
             .create(name, &secret("Maître-2026!"), fast(), at(0))
@@ -341,14 +362,19 @@ mod tests {
             .create("perso", &secret("Maître-2026!"), fast(), at(0))
             .unwrap();
         assert_eq!(names(&vaults), ["perso"]);
+        let path = vaults
+            .config()
+            .unwrap()
+            .vault("perso")
+            .unwrap()
+            .path
+            .clone();
         assert_eq!(
-            vaults.config().unwrap().vault("perso").unwrap().path,
-            dir.path()
-                .join("a")
-                .join("data")
-                .join("vaults")
-                .join("perso")
+            path.parent().unwrap(),
+            dir.path().join("a").join("data").join("vaults")
         );
+        let folder = path.file_name().unwrap().to_str().unwrap();
+        assert!(Uuid::try_parse(folder).is_ok(), "{folder}");
         assert!(open(&vaults, "perso").is_ok());
         assert!(
             vaults
@@ -399,15 +425,31 @@ mod tests {
     }
 
     #[test]
-    fn unregistered_vault_file_is_never_replaced() {
+    fn names_are_free_and_each_vault_has_its_own_folder() {
         let dir = TempDir::new().unwrap();
         let vaults = device(&dir, "a");
-        let folder = dir
-            .path()
-            .join("a")
-            .join("data")
-            .join("vaults")
-            .join("perso");
+        for name in ["Mon coffre", "Été", "Ete", "été"] {
+            create(&vaults, name);
+        }
+        assert_eq!(names(&vaults), ["Ete", "Mon coffre", "Été", "été"]);
+        assert!(open(&vaults, "Été").is_ok());
+        let config = vaults.config().unwrap();
+        let mut folders: Vec<_> = config.vaults.values().map(|vault| &vault.path).collect();
+        folders.sort();
+        folders.dedup();
+        assert_eq!(folders.len(), 4);
+        assert_eq!(
+            vaults.check_new_name("Été "),
+            Err(AppError::Config(ConfigError::InvalidVaultName(
+                "Été ".to_owned()
+            )))
+        );
+    }
+
+    #[test]
+    fn unregistered_vault_file_is_never_replaced() {
+        let dir = TempDir::new().unwrap();
+        let (vaults, folder) = device_with_known_folder(&dir, "a");
         fs::create_dir_all(&folder).unwrap();
         fs::write(folder.join("vault.enc"), b"ancien").unwrap();
         assert_eq!(
@@ -555,13 +597,7 @@ mod tests {
     fn restore_never_replaces_an_unregistered_vault_file() {
         let dir = TempDir::new().unwrap();
         let file = saved_vault(&dir);
-        let vaults = device(&dir, "b");
-        let folder = dir
-            .path()
-            .join("b")
-            .join("data")
-            .join("vaults")
-            .join("perso");
+        let (vaults, folder) = device_with_known_folder(&dir, "b");
         fs::create_dir_all(&folder).unwrap();
         fs::write(folder.join("vault.enc"), b"ancien").unwrap();
         assert_eq!(

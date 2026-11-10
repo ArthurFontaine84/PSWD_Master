@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectionProblem, newPasswordProblem, newVaultProblem } from "./validation";
+import { cleanVaultName, connectionProblem, newPasswordProblem, newVaultProblem } from "./validation";
 
 const STRONG = "Maître-2026!";
 const TOO_SHORT = "Le mot de passe maître doit contenir au moins 12 caractères.";
@@ -7,16 +7,17 @@ const TOO_SIMPLE =
   "Le mot de passe maître doit mélanger au moins 3 types de caractères parmi : minuscules, majuscules, chiffres, symboles.";
 
 describe("newVaultProblem", () => {
-  it("accepts a valid form", () => {
-    expect(newVaultProblem("Perso-2_x", STRONG, STRONG)).toBeNull();
-    expect(newVaultProblem("a".repeat(64), STRONG, STRONG)).toBeNull();
+  it("accepts a valid form, with a free name", () => {
+    for (const name of ["Perso-2_x", "Mon coffre", "Été", "a/b", "é".repeat(64), "🔒".repeat(63)]) {
+      expect(newVaultProblem(name, STRONG, STRONG)).toBeNull();
+    }
   });
 
-  it("requires a safe vault name", () => {
+  it("requires a vault name of 64 characters at most", () => {
     expect(newVaultProblem("", STRONG, STRONG)).toBe("Le nom du coffre est obligatoire.");
-    for (const name of ["coffre perso", "a/b", "é", "a".repeat(65)]) {
+    for (const name of ["a".repeat(65), "🔒".repeat(64), "per\tso", "per\nso"]) {
       expect(newVaultProblem(name, STRONG, STRONG)).toBe(
-        "Nom invalide : lettres, chiffres, - et _ uniquement, 64 caractères au plus.",
+        "Nom invalide : 64 caractères au plus, sans tabulation ni retour à la ligne.",
       );
     }
   });
@@ -27,6 +28,13 @@ describe("newVaultProblem", () => {
     expect(newVaultProblem("perso", STRONG, "Maitre-2026!")).toBe(
       "Les deux saisies ne correspondent pas.",
     );
+  });
+});
+
+describe("cleanVaultName", () => {
+  it("removes the spaces around the name and keeps one Unicode form", () => {
+    expect(cleanVaultName("  Mon coffre \t")).toBe("Mon coffre");
+    expect(cleanVaultName("Été")).toBe("Été");
   });
 });
 

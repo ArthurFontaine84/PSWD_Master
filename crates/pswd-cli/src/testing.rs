@@ -212,8 +212,14 @@ impl TestEnv {
             .unwrap()
     }
 
+    /// Dossier du coffre `name`, lu dans la configuration.
     pub fn vault_dir(&self, device: &str, name: &str) -> PathBuf {
-        self.locations(device).vault_dir(name)
+        self.config(device).vault(name).unwrap().path.clone()
+    }
+
+    /// Dossier qui contient les coffres de l'appareil.
+    pub fn vaults_dir(&self, device: &str) -> PathBuf {
+        self.dir.path().join(device).join("data").join("vaults")
     }
 
     /// Modifie le coffre `perso` de l'appareil `device`.

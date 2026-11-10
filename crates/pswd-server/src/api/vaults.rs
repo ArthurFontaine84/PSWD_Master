@@ -303,12 +303,17 @@ mod tests {
     #[tokio::test]
     async fn vault_name_must_be_valid() {
         let (app, token) = app_with_admin().await;
-        for name in ["", "coffre perso", "a/b", "con"] {
+        let too_long = "a".repeat(65);
+        for name in ["", " perso", "per\nso", &too_long] {
             let response = send(&app, create_request(Some(&token), name)).await;
             assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{name:?}");
         }
         let response = send(&app, request("GET", "/v1/vaults", Some(&token), None)).await;
         assert_eq!(json(response).await, serde_json::json!([]));
+        let response = send(&app, create_request(Some(&token), "Été 2026")).await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let response = send(&app, request("GET", "/v1/vaults", Some(&token), None)).await;
+        assert_eq!(json(response).await[0]["name"], "Été 2026");
     }
 
     #[tokio::test]

@@ -13,7 +13,7 @@ const errors = {
   unknownVault: (detail: string) => `Coffre inconnu : ${detail}.`,
   vaultExists: (detail: string) => `Un coffre nommé ${detail} existe déjà.`,
   invalidVaultName: (detail: string) =>
-    `Nom de coffre invalide : « ${detail} » (lettres, chiffres, - et _ ; 64 caractères au plus).`,
+    `Nom de coffre invalide : « ${detail} » (64 caractères au plus, sans espace au début ni à la fin).`,
   passwordTooShort: () => "Le mot de passe maître doit contenir au moins 12 caractères.",
   passwordTooSimple: () =>
     "Le mot de passe maître doit mélanger au moins 3 types de caractères parmi : minuscules, majuscules, chiffres, symboles.",
@@ -63,7 +63,7 @@ export const fr = {
   cancel: "Annuler",
   newVault: "Nouveau coffre",
   vaultName: "Nom du coffre",
-  vaultNameHint: "Lettres, chiffres, - et _.",
+  vaultNameHint: "64 caractères au plus ; espaces et accents permis.",
   masterPassword: "Mot de passe maître",
   confirmation: "Confirmation",
   sharedVault: "Coffre commun",
@@ -417,7 +417,7 @@ export const fr = {
   passwordRule: "Au moins 12 caractères, dont au moins 3 types parmi : minuscules, majuscules, chiffres, symboles.",
   validation: {
     nameRequired: "Le nom du coffre est obligatoire.",
-    nameInvalid: "Nom invalide : lettres, chiffres, - et _ uniquement, 64 caractères au plus.",
+    nameInvalid: "Nom invalide : 64 caractères au plus, sans tabulation ni retour à la ligne.",
     passwordRequired: "Le mot de passe maître est obligatoire.",
     passwordTooShort: "Le mot de passe maître doit contenir au moins 12 caractères.",
     passwordTooSimple:

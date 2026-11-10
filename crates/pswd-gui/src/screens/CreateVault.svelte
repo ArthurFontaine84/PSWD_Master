@@ -4,7 +4,7 @@
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { verbatim } from "../lib/keyboard";
-  import { newVaultProblem } from "../lib/validation";
+  import { cleanVaultName, newVaultProblem } from "../lib/validation";
 
   interface Props {
     onCreated: (created: CreatedVault) => void;
@@ -22,7 +22,8 @@
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    problem = newVaultProblem(name, password, confirmation);
+    const cleaned = cleanVaultName(name);
+    problem = newVaultProblem(cleaned, password, confirmation);
     if (problem !== null) {
       return;
     }
@@ -32,7 +33,7 @@
     confirmation = "";
     busy = true;
     try {
-      onCreated(await createVault(name, typed, shared));
+      onCreated(await createVault(cleaned, typed, shared));
     } catch (error) {
       problem = errorMessage(error);
     } finally {
