@@ -105,6 +105,37 @@ mod tests {
         }
     }
 
+    /// Le lendemain d'une date, par les règles du calendrier grégorien.
+    fn next_day((year, month, day): (i64, i64, i64)) -> (i64, i64, i64) {
+        let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+        let length = match month {
+            2 if leap => 29,
+            2 => 28,
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        };
+        match (day < length, month < 12) {
+            (true, _) => (year, month, day + 1),
+            (false, true) => (year, month + 1, 1),
+            (false, false) => (year + 1, 1, 1),
+        }
+    }
+
+    #[test]
+    fn every_day_from_1600_to_2500_follows_the_calendar() {
+        // Du 1ᵉʳ janvier 1600 au 31 décembre 2499 : les siècles bissextiles ou non, et chaque
+        // passage du 28 février au 1ᵉʳ mars, où l'algorithme change d'année.
+        let first = -135_140;
+        assert_eq!(civil_from_days(first), (1600, 1, 1));
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        let mut expected = (1600, 1, 1);
+        for days in first..=193_578 {
+            assert_eq!(civil_from_days(days), expected, "{days}");
+            expected = next_day(expected);
+        }
+        assert_eq!(expected, (2500, 1, 1));
+    }
+
     #[test]
     fn backup_file_names_are_precise_to_the_second() {
         let cases = [
