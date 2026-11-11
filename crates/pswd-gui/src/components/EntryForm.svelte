@@ -13,9 +13,12 @@
   import { texts } from "../lib/i18n";
   import { verbatim } from "../lib/keyboard";
   import PasswordInput from "./PasswordInput.svelte";
+  import TagInput from "./TagInput.svelte";
 
   interface Props {
     initial: FormValues;
+    /** Tags déjà utilisés dans le coffre, proposés à la saisie. */
+    knownTags: string[];
     /** `true` pour modifier une entrée : le type ne change plus, le mot de passe peut rester. */
     editing: boolean;
     onSubmit: (input: EntryInput) => Promise<void>;
@@ -23,7 +26,7 @@
     onExpired: () => void;
   }
 
-  const { initial, editing, onSubmit, onCancel, onExpired }: Props = $props();
+  const { initial, knownTags, editing, onSubmit, onCancel, onExpired }: Props = $props();
 
   // Le formulaire part des valeurs initiales, puis suit seulement la saisie.
   const values = $state<FormValues>(untrack(() => ({ ...initial })));
@@ -112,11 +115,7 @@
     {texts.notes}
     <textarea bind:value={values.notes} rows="4"></textarea>
   </label>
-  <label>
-    {texts.tags}
-    <input bind:value={values.tags} {...verbatim} />
-    <small>{texts.tagsHint}</small>
-  </label>
+  <TagInput bind:tags={values.tags} bind:draft={values.tagDraft} known={knownTags} />
   {#if problem}
     <p role="alert">{problem}</p>
   {/if}

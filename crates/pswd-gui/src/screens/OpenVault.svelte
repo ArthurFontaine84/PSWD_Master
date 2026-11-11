@@ -364,6 +364,7 @@
             {#key editor}
               <EntryForm
                 initial={editor.mode === "edit" ? formFrom(editor.detail) : emptyForm()}
+                knownTags={tags.map(({ tag }) => tag)}
                 editing={editor.mode === "edit"}
                 onSubmit={save}
                 onCancel={() => (editor = null)}

@@ -28,7 +28,8 @@ describe("entry form", () => {
       symbols: true,
       urls: "",
       notes: "",
-      tags: "",
+      tags: [],
+      tagDraft: "",
     });
   });
 
@@ -40,10 +41,10 @@ describe("entry form", () => {
       passwordMode: "keep",
       urls: "https://github.com\nhttps://gist.github.com",
       notes: "compte pro",
-      tags: "dev perso",
+      tags: ["dev", "perso"],
     });
     const note = formFrom({ ...detail, kind: "note", username: null, notes: null, urls: [], tags: [] });
-    expect(note).toMatchObject({ kind: "note", username: "", notes: "", urls: "", tags: "" });
+    expect(note).toMatchObject({ kind: "note", username: "", notes: "", urls: "", tags: [] });
   });
 
   it("requires a title and a valid length to generate", () => {
@@ -70,7 +71,8 @@ describe("entry form", () => {
       password: "hunter2",
       urls: " https://github.com \n\n https://gist.github.com ",
       notes: "compte pro",
-      tags: "dev, perso  maison",
+      tags: ["dev", "perso"],
+      tagDraft: " Maison ",
     };
     expect(toInput(values)).toEqual({
       kind: "login",

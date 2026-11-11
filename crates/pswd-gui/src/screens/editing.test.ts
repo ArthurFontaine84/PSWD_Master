@@ -120,7 +120,9 @@ describe("adding an entry", () => {
     await type("Identifiant", "admin");
     await type("Mot de passe", "box-1234");
     await type("Adresses", "http://192.168.1.1");
-    await type("Tags", "maison réseau");
+    await type("Nouveau tag", "maison réseau");
+    expect(screen.getByRole("button", { name: "Retirer le tag maison" })).toBeInTheDocument();
+    expect(field("Nouveau tag").value).toBe("réseau");
     await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
     await vi.waitFor(() => {
       expect(entryDetail).toHaveBeenCalledWith("9");
@@ -143,7 +145,7 @@ describe("adding an entry", () => {
     await startNewEntry();
     expectVerbatim(field("Identifiant"));
     expectVerbatim(field("Adresses"));
-    expectVerbatim(field("Tags"));
+    expectVerbatim(field("Nouveau tag"));
     expectVerbatim(screen.getByRole("searchbox"));
     expect(field("Titre")).not.toHaveAttribute("autocapitalize");
   });
@@ -237,6 +239,48 @@ describe("the vault locking itself during a save", () => {
 });
 
 describe("editing an entry", () => {
+  it("edits the tags as labels, with the existing tags proposed", async () => {
+    vi.mocked(listTags).mockResolvedValue([
+      { tag: "dev", count: 1 },
+      { tag: "maison", count: 2 },
+      { tag: "perso", count: 3 },
+    ]);
+    vi.mocked(updateEntry).mockResolvedValue(githubDetail);
+    await openGithub();
+    await fireEvent.click(screen.getByRole("button", { name: "Modifier" }));
+    const chosen = () => within(screen.getByRole("list", { name: "Tags de l'entrée" }));
+    expect(chosen().getByText("dev")).toBeInTheDocument();
+    const existing = screen.getByRole("group", { name: "Tags existants" });
+    expect(within(existing).queryByRole("button", { name: "Ajouter le tag dev" })).not.toBeInTheDocument();
+
+    await fireEvent.click(within(existing).getByRole("button", { name: "Ajouter le tag perso" }));
+    expect(chosen().getByText("perso")).toBeInTheDocument();
+    await type("Nouveau tag", "ma");
+    expect(screen.getAllByRole("button", { name: /^Ajouter le tag/ }).map((button) => button.textContent.trim())).toEqual([
+      "+ maison",
+    ]);
+
+    await type("Nouveau tag", "Pro");
+    await fireEvent.keyDown(field("Nouveau tag"), { key: "Enter" });
+    expect(chosen().getByText("pro")).toBeInTheDocument();
+    expect(field("Nouveau tag").value).toBe("");
+    expect(updateEntry).not.toHaveBeenCalled();
+    await fireEvent.keyDown(field("Nouveau tag"), { key: "a" });
+
+    const add = screen.getByRole("button", { name: "Ajouter" });
+    expect(add).toBeDisabled();
+    await type("Nouveau tag", "x");
+    await fireEvent.click(add);
+    await fireEvent.click(screen.getByRole("button", { name: "Retirer le tag dev" }));
+    expect(screen.queryByRole("button", { name: "Retirer le tag dev" })).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
+    await vi.waitFor(() => {
+      expect(updateEntry).toHaveBeenCalledWith("1", expect.objectContaining({ tags: ["perso", "pro", "x"] }));
+    });
+  });
+
+
   it("starts from its values and keeps its password by default", async () => {
     vi.mocked(updateEntry).mockResolvedValue({ ...githubDetail, title: "GitHub pro" });
     await openGithub();

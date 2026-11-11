@@ -2,6 +2,7 @@
 // backend, qui refait toutes les vérifications.
 import type { EntryDetail, EntryInput, EntryKind } from "./api";
 import { texts } from "./i18n";
+import { addTags } from "./tags";
 
 export type PasswordMode = "keep" | "clear" | "set" | "generate";
 
@@ -17,8 +18,9 @@ export interface FormValues {
   /** Une URL par ligne. */
   urls: string;
   notes: string;
-  /** Séparés par des espaces ou des virgules. */
-  tags: string;
+  tags: string[];
+  /** Tag en cours de saisie, pas encore ajouté : enregistré avec les autres. */
+  tagDraft: string;
 }
 
 export const MIN_LENGTH = 8;
@@ -37,7 +39,8 @@ export function emptyForm(): FormValues {
     symbols: true,
     urls: "",
     notes: "",
-    tags: "",
+    tags: [],
+    tagDraft: "",
   };
 }
 
@@ -51,7 +54,7 @@ export function formFrom(detail: EntryDetail): FormValues {
     passwordMode: "keep",
     urls: detail.urls.join("\n"),
     notes: detail.notes ?? "",
-    tags: detail.tags.join(" "),
+    tags: [...detail.tags],
   };
 }
 
@@ -86,6 +89,6 @@ export function toInput(values: FormValues): EntryInput {
     password,
     urls: words(values.urls, /\s+/),
     notes: values.notes,
-    tags: words(values.tags, /[\s,]+/),
+    tags: addTags(values.tags, values.tagDraft),
   };
 }
