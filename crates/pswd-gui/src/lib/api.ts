@@ -314,6 +314,11 @@ export function copyPassword(id: string): Promise<number> {
   return invoke<number>("copy_password", { id });
 }
 
+/** Ouvre une adresse web dans le navigateur du système ; Rust refuse tout autre protocole. */
+export async function openUrl(url: string): Promise<void> {
+  await invoke("open_url", { url });
+}
+
 export function addEntry(entry: EntryInput): Promise<EntryDetail> {
   return invoke<EntryDetail>("add_entry", { entry });
 }

@@ -5,6 +5,7 @@ import {
   addEntry,
   changePassword,
   copyPassword,
+  openUrl,
   createVault,
   currentVault,
   appHidden,
@@ -94,6 +95,7 @@ describe("api", () => {
     await listTags();
     await revealPassword("1");
     await copyPassword("1");
+    await openUrl("exemple.fr");
     const entry: EntryInput = {
       kind: "note",
       title: "Wi-Fi",
@@ -173,6 +175,7 @@ describe("api", () => {
       ["list_tags"],
       ["reveal_password", { id: "1" }],
       ["copy_password", { id: "1" }],
+      ["open_url", { url: "exemple.fr" }],
       ["add_entry", { entry }],
       ["update_entry", { id: "1", entry }],
       ["delete_entry", { id: "1" }],

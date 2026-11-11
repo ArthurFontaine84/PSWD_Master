@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   copyPassword,
+  openUrl,
   entryDetail,
   entryHistory,
   listEntries,
@@ -28,6 +29,7 @@ vi.mock("../lib/api", () => ({
   entryHistory: vi.fn(),
   revealPassword: vi.fn(),
   copyPassword: vi.fn(),
+  openUrl: vi.fn(),
   lockVault: vi.fn(),
   onVaultSynced: vi.fn(),
   refreshServer: vi.fn(),
@@ -162,7 +164,8 @@ describe("OpenVault", () => {
     expect(screen.getByText("Mot de passe", { selector: ".kind" })).toBeInTheDocument();
     expect(screen.getByText("arthur", { selector: "dd" })).toBeInTheDocument();
     expect(screen.getByText("••••••••")).toBeInTheDocument();
-    expect(screen.getByText("https://github.com")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Ouvrir https://github.com dans le navigateur" }));
+    expect(openUrl).toHaveBeenCalledWith("https://github.com");
     expect(screen.getByText("compte pro")).toBeInTheDocument();
     expect(screen.getByText("dev, perso")).toBeInTheDocument();
     expect(screen.getByText(/Modifiée le 23 octobre 2026 .* · 2 versions précédentes/)).toBeInTheDocument();
@@ -243,6 +246,9 @@ describe("OpenVault", () => {
     );
     await fireEvent.click(screen.getByRole("button", { name: "Copier" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Copie impossible : occupé");
+    vi.mocked(openUrl).mockRejectedValue({ code: "urlNotOpened", detail: "aucun navigateur" });
+    await fireEvent.click(screen.getByRole("button", { name: /^Ouvrir https:\/\/github.com/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Ouverture du navigateur impossible : aucun navigateur");
   });
 
   it("reports an entry that disappeared", async () => {

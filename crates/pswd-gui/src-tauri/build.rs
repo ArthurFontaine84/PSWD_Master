@@ -17,6 +17,7 @@ const COMMANDS: &[&str] = &[
     "list_tags",
     "reveal_password",
     "copy_password",
+    "open_url",
     "add_entry",
     "update_entry",
     "delete_entry",

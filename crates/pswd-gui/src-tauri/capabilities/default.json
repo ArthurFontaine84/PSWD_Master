@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Ce que l'interface peut appeler : les commandes de PSWD Master, l'écoute de leurs événements et les fenêtres système d'ouverture et d'enregistrement d'un fichier (seul le chemin choisi est transmis) ; ni lecture de fichiers, ni shell, ni réseau.",
+  "description": "Ce que l'interface peut appeler : les commandes de PSWD Master, l'écoute de leurs événements et les fenêtres système d'ouverture et d'enregistrement d'un fichier (seul le chemin choisi est transmis) ; ni lecture de fichiers, ni shell, ni réseau. Les adresses web s'ouvrent par la commande open_url, qui les vérifie : aucune permission du plugin opener.",
   "windows": ["main"],
   "permissions": [
     "allow-device-kind",
@@ -17,6 +17,7 @@
     "allow-list-tags",
     "allow-reveal-password",
     "allow-copy-password",
+    "allow-open-url",
     "allow-add-entry",
     "allow-update-entry",
     "allow-delete-entry",

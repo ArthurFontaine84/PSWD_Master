@@ -13,6 +13,7 @@ use crate::editing::{EntryInput, HistoryItem};
 use crate::entries::{EntryDetail, EntrySummary, TagCount};
 use crate::error::UiError;
 use crate::files;
+use crate::links::Browser;
 use crate::server::{Disconnection, Exchange, IgnoredVault, ServerStatus};
 use crate::settings::Settings;
 use crate::sharing::{Invitation, Member, Members};
@@ -127,6 +128,12 @@ pub fn reveal_password(state: State<'_, AppState>, id: String) -> Result<String,
 #[tauri::command]
 pub fn copy_password(state: State<'_, AppState>, id: String) -> Result<u64, UiError> {
     Ok(state.copy_password(&id)?.as_secs())
+}
+
+/// Ouvre une adresse web d'une entrée dans le navigateur du système.
+#[tauri::command]
+pub fn open_url(browser: State<'_, Browser>, url: String) -> Result<(), UiError> {
+    browser.open(&url)
 }
 
 #[tauri::command]
@@ -569,7 +576,7 @@ impl<R: Runtime> Notifier for Events<R> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex, mpsc};
     use std::time::Duration;
 
     use pswd_app::Vaults;
@@ -599,6 +606,8 @@ mod tests {
         app: App<MockRuntime>,
         webview: WebviewWindow<MockRuntime>,
         dir: TempDir,
+        /// Adresses passées au navigateur factice.
+        opened: Arc<Mutex<Vec<String>>>,
     }
 
     /// Toutes les commandes, comme dans `run`.
@@ -621,6 +630,7 @@ mod tests {
             list_tags,
             reveal_password,
             copy_password,
+            open_url,
             add_entry,
             update_entry,
             delete_entry,
@@ -685,6 +695,7 @@ mod tests {
             let kdf = KdfParams::new(8 * 1024, 1, 1).unwrap();
             let app = mock_builder()
                 .plugin(tauri_plugin_fs::init())
+                .plugin(tauri_plugin_opener::init())
                 .invoke_handler(handler())
                 .build(tauri::generate_context!())
                 .unwrap();
@@ -697,10 +708,21 @@ mod tests {
                 true,
                 Events(app.handle().clone()),
             ));
+            let opened = Arc::new(Mutex::new(Vec::new()));
+            let seen = Arc::clone(&opened);
+            app.manage(Browser::new(move |url| {
+                seen.lock().unwrap().push(url.to_owned());
+                Ok(())
+            }));
             let webview = tauri::WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
                 .build()
                 .unwrap();
-            Self { app, webview, dir }
+            Self {
+                app,
+                webview,
+                dir,
+                opened,
+            }
         }
 
         fn call(&self, command: &str, arguments: Value) -> Result<Value, Value> {
@@ -912,6 +934,20 @@ mod tests {
         assert_eq!(app.call("entry_detail", unknown.clone()), not_found);
         assert_eq!(app.call("reveal_password", unknown.clone()), not_found);
         assert_eq!(app.call("copy_password", unknown), not_found);
+    }
+
+    #[test]
+    fn only_web_addresses_are_opened() {
+        let app = TestApp::new(None);
+        assert_eq!(
+            app.call("open_url", json!({ "url": "exemple.fr/compte" })),
+            Ok(Value::Null)
+        );
+        assert_eq!(
+            app.call("open_url", json!({ "url": "file:///etc/passwd" })),
+            Err(json!({ "code": "invalidUrl", "detail": null }))
+        );
+        assert_eq!(*app.opened.lock().unwrap(), ["https://exemple.fr/compte"]);
     }
 
     #[test]
@@ -1290,5 +1326,12 @@ mod tests {
         refused("plugin:fs|write_file", json!({ "path": path }));
         refused("plugin:fs|remove", json!({ "path": path }));
         assert!(file.exists());
+        // Le plugin `opener` aussi : une adresse ne s'ouvre que vérifiée par `open_url`.
+        refused(
+            "plugin:opener|open_url",
+            json!({ "url": "file:///etc/passwd" }),
+        );
+        refused("plugin:opener|open_path", json!({ "path": path }));
+        assert_eq!(*app.opened.lock().unwrap(), Vec::<String>::new());
     }
 }

@@ -5,6 +5,7 @@
     deleteEntry,
     entryDetail,
     entryHistory,
+    openUrl,
     revealPassword,
     type EntryDetail,
     type HistoryItem,
@@ -67,6 +68,15 @@
     }
   }
 
+  /** Une adresse s'ouvre dans le navigateur du système, jamais dans l'application. */
+  async function open(url: string) {
+    try {
+      await openUrl(url);
+    } catch (error) {
+      onError(error);
+    }
+  }
+
   async function remove() {
     try {
       await deleteEntry(id);
@@ -105,7 +115,11 @@
       {#if detail.urls.length > 0}
         <dt>{texts.urls}</dt>
         {#each detail.urls as url (url)}
-          <dd>{url}</dd>
+          <dd>
+            <button type="button" class="link" aria-label={texts.openUrl(url)} title={texts.openUrl(url)} onclick={() => open(url)}>
+              {url}
+            </button>
+          </dd>
         {/each}
       {/if}
       {#if detail.notes}
@@ -190,6 +204,24 @@
   dd {
     margin: 0;
     overflow-wrap: anywhere;
+  }
+
+  .link {
+    padding: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    color: var(--accent);
+    font-weight: 500;
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+
+  @media (hover: hover) {
+    .link:hover {
+      background: none;
+      text-decoration: underline;
+    }
   }
 
   .password {

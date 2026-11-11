@@ -13,6 +13,7 @@ mod editing;
 mod entries;
 mod error;
 mod files;
+mod links;
 mod server;
 mod settings;
 mod sharing;
@@ -27,6 +28,9 @@ use pswd_app::Vaults;
 use pswd_infra::Locations;
 use tauri::{AppHandle, Manager, RunEvent, Runtime};
 
+use tauri_plugin_opener::OpenerExt;
+
+use crate::links::Browser;
 use crate::state::{AppState, Clipboard};
 
 /// Démarre l'application : sur le bureau par `main`, sur mobile par le code natif généré.
@@ -37,7 +41,8 @@ use crate::state::{AppState, Clipboard};
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init());
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_opener::init());
     #[cfg(target_os = "android")]
     let builder = builder.plugin(android_clipboard::plugin());
     let app = builder
@@ -46,6 +51,7 @@ pub fn run() {
             let events = commands::Events(app.handle().clone());
             let clipboard = clipboard(app.handle());
             app.manage(AppState::new(Vaults::new(locations), clipboard, events));
+            app.manage(browser(app.handle()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -62,6 +68,7 @@ pub fn run() {
             commands::list_tags,
             commands::reveal_password,
             commands::copy_password,
+            commands::open_url,
             commands::add_entry,
             commands::update_entry,
             commands::delete_entry,
@@ -146,6 +153,17 @@ fn locations(_: &tauri::AppHandle) -> Result<Locations, Box<dyn Error>> {
 fn locations(app: &tauri::AppHandle) -> Result<Locations, Box<dyn Error>> {
     let dir = app.path().app_data_dir()?;
     Ok(Locations::new(&dir.join("config"), &dir.join("data")))
+}
+
+/// Le navigateur du système, par le plugin `opener` (bureau et mobile).
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn browser(app: &tauri::AppHandle) -> Browser {
+    let app = app.clone();
+    Browser::new(move |url| {
+        app.opener()
+            .open_url(url, None::<&str>)
+            .map_err(|error| error.to_string())
+    })
 }
 
 /// Sur le bureau, le presse-papiers du système, ouvert à la première copie.

@@ -6,8 +6,14 @@ yanked = "deny"
 # proc-macro-error n'est plus maintenue : ce n'est pas une faille. Macro utilisée seulement à la
 # compilation, par la pile GTK de Tauri sous Linux ; aucune version de remplacement.
 # À retirer dès que Tauri n'en dépend plus.
+# zbus_names, zvariant et zvariant_derive ne sont plus maintenues : ce n'est pas une faille. Le
+# plugin `opener` les tire sous Linux seulement (D-Bus), pour ouvrir une adresse dans le
+# navigateur ; aucune version de remplacement. À retirer dès que le plugin n'en dépend plus.
 ignore = [
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error abandonnée, utilisée à la compilation par GTK (Tauri, Linux)" },
+    { id = "RUSTSEC-2026-0370", reason = "zvariant abandonnée, tirée par zbus (plugin opener, Linux)" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names abandonnée, tirée par zbus (plugin opener, Linux)" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive abandonnée, tirée par zbus (plugin opener, Linux)" },
 ]
 
 [licenses]

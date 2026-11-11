@@ -22,13 +22,13 @@ Le coffre est chiffré de bout en bout : le serveur ne voit jamais de données e
 **Étape 2 — interfaces graphiques** (terminée sur le bureau et Android ; iOS reporté, en attente d'un Mac, §12) : application **PSWD Master** pour le bureau (Windows, Linux, macOS) et le mobile (Android, iOS), un seul projet Tauri 2. Chaque appareil est autonome et entièrement local, avec les fonctionnalités de la CLI. Sous-étapes, chacune validée et commitée :
 1. `pswd-app` : cas d'usage extraits de la CLI, comportement inchangé.
 2. Squelette Tauri (`pswd-gui`) : CSP et capacités, premier build Android et iOS ; liste des coffres, création, déverrouillage, verrouillage.
-3. Consultation : liste, recherche, tags, détail, copier, afficher. Reportés : ouvrir une URL dans le navigateur du système (plugin et capacité dédiés), copier l'identifiant.
+3. Consultation : liste, recherche, tags, détail, copier, afficher. Ouvrir une adresse dans le navigateur du système (ajouté le 2026-11-10, #16 des tests d'intégration). Reporté : copier l'identifiant.
 4. Modification : ajout, édition, suppression, historique, générateur.
 5. Gestion des coffres : mot de passe maître, récupération, import CSV, sauvegarde et restauration, suppression, réglages.
 6. Mobile : presse-papiers sensible, verrouillage en arrière-plan, écran masqué, fichiers `.pswd`, ergonomie tactile.
 7. Installateurs, documentation, mutants.
 
-Reste à faire sur le Mac : build iOS, plugin Swift du presse-papiers, écran neutre, accès « security-scoped » (§12).
+Reste à faire sur le Mac : build iOS, plugin Swift du presse-papiers, écran neutre, accès « security-scoped » (§12), essai de l'ouverture des adresses dans le navigateur (plugin `opener`, §9).
 
 **Étape 3 — serveur maison** (§11) : `pswd-server`, comptes, coffres privés et communs, synchro entre appareils. Sous-étapes par fonctionnalité, du serveur jusqu'à l'écran, chacune validée et commitée :
 1. Serveur minimal : crate `pswd-server`, base SQLite créée au démarrage, lecture et publication conditionnelle d'un coffre, 15 versions conservées ; HTTP simple, sans comptes, réservé aux tests.
@@ -290,7 +290,7 @@ Code Wi-Fi,note,,,,"Box: ABCD-1234",maison
   - Jamais côté JS : clé du coffre, coffre déchiffré, mot de passe copié (la copie est faite par Rust).
   - Côté JS seulement sur demande explicite : mot de passe affiché (« Afficher », masqué à nouveau après 30 s), mot de passe généré affiché.
   - **Limite acceptée** : les saisies (mot de passe maître, mot de passe d'une entrée) passent par un champ HTML, donc par JS ; le champ est vidé dès l'envoi.
-  - CSP stricte (ressources de l'application seulement, ni script externe, ni `eval`, ni réseau) ; capacités Tauri limitées à nos commandes (aucun accès fichiers ou shell depuis JS) ; les adresses d'une entrée ne sont pas des liens pour l'instant (ouverture reportée, §2) : elles s'ouvriront dans le navigateur du système, jamais dans la webview.
+  - CSP stricte (ressources de l'application seulement, ni script externe, ni `eval`, ni réseau) ; capacités Tauri limitées à nos commandes (aucun accès fichiers ou shell depuis JS) ; les adresses d'une entrée s'ouvrent dans le navigateur du système, jamais dans la webview : un clic appelle la commande `open_url`, qui n'accepte qu'une adresse `http` ou `https` avec un nom d'hôte et sans identifiant (`https://moi@site` déguise le vrai site) ; une adresse sans protocole (`exemple.fr`) s'ouvre en `https`. Le backend seul appelle le plugin `opener` (module `links.rs`) ; l'interface n'a aucune de ses permissions (vérifié par un test). Le plugin est fixé à la version 2.7.2.
 - **Mobile** : écran masqué dans les applications récentes et captures interdites (Android `FLAG_SECURE`, écran neutre sur iOS).
 
 ## 10. Points d'extension à préparer
