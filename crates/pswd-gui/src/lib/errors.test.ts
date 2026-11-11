@@ -70,7 +70,7 @@ describe("errorMessage", () => {
       ["nothingToBackUp", null, "Aucun coffre à sauvegarder."],
       ["emptyBackup", null, "Cette sauvegarde ne contient aucun coffre."],
       ["notInBackup", "perso", "Cette sauvegarde ne contient pas de coffre « perso »."],
-      ["invalidBackup", "altérée", "Sauvegarde inutilisable : altérée"],
+      ["invalidBackup", "altérée", "Sauvegarde inutilisable."],
       ["invalidSettings", null, "Réglages hors des valeurs permises."],
       ["ioError", "disque absent", "Erreur de fichier : disque absent"],
       ["notConnected", null, "Cet appareil n'est connecté à aucun serveur."],

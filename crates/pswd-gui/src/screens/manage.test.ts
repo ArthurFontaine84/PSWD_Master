@@ -418,7 +418,7 @@ describe("restoring vaults", () => {
     expect(backupFileContents).not.toHaveBeenCalled();
     await fireEvent.click(choose);
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Sauvegarde inutilisable : fichier de sauvegarde mal formé",
+      "Sauvegarde inutilisable.",
     );
     await fireEvent.click(choose);
     expect(await screen.findByText("s.pswd")).toBeInTheDocument();
@@ -516,7 +516,7 @@ describe("restoring vaults", () => {
     await chooseFile();
     await fireEvent.click(screen.getByRole("checkbox", { name: "Tout sélectionner" }));
     await fireEvent.click(screen.getByRole("button", { name: "Restaurer les 2 coffres sélectionnés" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Sauvegarde inutilisable : altérée");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^Sauvegarde inutilisable\.$/);
     expect(screen.queryByRole("checkbox", { name: "perso" })).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "travail" })).toBeChecked();
     expect(screen.getByRole("button", { name: "Restaurer le coffre sélectionné" })).toBeEnabled();

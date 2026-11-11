@@ -41,7 +41,8 @@ const errors = {
   nothingToBackUp: () => "Aucun coffre à sauvegarder.",
   emptyBackup: () => "Cette sauvegarde ne contient aucun coffre.",
   notInBackup: (detail: string) => `Cette sauvegarde ne contient pas de coffre « ${detail} ».`,
-  invalidBackup: (detail: string) => `Sauvegarde inutilisable : ${detail}`,
+  // Le détail technique (taille, format) n'aide pas l'utilisateur : la CLI seule le donne.
+  invalidBackup: () => "Sauvegarde inutilisable.",
   invalidSettings: () => "Réglages hors des valeurs permises.",
   ioError: (detail: string) => `Erreur de fichier : ${detail}`,
   fileUnwritable: (detail: string) => `Écriture du fichier impossible : ${detail}`,
