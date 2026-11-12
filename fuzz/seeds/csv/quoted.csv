@@ -1,3 +1,3 @@
-title,kind,username,password,urls,notes,tags
-"a,b",note,,,,"ligne 1
-ligne 2, ""citee""",x
+Titre / Title;Type / Kind;Nom d'utilisateur / Username;Mot de passe / Password;Urls;Notes;Tags
+"a;b";note;;;;"ligne 1
+ligne 2; ""citee""";x

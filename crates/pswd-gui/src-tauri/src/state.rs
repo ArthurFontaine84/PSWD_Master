@@ -1377,8 +1377,7 @@ mod tests {
             state.change_password(&secret("a"), &secret("b")).err(),
             locked
         );
-        let csv = b"title,kind,username,password,urls,notes,tags\r\n";
-        assert_eq!(state.import_entries(csv).err(), locked);
+        assert_eq!(state.import_entries(CSV_HEADER).err(), locked);
     }
 
     #[test]
@@ -1495,19 +1494,24 @@ mod tests {
         );
     }
 
+    const CSV_HEADER: &[u8] = b"Titre / Title;Type / Kind;Nom d'utilisateur / Username;\
+        Mot de passe / Password;Urls;Notes;Tags\r\n";
+
     #[test]
     fn csv_files_are_imported_all_or_nothing() {
         let dir = TempDir::new().unwrap();
         let (state, _) = state_in(&dir, None);
         open_with_entries(&state);
-        let csv = b"title,kind,username,password,urls,notes,tags\r\n\
-             Box,login,admin,1234,,,maison\r\n\
-             Code,note,,,,ABCD,\r\n";
-        assert_eq!(state.import_entries(csv), Ok(2));
+        let csv = [
+            CSV_HEADER,
+            b"Box;login;admin;1234;;;maison\r\nCode;note;;;;ABCD;\r\n",
+        ]
+        .concat();
+        assert_eq!(state.import_entries(&csv), Ok(2));
         assert_eq!(state.entries("", None).unwrap().len(), 5);
-        let csv = b"title,kind,username,password,urls,notes,tags\r\nA,carte,,,,,\r\n";
+        let csv = [CSV_HEADER, b"A;carte;;;;;\r\n"].concat();
         assert_eq!(
-            state.import_entries(csv).err(),
+            state.import_entries(&csv).err(),
             Some(UiError::new("csvUnknownKind", "2"))
         );
         assert_eq!(state.entries("", None).unwrap().len(), 5);

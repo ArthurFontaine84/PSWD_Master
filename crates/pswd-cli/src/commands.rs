@@ -111,9 +111,10 @@ mod tests {
         titles
     }
 
-    const CSV: &str = "title,kind,username,password,urls,notes,tags\r\n\
-        GitHub,login,arthur,hunter2,https://github.com,,dev\r\n\
-        Wi-Fi,note,,,,ABCD,maison\r\n";
+    const CSV: &str = "Titre / Title;Type / Kind;Nom d'utilisateur / Username;\
+        Mot de passe / Password;Urls;Notes;Tags\r\n\
+        GitHub;login;arthur;hunter2;https://github.com;;dev\r\n\
+        Wi-Fi;note;;;;ABCD;maison\r\n";
 
     #[test]
     fn passwd_replaces_the_master_password() {
@@ -219,7 +220,7 @@ mod tests {
     fn invalid_or_missing_csv_imports_nothing() {
         let env = TestEnv::with_vault();
         let file = env.dir.path().join("import.csv");
-        fs::write(&file, format!("{CSV}incomplète,login\r\n")).unwrap();
+        fs::write(&file, format!("{CSV}incomplète;login\r\n")).unwrap();
         let mut app = env.app("a", &["Maître-2026!"]);
         assert_eq!(
             app.run(Command::Import {

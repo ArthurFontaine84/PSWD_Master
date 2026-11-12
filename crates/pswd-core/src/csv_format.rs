@@ -11,8 +11,16 @@ use crate::buffer::write_exact;
 use crate::{EntryContent, EntryKind, Secret, Tags};
 
 const HEADER: [&str; 7] = [
-    "title", "kind", "username", "password", "urls", "notes", "tags",
+    "Titre / Title",
+    "Type / Kind",
+    "Nom d'utilisateur / Username",
+    "Mot de passe / Password",
+    "Urls",
+    "Notes",
+    "Tags",
 ];
+/// Séparateur de colonnes, celui d'Excel en français.
+const DELIMITER: u8 = b';';
 const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 const LIST_SEPARATOR: char = ';';
 const ESCAPE: char = '\\';
@@ -36,7 +44,7 @@ pub enum LineProblem {
 impl fmt::Display for CsvError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidHeader => write!(f, "en-tête CSV attendu : {}", HEADER.join(",")),
+            Self::InvalidHeader => write!(f, "en-tête CSV attendu : {}", HEADER.join(";")),
             Self::InvalidLine { line, problem } => write!(f, "ligne {line} : {problem}"),
             Self::Internal => f.write_str("erreur interne de lecture CSV"),
         }
@@ -68,6 +76,7 @@ fn internal_error<E>(_: E) -> CsvError {
 fn write_contents(contents: &[&EntryContent]) -> Result<Zeroizing<Vec<u8>>, csv::Error> {
     write_exact(|out| {
         let mut writer = WriterBuilder::new()
+            .delimiter(DELIMITER)
             .terminator(Terminator::CRLF)
             .from_writer(out);
         writer.write_record(HEADER)?;
@@ -105,6 +114,7 @@ fn write_contents(contents: &[&EntryContent]) -> Result<Zeroizing<Vec<u8>>, csv:
 pub fn import_csv(data: &[u8]) -> Result<Vec<EntryContent>, CsvError> {
     let data = data.strip_prefix(UTF8_BOM).unwrap_or(data);
     let mut reader = ReaderBuilder::new()
+        .delimiter(DELIMITER)
         .has_headers(false)
         .flexible(true)
         .from_reader(data);
@@ -252,9 +262,13 @@ mod tests {
 
     use super::*;
 
-    const SPEC_EXAMPLE: &str = "title,kind,username,password,urls,notes,tags\r\n\
-        GitHub,login,arthur,xxxx,https://github.com,,dev;perso\r\n\
-        Code Wi-Fi,note,,,,\"Box: ABCD-1234\",maison\r\n";
+    const HEADER_LINE: &str = "Titre / Title;Type / Kind;Nom d'utilisateur / Username;\
+        Mot de passe / Password;Urls;Notes;Tags";
+
+    const SPEC_EXAMPLE: &str = "Titre / Title;Type / Kind;Nom d'utilisateur / Username;\
+        Mot de passe / Password;Urls;Notes;Tags\r\n\
+        GitHub;login;arthur;xxxx;https://github.com;;\"dev;perso\"\r\n\
+        Code Wi-Fi;note;;;;\"Box: ABCD-1234\";maison\r\n";
 
     fn github() -> EntryContent {
         EntryContent {
@@ -279,7 +293,7 @@ mod tests {
     }
 
     fn header_then(lines: &str) -> String {
-        format!("{}\r\n{lines}", HEADER.join(","))
+        format!("{HEADER_LINE}\r\n{lines}")
     }
 
     #[test]
@@ -288,19 +302,41 @@ mod tests {
     }
 
     #[test]
+    fn header_is_the_one_of_the_template_in_docs() {
+        let template = include_str!("../../../docs/template_import_pswd.csv");
+        let header = template.lines().next().unwrap();
+        assert_eq!(import_str(header), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn several_urls_in_one_cell() {
+        let entries = import_str(&header_then(
+            "Exemple;login;exemple;Exemple123!;\"https://exemple.com;https://exemple2.com\";text;\"exemple;exemple2\"\r\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            entries[0].urls,
+            ["https://exemple.com", "https://exemple2.com"]
+        );
+        assert_eq!(entries[0].tags, Tags::new(["exemple", "exemple2"]));
+    }
+
+    #[test]
     fn test_writer_follows_the_import_format() {
         let csv = write_contents(&[&github(), &wifi()]).unwrap();
-        let expected = "title,kind,username,password,urls,notes,tags\r\n\
-            GitHub,login,arthur,xxxx,https://github.com,,dev;perso\r\n\
-            Code Wi-Fi,note,,,,Box: ABCD-1234,maison\r\n";
+        let expected = format!(
+            "{HEADER_LINE}\r\n\
+            GitHub;login;arthur;xxxx;https://github.com;;\"dev;perso\"\r\n\
+            Code Wi-Fi;note;;;;Box: ABCD-1234;maison\r\n"
+        );
         assert_eq!(std::str::from_utf8(&csv).unwrap(), expected);
     }
 
     #[test]
-    fn quotes_commas_and_line_breaks_survive() {
+    fn quotes_separators_and_line_breaks_survive() {
         let content = EntryContent {
-            notes: Some("ligne 1\r\nligne 2, \"citée\"".to_owned()),
-            ..EntryContent::new(EntryKind::Note, "a,b".to_owned())
+            notes: Some("ligne 1\r\nligne 2; \"citée\", fin".to_owned()),
+            ..EntryContent::new(EntryKind::Note, "a;b,c".to_owned())
         };
         let csv = write_contents(&[&content]).unwrap();
         assert_eq!(import_csv(&csv), Ok(vec![content]));
@@ -319,10 +355,13 @@ mod tests {
 
     #[test]
     fn missing_or_wrong_header_is_rejected() {
+        let with_commas = format!("{}\r\n", HEADER.join(","));
         for text in [
             "",
-            "title,kind\r\n",
-            "Title,kind,username,password,urls,notes,tags\r\n",
+            "Titre / Title;Type / Kind\r\n",
+            "titre / title;Type / Kind;Nom d'utilisateur / Username;Mot de passe / Password;Urls;Notes;Tags\r\n",
+            "title,kind,username,password,urls,notes,tags\r\n",
+            &with_commas,
         ] {
             assert_eq!(import_str(text), Err(CsvError::InvalidHeader), "{text:?}");
         }
@@ -330,7 +369,7 @@ mod tests {
 
     #[test]
     fn kind_is_case_insensitive() {
-        let entries = import_str(&header_then("a,LOGIN,,,,,\r\nb,Note,,,,,\r\n")).unwrap();
+        let entries = import_str(&header_then("a;LOGIN;;;;;\r\nb;Note;;;;;\r\n")).unwrap();
         assert_eq!(entries[0].kind, EntryKind::Login);
         assert_eq!(entries[1].kind, EntryKind::Note);
     }
@@ -338,13 +377,14 @@ mod tests {
     #[test]
     fn invalid_line_is_reported_with_its_number() {
         let cases = [
-            ("a,login,,,,\r\n", LineProblem::FieldCount),
-            ("a,login,,,,,,\r\n", LineProblem::FieldCount),
-            ("a,card,,,,,\r\n", LineProblem::UnknownKind),
+            ("a;login;;;;\r\n", LineProblem::FieldCount),
+            ("a;login;;;;;;\r\n", LineProblem::FieldCount),
+            ("a,login,,,,,\r\n", LineProblem::FieldCount),
+            ("a;card;;;;;\r\n", LineProblem::UnknownKind),
         ];
         for (line, problem) in cases {
             let text = header_then(&format!(
-                "ok,note,,,,,\r\n\"multi\r\nligne\",note,,,,,\r\n{line}"
+                "ok;note;;;;;\r\n\"multi\r\nligne\";note;;;;;\r\n{line}"
             ));
             assert_eq!(
                 import_str(&text),
@@ -356,9 +396,9 @@ mod tests {
 
     #[test]
     fn line_numbers_handle_lf_and_blank_lines() {
-        let text = "title,kind,username,password,urls,notes,tags\nok,note,,,,,\n\n\nbad,note\n";
+        let text = format!("{HEADER_LINE}\nok;note;;;;;\n\n\nbad;note\n");
         assert_eq!(
-            import_str(text),
+            import_str(&text),
             Err(CsvError::InvalidLine {
                 line: 5,
                 problem: LineProblem::FieldCount
@@ -368,9 +408,9 @@ mod tests {
 
     #[test]
     fn line_numbers_handle_old_mac_line_endings() {
-        let text = "title,kind,username,password,urls,notes,tags\rok,note,,,,,\rbad,note\r";
+        let text = format!("{HEADER_LINE}\rok;note;;;;;\rbad;note\r");
         assert_eq!(
-            import_str(text),
+            import_str(&text),
             Err(CsvError::InvalidLine {
                 line: 3,
                 problem: LineProblem::FieldCount
@@ -380,10 +420,9 @@ mod tests {
 
     #[test]
     fn line_numbers_handle_blank_crlf_lines() {
-        let text =
-            "title,kind,username,password,urls,notes,tags\r\nok,note,,,,,\r\n\r\n\r\nbad,note\r\n";
+        let text = header_then("ok;note;;;;;\r\n\r\n\r\nbad;note\r\n");
         assert_eq!(
-            import_str(text),
+            import_str(&text),
             Err(CsvError::InvalidLine {
                 line: 5,
                 problem: LineProblem::FieldCount
@@ -394,7 +433,7 @@ mod tests {
     #[test]
     fn invalid_utf8_is_rejected() {
         let mut data = header_then("").into_bytes();
-        data.extend_from_slice(b"a\xFF,note,,,,,\r\n");
+        data.extend_from_slice(b"a\xFF;note;;;;;\r\n");
         assert_eq!(
             import_csv(&data),
             Err(CsvError::InvalidLine {
@@ -420,7 +459,7 @@ mod tests {
 
     #[test]
     fn empty_cells_are_absent_fields() {
-        let entries = import_str(&header_then("a,login,,,,,\r\n")).unwrap();
+        let entries = import_str(&header_then("a;login;;;;;\r\n")).unwrap();
         assert_eq!(
             entries,
             [EntryContent::new(EntryKind::Login, "a".to_owned())]
@@ -429,7 +468,7 @@ mod tests {
 
     #[test]
     fn errors_never_quote_the_content() {
-        let text = header_then("a,login,,hunter2,,\r\n");
+        let text = header_then("a;login;;hunter2;;\r\n");
         let message = import_str(&text).unwrap_err().to_string();
         assert_eq!(message, "ligne 2 : 7 colonnes attendues");
     }
@@ -439,7 +478,8 @@ mod tests {
         let messages = [
             (
                 CsvError::InvalidHeader,
-                "en-tête CSV attendu : title,kind,username,password,urls,notes,tags",
+                "en-tête CSV attendu : Titre / Title;Type / Kind;Nom d'utilisateur / Username;\
+                Mot de passe / Password;Urls;Notes;Tags",
             ),
             (
                 CsvError::InvalidLine {

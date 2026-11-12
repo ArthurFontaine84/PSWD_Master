@@ -1016,7 +1016,8 @@ mod tests {
         let csv = app.dir.path().join("import.csv");
         fs::write(
             &csv,
-            "title,kind,username,password,urls,notes,tags\r\nWi-Fi,note,,,,ABCD,\r\n",
+            "Titre / Title;Type / Kind;Nom d'utilisateur / Username;Mot de passe / Password;\
+             Urls;Notes;Tags\r\nWi-Fi;note;;;;ABCD;\r\n",
         )
         .unwrap();
         assert_eq!(

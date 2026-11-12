@@ -120,7 +120,8 @@ mod tests {
             ),
             (
                 AppError::Csv(CsvError::InvalidHeader),
-                "en-tête CSV attendu : title,kind,username,password,urls,notes,tags",
+                "en-tête CSV attendu : Titre / Title;Type / Kind;Nom d'utilisateur / Username;\
+                Mot de passe / Password;Urls;Notes;Tags",
             ),
             (
                 AppError::from(GeneratorError::InvalidLength),

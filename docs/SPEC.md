@@ -263,11 +263,13 @@ Aucune commande n'écrase un coffre existant.
 **Format CSV d'import**
 
 ```csv
-title,kind,username,password,urls,notes,tags
-GitHub,login,arthur,xxxx,https://github.com,,dev;perso
-Code Wi-Fi,note,,,,"Box: ABCD-1234",maison
+Titre / Title;Type / Kind;Nom d'utilisateur / Username;Mot de passe / Password;Urls;Notes;Tags
+GitHub;login;arthur;xxxx;https://github.com;;"dev;perso"
+Code Wi-Fi;note;;;;"Box: ABCD-1234";maison
 ```
-`kind` ∈ {`login`, `note`} ; `urls` et `tags` séparés par `;`. RFC 4180 (guillemets, retours à la ligne dans les champs). Une ligne invalide fait échouer l'import avec son numéro de ligne ; rien n'est importé partiellement.
+Modèle à remplir : `docs/template_import_pswd.csv` (sa ligne d'exemple est à remplacer). Colonnes séparées par `;`, comme l'enregistre Excel en français. Le type (`kind`) vaut `login` ou `note` ; `urls` et `tags` séparés par `;`, donc la cellule entre guillemets dès qu'elle en contient plusieurs (Excel le fait seul). RFC 4180 pour le reste (guillemets, retours à la ligne dans les champs). Une ligne invalide fait échouer l'import avec son numéro de ligne ; rien n'est importé partiellement.
+
+- **Avertissement** : l'écran d'import rappelle, avant le choix du fichier, qu'il contient les mots de passe en clair et qu'il faut le supprimer (corbeille comprise) après l'import ; la confirmation de l'import (interface et CLI) le redit.
 
 - Listes (`urls`, `tags`) : `\;` et `\\` désignent un `;` et un `\` littéraux ; un `\` isolé est gardé tel quel ; les éléments vides sont ignorés.
 - Une cellule vide est un champ absent (`username`, `password`, `notes`). `kind` est lu sans tenir compte de la casse. Le BOM UTF-8 (Excel) est ignoré ; fins de ligne `\r\n`, `\n` ou `\r`.

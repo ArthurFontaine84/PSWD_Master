@@ -34,7 +34,7 @@ const errors = {
   confirmationMismatch: () => "Le nom retapé ne correspond pas.",
   fileUnreadable: (detail: string) => `Fichier illisible : ${detail}`,
   csvInvalidHeader: () =>
-    "Première ligne du CSV attendue : title,kind,username,password,urls,notes,tags",
+    "Première ligne du CSV attendue : Titre / Title;Type / Kind;Nom d'utilisateur / Username;Mot de passe / Password;Urls;Notes;Tags",
   csvFieldCount: (detail: string) => `CSV, ligne ${detail} : nombre de colonnes incorrect.`,
   csvUnknownKind: (detail: string) => `CSV, ligne ${detail} : type inconnu (login ou note attendu).`,
   csvInvalidUtf8: (detail: string) => `CSV, ligne ${detail} : texte qui n'est pas en UTF-8.`,
@@ -153,6 +153,8 @@ export const fr = {
   importCsv: "Importer un CSV",
   importExplanation:
     "Le fichier est lu sans passer par l'interface. Tout le fichier est vérifié avant d'ajouter quoi que ce soit.",
+  importSecurity:
+    "Sécurité : ce fichier contient vos mots de passe en clair. Une fois l'import terminé, supprimez-le et videz la corbeille ; ne le laissez pas dans un dossier synchronisé (OneDrive, Google Drive…).",
   chooseFile: "Choisir le fichier",
   imported: (count: number) =>
     `${count <= 1 ? `${count} entrée importée` : `${count} entrées importées`}. Supprimez maintenant le fichier CSV : il contient vos mots de passe en clair.`,

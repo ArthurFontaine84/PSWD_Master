@@ -140,6 +140,9 @@ describe("importing a CSV file", () => {
     vi.mocked(importEntries).mockResolvedValue(2);
     await manage();
     await fireEvent.click(screen.getByRole("menuitem", { name: "Importer un CSV" }));
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "ce fichier contient vos mots de passe en clair. Une fois l'import terminé, supprimez-le",
+    );
     await fireEvent.click(screen.getByRole("button", { name: "Choisir le fichier" }));
     expect(importEntries).not.toHaveBeenCalled();
     await fireEvent.click(screen.getByRole("button", { name: "Choisir le fichier" }));

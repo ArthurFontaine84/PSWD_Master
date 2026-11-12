@@ -1,2 +1,2 @@
-title,kind,username,password,urls,notes,tags
-e,login,u,p,a\;b;c\\d,,t\;1;\x
+Titre / Title;Type / Kind;Nom d'utilisateur / Username;Mot de passe / Password;Urls;Notes;Tags
+e;login;u;p;"a\;b;c\\d";;"t\;1;\x"

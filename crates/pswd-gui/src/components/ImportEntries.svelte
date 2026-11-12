@@ -39,6 +39,7 @@
 
 <h3>{texts.importCsv}</h3>
 <p>{texts.importExplanation}</p>
+<p role="note" class="notice">{texts.importSecurity}</p>
 {#if problem}
   <p role="alert">{problem}</p>
 {/if}

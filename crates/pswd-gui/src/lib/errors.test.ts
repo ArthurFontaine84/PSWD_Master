@@ -64,7 +64,7 @@ describe("errorMessage", () => {
       [
         "csvInvalidHeader",
         null,
-        "Première ligne du CSV attendue : title,kind,username,password,urls,notes,tags",
+        "Première ligne du CSV attendue : Titre / Title;Type / Kind;Nom d'utilisateur / Username;Mot de passe / Password;Urls;Notes;Tags",
       ],
       ["csvFieldCount", "3", "CSV, ligne 3 : nombre de colonnes incorrect."],
       ["csvUnknownKind", "4", "CSV, ligne 4 : type inconnu (login ou note attendu)."],
