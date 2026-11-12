@@ -78,8 +78,11 @@
 </fieldset>
 
 <style>
+  /* Une seule colonne, à la largeur du cadre : sans cela, la largeur naturelle du champ et du
+     bouton élargit la colonne, et le texte d'aide et « Ajouter » débordent de la carte. */
   fieldset {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-s);
     border: 1px solid var(--border);
     border-radius: var(--radius);

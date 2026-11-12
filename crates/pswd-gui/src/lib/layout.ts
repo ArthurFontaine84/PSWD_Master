@@ -17,7 +17,7 @@ export interface ListLayout {
  * identifiant et tags. */
 export const ENTRY_LIST: ListLayout = { reserved: 21.25, row: 5.75, minRows: 3, columns: 1 };
 
-/** Partie commune du panneau d'administration : en-tête de l'appli, titre, onglets, « Retour ». */
+/** Partie commune du panneau d'administration : en-tête de l'appli, « Retour », titre, onglets. */
 const ADMIN_PANEL = 22;
 
 /** Comptes : recherche, pagination et ajout d'un membre ; carte avec un appareil, deux par ligne. */
@@ -25,6 +25,9 @@ export const ACCOUNT_LIST: ListLayout = { reserved: ADMIN_PANEL + 18, row: 11.5,
 
 /** Coffres : recherche et pagination ; carte de trois lignes, deux par ligne. */
 export const VAULT_LIST: ListLayout = { reserved: ADMIN_PANEL + 8, row: 6.25, minRows: 2, columns: 2 };
+
+/** Clés en attente : pagination ; clé sur deux lignes et son bouton. */
+export const KEY_LIST: ListLayout = { reserved: ADMIN_PANEL + 4, row: 4, minRows: 3, columns: 1 };
 
 /** Versions d'un coffre : nom, deux membres, titres, pagination et boutons du coffre. */
 export const VERSION_LIST: ListLayout = { reserved: ADMIN_PANEL + 20, row: 3.25, minRows: 3, columns: 1 };

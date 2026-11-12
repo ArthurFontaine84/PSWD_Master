@@ -5,6 +5,7 @@
   import { texts } from "../lib/i18n";
   import { verbatim } from "../lib/keyboard";
   import { showToast } from "../lib/toast.svelte";
+  import Icon from "./Icon.svelte";
 
   interface Props {
     publicAddress: string | null;
@@ -64,15 +65,30 @@
     </button>
   </div>
 </form>
-<h3>{texts.serverBackup}</h3>
-<p class="muted">{texts.serverBackupExplanation}</p>
-<div class="actions">
-  <button type="button" disabled={running !== null} onclick={backup}>
-    {running === "backup" ? texts.backingUp : texts.serverBackup}
+<div class="backup">
+  <h3>{texts.serverBackup}</h3>
+  <button
+    type="button"
+    class="icon-button"
+    aria-label={texts.serverBackup}
+    title={running === "backup" ? texts.backingUp : texts.serverBackup}
+    aria-busy={running === "backup"}
+    disabled={running !== null}
+    onclick={backup}
+  >
+    <Icon name="save" />
   </button>
 </div>
+<p class="muted">{texts.serverBackupExplanation}</p>
 
 <style>
+  .backup {
+    display: flex;
+    align-items: center;
+    gap: var(--space-m);
+    margin-top: 1rem;
+  }
+
   .muted {
     color: var(--text-muted);
   }

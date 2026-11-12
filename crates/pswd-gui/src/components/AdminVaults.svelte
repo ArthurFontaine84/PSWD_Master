@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { serverVaults, type AdminVault as Vault } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { VAULT_LIST } from "../lib/layout";
+  import { everyExchange } from "../lib/poll";
   import { byName } from "../lib/search";
   import AdminVault from "./AdminVault.svelte";
   import Paged from "./Paged.svelte";
@@ -22,6 +24,8 @@
   const shown = $derived(vaults?.find(({ id }) => id === selected));
   let query = $state("");
   let page = $state(0);
+  /** Confirmation ouverte dans le volet de gestion : la liste n'est pas relue. */
+  let confirming = false;
   const found = $derived(byName(vaults ?? [], query));
 
   // Une nouvelle recherche repart de la première page.
@@ -30,20 +34,40 @@
     page = 0;
   });
 
-  async function load() {
+  /** `quiet` : relecture automatique, dont l'échec n'est pas affiché. */
+  async function load(quiet = false) {
     try {
-      vaults = await serverVaults();
+      const list = await serverVaults();
+      // Le volet de gestion est recréé quand son coffre change : seulement s'il a vraiment changé.
+      if (JSON.stringify(list) !== JSON.stringify(vaults)) {
+        vaults = list;
+      }
     } catch (error) {
-      problem = errorMessage(error);
+      if (!quiet) {
+        problem = errorMessage(error);
+      }
     }
   }
 
   void load();
+
+  onMount(() =>
+    everyExchange(() => {
+      if (!confirming) {
+        void load(true);
+      }
+    }),
+  );
+
+  function confirm(open: boolean) {
+    confirming = open;
+    onConfirming(open);
+  }
 </script>
 
 {#if shown !== undefined}
   {#key shown}
-    <AdminVault vault={shown} {accountId} onChanged={load} {onConfirming} onClose={() => (selected = null)} />
+    <AdminVault vault={shown} {accountId} onChanged={load} onConfirming={confirm} onClose={() => (selected = null)} />
   {/key}
 {:else}
   {#if problem}

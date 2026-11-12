@@ -13,6 +13,7 @@
     | "eye"
     | "eye-off"
     | "server"
+    | "save"
     | "sync";
 </script>
 
@@ -70,6 +71,9 @@
     <rect x="3" y="4" width="18" height="7" rx="2" />
     <rect x="3" y="13" width="18" height="7" rx="2" />
     <path d="M7 7.5h.01M7 16.5h.01" />
+  {:else if name === "save"}
+    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+    <path d="M17 21v-8H7v8M7 3v5h8" />
   {:else if name === "sync"}
     <path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" />
     <path d="M3 21v-5h5" />

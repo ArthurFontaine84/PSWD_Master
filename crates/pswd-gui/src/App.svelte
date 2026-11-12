@@ -258,7 +258,7 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-m);
-    margin-bottom: var(--space-m);
+    margin-bottom: 2rem;
   }
 
   h1 {

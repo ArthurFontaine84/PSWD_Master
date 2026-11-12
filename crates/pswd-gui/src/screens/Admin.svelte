@@ -3,6 +3,7 @@
   import AdminKeys from "../components/AdminKeys.svelte";
   import AdminServer from "../components/AdminServer.svelte";
   import AdminVaults from "../components/AdminVaults.svelte";
+  import Icon from "../components/Icon.svelte";
   import { texts } from "../lib/i18n";
 
   interface Props {
@@ -22,7 +23,7 @@
   type Tab = (typeof tabs)[number];
 
   let tab = $state<Tab>("accounts");
-  /** Une confirmation a son propre « Annuler » : le « Retour » du panneau est masqué. */
+  /** Une confirmation est ouverte : le « Retour » du panneau est masqué. */
   let confirming = $state(false);
 
   function confirm(open: boolean) {
@@ -31,6 +32,11 @@
 </script>
 
 <section class="panel admin" aria-labelledby="admin-title">
+  {#if !confirming}
+    <button type="button" class="back icon-button" aria-label={texts.back} title={texts.back} onclick={onClose}>
+      <Icon name="back" />
+    </button>
+  {/if}
   <h2 id="admin-title">{texts.adminTitle}</h2>
   <div class="tabs" role="tablist" aria-label={texts.adminTitle}>
     {#each tabs as name (name)}
@@ -51,22 +57,25 @@
     {:else if tab === "vaults"}
       <AdminVaults {accountId} onConfirming={confirm} />
     {:else if tab === "keys"}
-      <AdminKeys />
+      <AdminKeys onConfirming={confirm} />
     {:else}
       <AdminServer {publicAddress} />
     {/if}
   </div>
-  {#if !confirming}
-    <div class="actions">
-      <button type="button" onclick={onClose}>{texts.back}</button>
-    </div>
-  {/if}
 </section>
 
 <style>
   /* Plus large que les autres cartes : les listes y tiennent sur deux colonnes. */
   .admin {
     max-width: 60rem;
+  }
+
+  .back {
+    margin-bottom: var(--space-s);
+  }
+
+  h2 {
+    margin-top: 0;
   }
 
   .tabs {
