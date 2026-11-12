@@ -13,7 +13,7 @@ const errors = {
   unknownVault: (detail: string) => `Coffre inconnu : ${detail}.`,
   vaultExists: (detail: string) => `Un coffre nommé ${detail} existe déjà.`,
   invalidVaultName: (detail: string) =>
-    `Nom de coffre invalide : « ${detail} » (64 caractères au plus, sans espace au début ni à la fin).`,
+    `Nom de coffre invalide : « ${detail} » (32 caractères au plus, sans espace au début ni à la fin).`,
   passwordTooShort: () => "Le mot de passe maître doit contenir au moins 12 caractères.",
   passwordTooSimple: () =>
     "Le mot de passe maître doit mélanger au moins 3 types de caractères parmi : minuscules, majuscules, chiffres, symboles.",
@@ -52,8 +52,9 @@ const errors = {
   serverError: (detail: string) => `Échange avec le serveur impossible : ${detail}.`,
   serverUnreachable: () => "Serveur injoignable.",
   notPublished: (detail: string) => `Le coffre « ${detail} » n'est pas publié sur le serveur de cet appareil.`,
-  unpublishedChanges: (detail: string) =>
-    `Le coffre « ${detail} » a des modifications que le serveur n'a pas encore : synchronisez-le d'abord.`,
+  unpublishedChanges: (detail: string) => `« ${detail} » a des modifications non publiées : synchronisez-le d'abord.`,
+  emptyPassword: () => "Le mot de passe est obligatoire.",
+  emptyNote: () => "La note est obligatoire.",
   unexpected: (detail: string) => `Erreur : ${detail}`,
 } satisfies Record<string, Message>;
 
@@ -66,7 +67,7 @@ export const fr = {
   cancel: "Annuler",
   newVault: "Nouveau coffre",
   vaultName: "Nom du coffre",
-  vaultNameHint: "64 caractères au plus ; espaces et accents permis.",
+  vaultNameHint: "32 caractères au plus ; espaces et accents permis.",
   masterPassword: "Mot de passe maître",
   confirmation: "Confirmation",
   sharedVault: "Coffre commun",
@@ -126,7 +127,6 @@ export const fr = {
     keep: "Inchangé",
     set: "Saisir",
     generate: "Générer",
-    clear: "Supprimer",
   },
   length: "Longueur",
   symbols: "Avec des symboles",
@@ -158,7 +158,7 @@ export const fr = {
   deleteVault: "Supprimer ce coffre",
   deleteForever: "Supprimer",
   deleteVaultExplanation: (name: string) =>
-    `Le coffre « ${name} » et toutes ses entrées seront supprimés de cet appareil, sans retour possible. Une sauvegarde permet de le restaurer plus tard. Pour confirmer, retapez son nom.`,
+    `« ${name} » et ses entrées seront supprimés de cet appareil, sans retour possible : sauvegardez-le avant si besoin. Pour confirmer, retapez son nom.`,
   vaultDeleted: (name: string) => `Coffre « ${name} » supprimé.`,
   backup: "Sauvegarder",
   backupTitle: "Sauvegarder des coffres",
@@ -236,33 +236,24 @@ export const fr = {
       });
     return `${shown.join(", ")}.`;
   },
-  renamedOnDownload: (name: string, localName: string) =>
-    `Coffre « ${name} » enregistré sous le nom « ${localName} » : ce nom était déjà pris.`,
-  vaultArrived: (name: string) => `Nouveau coffre « ${name} » reçu du serveur.`,
-  gaveWay: (name: string, newName: string) =>
-    `Le serveur a déjà un coffre « ${name} » : celui de cet appareil devient « ${newName} ». S'il s'agit du même coffre, supprimez « ${newName} ».`,
-  newInvitation: (vaultName: string, invitedBy: string) =>
-    `Nouvelle invitation : ${invitedBy} vous invite dans le coffre « ${vaultName} ».`,
+  renamedOnDownload: (name: string, localName: string) => `« ${name} » enregistré sous « ${localName} » (nom déjà pris).`,
+  vaultArrived: (name: string) => `Nouveau coffre « ${name} » reçu.`,
+  gaveWay: (name: string, newName: string) => `« ${name} » renommé « ${newName} » : nom déjà pris sur le serveur.`,
   downloaded: (name: string, localName: string) =>
-    name === localName
-      ? `Coffre « ${name} » téléchargé.`
-      : `Coffre « ${name} » téléchargé sous le nom « ${localName} » : ce nom était déjà pris.`,
+    name === localName ? `Coffre « ${name} » téléchargé.` : `« ${name} » téléchargé sous « ${localName} » (nom déjà pris).`,
   notDownloaded: (name: string, reason: string) => `Coffre « ${name} » du serveur non téléchargé : ${reason}.`,
   published: (name: string) => `Coffre « ${name} » publié.`,
   notPublished: (name: string, reason: string) => `Coffre « ${name} » non publié : ${reason}.`,
   sent: (name: string) => `Coffre « ${name} » envoyé au serveur.`,
   received: (name: string) => `Coffre « ${name} » mis à jour depuis le serveur.`,
-  needsUnlock: (name: string) =>
-    `Le coffre « ${name} » a été modifié ici et sur le serveur : déverrouillez-le pour terminer la synchro.`,
+  needsUnlock: (name: string) => `« ${name} » modifié ici et sur le serveur : déverrouillez-le.`,
   notUpdated: (name: string, reason: string) => `Coffre « ${name} » non synchronisé : ${reason}.`,
-  leftElsewhere: (name: string) =>
-    `Coffre « ${name} » supprimé de cet appareil : vous n'êtes plus membre de ce coffre.`,
+  leftElsewhere: (name: string) => `« ${name} » retiré : vous n'êtes plus membre.`,
   notLeft: (name: string, reason: string) =>
-    `Vous n'êtes plus membre du coffre « ${name} », mais il n'a pas pu être supprimé de cet appareil : ${reason}.`,
-  deletedElsewhere: (name: string) =>
-    `Coffre « ${name} » supprimé de cet appareil : il a été supprimé partout depuis un autre appareil.`,
+    `« ${name} » : vous n'êtes plus membre, mais sa suppression ici a échoué : ${reason}.`,
+  deletedElsewhere: (name: string) => `« ${name} » supprimé depuis un autre appareil.`,
   notDeleted: (name: string, reason: string) =>
-    `Le coffre « ${name} » a été supprimé partout, mais n'a pas pu être supprimé de cet appareil : ${reason}.`,
+    `« ${name} » supprimé ailleurs, mais sa suppression ici a échoué : ${reason}.`,
   addDevice: "Ajouter un appareil",
   deviceKeyTitle: "Clé pour un nouvel appareil",
   deviceKeyExplanation: (address: string) =>
@@ -273,15 +264,25 @@ export const fr = {
   disconnectExplanation:
     "Cet appareil ne sera plus synchronisé. Vous pourrez vous reconnecter plus tard avec une nouvelle clé de connexion.",
   keepLocalCopies: "Garder une copie des coffres sur cet appareil",
-  removeExplanation:
-    "Seuls les coffres déjà à jour sur le serveur seront retirés de cet appareil ; ceux qui ont des modifications non publiées seront gardés.",
+  removeExplanation: "Les coffres à jour sur le serveur seront retirés ; ceux qui ont des modifications non publiées, gardés.",
   disconnecting: "Déconnexion…",
-  disconnected: "Appareil déconnecté du serveur.",
-  tokenNotRevoked: (reason: string) =>
-    `Le serveur n'a pas pu être prévenu (${reason}) : révoquez cet appareil depuis le panneau d'administration.`,
-  removedFromDevice: (name: string) => `Coffre « ${name} » retiré de cet appareil ; il reste sur le serveur.`,
-  keptOnDevice: (name: string, reason: string | null) =>
-    `Coffre « ${name} » gardé : ${reason ?? "des modifications ne sont pas encore sur le serveur"}.`,
+  disconnected: (removed: number, kept: number) => {
+    const vaults = (count: number, one: string, many: string) =>
+      `${count} ${count === 1 ? `coffre ${one}` : `coffres ${many}`}`;
+    if (removed === 0 && kept === 0) {
+      return "Appareil déconnecté.";
+    }
+    if (kept === 0) {
+      return `Appareil déconnecté : ${vaults(removed, "retiré", "retirés")}.`;
+    }
+    if (removed === 0) {
+      return `Appareil déconnecté : ${vaults(kept, "gardé", "gardés")}.`;
+    }
+    return `Appareil déconnecté : ${vaults(removed, "retiré", "retirés")}, ${kept} ${kept === 1 ? "gardé" : "gardés"}.`;
+  },
+  tokenNotRevoked: (reason: string) => `Serveur non prévenu (${reason}) : révoquez cet appareil dans l'administration.`,
+  removedFromDevice: (name: string) => `« ${name} » retiré de cet appareil.`,
+  keptOnDevice: (name: string, reason: string) => `« ${name} » gardé : ${reason}.`,
   vaultStates: {
     local: "Pas sur ce serveur : publié au prochain échange",
     synced: "Synchronisé",
@@ -293,43 +294,34 @@ export const fr = {
   removedNotice:
     "Ce coffre n'est pas (ou plus) sur votre compte du serveur : il n'existe que sur cet appareil. Déverrouillez-le puis appuyez sur « Synchroniser » pour le publier, ou supprimez-le.",
   shared: "commun",
-  absentFromAccount: (names: string[]) =>
-    names.length === 1
-      ? `Coffre « ${names.join("")} » absent de votre compte sur le serveur : gardé sur cet appareil. Pour le publier, ouvrez-le puis appuyez sur « Synchroniser ».`
-      : `Coffres absents de votre compte sur le serveur, gardés sur cet appareil : ${names.map((name) => `« ${name} »`).join(", ")}. Pour les publier, ouvrez-les puis appuyez sur « Synchroniser ».`,
-  otherAccountReminder:
-    "Les coffres gardés sur cet appareil restent liés à ce compte : s'ils appartiennent à quelqu'un d'autre, supprimez-les avant de connecter un autre compte.",
   invitations: "Invitations",
   invitation: (vaultName: string, invitedBy: string) => `${invitedBy} vous invite dans le coffre « ${vaultName} ».`,
   accept: "Accepter",
   decline: "Refuser",
-  invitationAccepted: (invitedBy: string) => `Demandez à ${invitedBy} le mot de passe maître du coffre pour l'ouvrir.`,
-  invitationDeclined: (vaultName: string) => `Invitation au coffre « ${vaultName} » refusée.`,
+  invitationAccepted: (invitedBy: string) => `Invitation acceptée : demandez le mot de passe à ${invitedBy}.`,
+  invitationDeclined: "Invitation refusée.",
   members: "Membres",
   membersTitle: "Membres du coffre",
   pendingInvitations: "Invitations en attente",
   cancelInvitation: (name: string) => `Annuler l'invitation de ${name}`,
-  invitationCancelled: (name: string) => `Invitation de ${name} annulée.`,
+  invitationCancelled: "Invitation annulée.",
   inviteAccount: "Inviter un compte",
   invite: "Inviter",
   inviting: "Invitation…",
   noOneToInvite: "Tous les comptes du serveur sont déjà membres ou invités.",
-  invited: (name: string) =>
-    `Invitation envoyée à ${name}. Transmettez-lui le mot de passe maître du coffre, sans passer par le serveur.`,
+  invited: "Invitation envoyée.",
   leaveVault: "Quitter ce coffre",
   leave: "Quitter",
-  leaveExplanation: (name: string) =>
-    `Le coffre « ${name} » sera supprimé de cet appareil et de vos autres appareils ; les autres membres le gardent. Pour le rejoindre plus tard, il faudra une nouvelle invitation.`,
-  vaultLeft: (name: string) => `Vous avez quitté le coffre « ${name} ».`,
+  leaveExplanation: (name: string) => `« ${name} » sera retiré de vos appareils ; les autres membres le gardent.`,
+  vaultLeft: (name: string) => `Vous avez quitté « ${name} ».`,
   lastMemberExplanation: (name: string) =>
-    `Vous êtes le dernier membre du coffre « ${name} » : il sera supprimé du serveur et de tous vos appareils, sans retour possible. Une sauvegarde permet de le restaurer plus tard. Pour confirmer, retapez son nom.`,
+    `Vous êtes le dernier membre : « ${name} » sera supprimé partout, sans retour possible : sauvegardez-le avant si besoin. Pour confirmer, retapez son nom.`,
   deleteWhere: "Que faire de ce coffre ?",
   deleteEverywhere: "Supprimer partout",
   deleteEverywhereExplanation:
-    "Le coffre et ses versions seront effacés du serveur, puis de vos autres appareils à leur prochain échange. Un appareil qui a des modifications pas encore publiées garde sa copie.",
+    "Effacé du serveur et de vos appareils ; un appareil aux modifications non publiées garde sa copie.",
   forgetVault: "Retirer de cet appareil",
-  forgetVaultExplanation:
-    "Le coffre reste sur le serveur et sur vos autres appareils ; il ne sera plus téléchargé ici. L'écran « Serveur » permet de le télécharger de nouveau.",
+  forgetVaultExplanation: "Reste sur le serveur et vos autres appareils ; l'écran « Serveur » permet de le retélécharger.",
   forget: "Retirer",
   confirmVaultName: "Pour confirmer, retapez le nom du coffre.",
   ignoredVaults: "Coffres retirés de cet appareil",
@@ -348,7 +340,7 @@ export const fr = {
   deviceAdded: (name: string, millis: number) => `${name}, ajouté le ${day.format(millis)}`,
   revoke: "Révoquer",
   revokeDevice: (name: string) => `Révoquer ${name}`,
-  deviceRevoked: (name: string) => `Appareil « ${name} » révoqué : il ne peut plus joindre le serveur.`,
+  deviceRevoked: (name: string) => `« ${name} » révoqué.`,
   makeAdmin: "Nommer administrateur",
   removeAdmin: "Retirer le rôle d'administrateur",
   lastAdministrator: "Dernier administrateur",
@@ -359,6 +351,10 @@ export const fr = {
     `Le compte « ${name} », ses appareils et ses clés seront supprimés. Ses coffres restent sur le serveur ; ceux dont il était le seul membre n'en auront plus. Pour confirmer, retapez son nom.`,
   accountNameConfirmation: "Nom du compte",
   accountDeleted: (name: string) => `Compte « ${name} » supprimé.`,
+  deleteOwnAccount: "Supprimer mon compte",
+  deleteOwnAccountExplanation:
+    "Votre compte et vos appareils seront supprimés du serveur, et cet appareil déconnecté ; vos coffres restent ici. Pour confirmer, retapez votre nom.",
+  ownAccountDeleted: "Compte supprimé : appareil déconnecté.",
   addMember: "Ajouter un membre",
   memberName: "Nom du nouveau membre",
   createKey: "Créer sa clé",
@@ -375,7 +371,7 @@ export const fr = {
         : `Appareil de plus pour ${name}`,
   expires: (millis: number) => `expire le ${day.format(millis)}`,
   cancelKey: "Annuler la clé",
-  keyCancelled: "Clé annulée : elle ne peut plus servir.",
+  keyCancelled: "Clé annulée.",
   noServerVault: "Aucun coffre sur le serveur.",
   searchServerVault: "Rechercher un coffre",
   noServerVaultFound: "Aucun coffre ne porte ce nom.",
@@ -388,11 +384,11 @@ export const fr = {
   allVaults: "Tous les coffres",
   remove: "Retirer",
   removeMember: (name: string) => `Retirer ${name}`,
-  memberRemoved: (name: string, vault: string) => `${name} a été retiré du coffre « ${vault} ».`,
+  memberRemoved: (name: string, vault: string) => `${name} retiré de « ${vault} ».`,
   attachExplanation: "Ce coffre n'a plus de membre : rattachez-y un compte pour qu'il le retrouve.",
   attachAccount: "Compte à rattacher",
   attach: "Rattacher",
-  attached: (name: string, vault: string) => `${name} est maintenant membre du coffre « ${vault} ».`,
+  attached: (name: string, vault: string) => `${name} ajouté à « ${vault} ».`,
   versionsTitle: "Versions conservées",
   noVersion: "Aucune version publiée.",
   versionLine: (version: number, millis: number, size: number) =>
@@ -400,8 +396,7 @@ export const fr = {
   restoreVersion: (version: number) => `Restaurer la version ${version}`,
   currentVersion: "(actuelle)",
   versionPages: "Pages des versions",
-  versionRestored: (name: string) =>
-    `Version restaurée dans le nouveau coffre « ${name} » ; ses membres le recevront au prochain échange.`,
+  versionRestored: (name: string) => `Version restaurée dans « ${name} ».`,
   deleteServerVault: "Supprimer du serveur",
   deleteServerVaultExplanation: (name: string) =>
     `Le contenu du coffre « ${name} » et ses versions seront effacés du serveur. Les copies des appareils sont gardées : un membre pourra republier la sienne. Pour confirmer, retapez son nom.`,
@@ -409,7 +404,7 @@ export const fr = {
   publicAddress: "Adresse publique",
   publicAddressHint:
     "Nom DNS ou adresse IP pour joindre le serveur hors de chez vous, par exemple maison.duckdns.org. Laissez vide pour l'effacer.",
-  publicAddressSaved: "Adresse publique enregistrée : les appareils la reçoivent au prochain échange.",
+  publicAddressSaved: "Adresse publique enregistrée.",
   serverBackup: "Sauvegarder le serveur",
   serverBackupExplanation:
     "Copie complète du serveur : comptes, coffres chiffrés et clé privée de son certificat. Rangez-la en lieu sûr, hors de cette machine.",
@@ -417,13 +412,11 @@ export const fr = {
   serverBackedUp: "Sauvegarde du serveur enregistrée.",
   syncDone: "Coffre à jour.",
   syncNotConnected: "Cet appareil n'est connecté à aucun serveur.",
-  syncRemoved:
-    "Coffre absent de votre compte sur le serveur : il n'existe que sur cet appareil. Pour le publier, appuyez sur « Synchroniser ».",
-  syncLeft: "Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil.",
-  syncDeleted: "Ce coffre a été supprimé partout depuis un autre appareil : il a été supprimé de cet appareil.",
-  syncNameTaken:
-    "Le serveur a déjà un coffre de ce nom : celui-ci sera renommé puis publié au retour à la liste des coffres.",
-  passwordChangedElsewhere: "Le mot de passe maître de ce coffre a été changé sur un autre appareil.",
+  syncRemoved: "Absent de votre compte sur le serveur : « Synchroniser » le publie.",
+  syncLeft: "Vous n'êtes plus membre : coffre retiré de cet appareil.",
+  syncDeleted: "Coffre supprimé depuis un autre appareil.",
+  syncNameTaken: "Nom déjà pris sur le serveur : ce coffre sera renommé au retour à la liste.",
+  passwordChangedElsewhere: "Mot de passe maître changé sur un autre appareil.",
   syncOffline: (detail: string) => `Synchro impossible : ${detail}. Les modifications seront publiées plus tard.`,
   syncConflict: "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",
   syncRejected: (detail: string) => `Copie du serveur refusée (${detail}) : elle n'est pas remplacée.`,
@@ -431,13 +424,15 @@ export const fr = {
   passwordRule: "Au moins 12 caractères, dont au moins 3 types parmi : minuscules, majuscules, chiffres, symboles.",
   validation: {
     nameRequired: "Le nom du coffre est obligatoire.",
-    nameInvalid: "Nom invalide : 64 caractères au plus, sans tabulation ni retour à la ligne.",
+    nameInvalid: "Nom invalide : 32 caractères au plus, sans tabulation ni retour à la ligne.",
     passwordRequired: "Le mot de passe maître est obligatoire.",
     passwordTooShort: "Le mot de passe maître doit contenir au moins 12 caractères.",
     passwordTooSimple:
       "Le mot de passe maître doit mélanger au moins 3 types de caractères parmi : minuscules, majuscules, chiffres, symboles.",
     passwordMismatch: "Les deux saisies ne correspondent pas.",
     titleRequired: "Le titre est obligatoire.",
+    entryPasswordRequired: "Le mot de passe est obligatoire.",
+    noteRequired: "La note est obligatoire.",
     lengthInvalid: "La longueur doit être un nombre entier entre 8 et 24.",
     addressRequired: "L'adresse du serveur est obligatoire.",
     keyRequired: "La clé de connexion est obligatoire.",

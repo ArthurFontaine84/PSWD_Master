@@ -2,9 +2,7 @@
 import { texts } from "./i18n";
 
 // Même règle que `pswd_core::is_valid_vault_name` (SPEC §7).
-const MAX_NAME_LENGTH = 64;
-/** La longueur d'un nom tient sur un octet dans une sauvegarde. */
-const MAX_NAME_BYTES = 255;
+const MAX_NAME_LENGTH = 32;
 const CONTROL = /\p{Cc}/u;
 
 // Même règle que `pswd_app::check_master_password` (SPEC §9).
@@ -30,11 +28,7 @@ export function newVaultProblem(name: string, password: string, confirmation: st
   if (name === "") {
     return texts.validation.nameRequired;
   }
-  if (
-    [...name].length > MAX_NAME_LENGTH ||
-    new TextEncoder().encode(name).length > MAX_NAME_BYTES ||
-    CONTROL.test(name)
-  ) {
+  if ([...name].length > MAX_NAME_LENGTH || CONTROL.test(name)) {
     return texts.validation.nameInvalid;
   }
   return newPasswordProblem(password, confirmation);

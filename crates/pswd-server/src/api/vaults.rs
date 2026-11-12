@@ -303,7 +303,7 @@ mod tests {
     #[tokio::test]
     async fn vault_name_must_be_valid() {
         let (app, token) = app_with_admin().await;
-        let too_long = "a".repeat(65);
+        let too_long = "a".repeat(pswd_core::MAX_VAULT_NAME_LEN + 1);
         for name in ["", " perso", "per\nso", &too_long] {
             let response = send(&app, create_request(Some(&token), name)).await;
             assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{name:?}");

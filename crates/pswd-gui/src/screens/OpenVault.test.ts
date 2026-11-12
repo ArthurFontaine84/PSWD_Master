@@ -382,7 +382,7 @@ describe("OpenVault and the server", () => {
     return { stop, send: (sent: SyncReport) => handler(sent) };
   }
 
-  it("checks the server every 30 seconds while the page is visible, silently", async () => {
+  it("checks the server every 5 seconds while the page is visible, silently", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     vi.mocked(checkVault).mockRejectedValueOnce({ code: "serverError", detail: "serveur injoignable" });
     const { unmount } = render(OpenVault, {
@@ -393,18 +393,20 @@ describe("OpenVault and the server", () => {
     });
     await screen.findByText("2 entrées");
     expect(checkVault).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(4_999);
+    expect(checkVault).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
     expect(checkVault).toHaveBeenCalledTimes(1);
-    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(5_000);
     expect(checkVault).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(5_000);
     expect(checkVault).toHaveBeenCalledTimes(2);
     visibility.mockRestore();
     unmount();
-    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(5_000);
     expect(checkVault).toHaveBeenCalledTimes(2);
   });
 
@@ -454,7 +456,7 @@ describe("OpenVault and the server", () => {
     const { onLocked } = show();
     await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
     expect(
-      await screen.findByText("Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil."),
+      await screen.findByText("Vous n'êtes plus membre : coffre retiré de cet appareil."),
     ).toBeInTheDocument();
     expect(onLocked).toHaveBeenCalled();
   });
@@ -466,7 +468,7 @@ describe("OpenVault and the server", () => {
     await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));
     expect(
       await screen.findByText(
-        "Ce coffre a été supprimé partout depuis un autre appareil : il a été supprimé de cet appareil.",
+        "Coffre supprimé depuis un autre appareil.",
       ),
     ).toBeInTheDocument();
     expect(onLocked).toHaveBeenCalled();
@@ -489,7 +491,7 @@ describe("OpenVault and the server", () => {
     show();
     await screen.findByText("2 entrées");
     syncs.send({ ...report("synced"), passwordChanged: true });
-    const changed = "Le mot de passe maître de ce coffre a été changé sur un autre appareil.";
+    const changed = "Mot de passe maître changé sur un autre appareil.";
     expect(await screen.findByText(changed)).toBeInTheDocument();
 
     await fireEvent.click(await screen.findByRole("button", { name: "Synchroniser" }));

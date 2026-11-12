@@ -172,9 +172,16 @@ impl AppState {
         self.vaults.add_member(name.trim()).map_err(server_error)
     }
 
-    /// Le nom du compte est retapé pour confirmer.
-    pub fn delete_account(&self, id: Uuid, name: &str, confirmation: &str) -> Result<(), UiError> {
+    /// Le nom du compte est retapé pour confirmer. `true` : c'était le compte de l'appareil, qui
+    /// a oublié le serveur en gardant ses coffres.
+    pub fn delete_account(
+        &self,
+        id: Uuid,
+        name: &str,
+        confirmation: &str,
+    ) -> Result<bool, UiError> {
         confirm(name, confirmation)?;
+        let _one_at_a_time = self.exclusive();
         self.vaults.delete_account(id).map_err(server_error)
     }
 
@@ -435,10 +442,44 @@ mod tests {
             arthur.delete_account(camille_id, "Camille", "camille"),
             Err(UiError::code("confirmationMismatch"))
         );
-        arthur
-            .delete_account(camille_id, "Camille", "Camille")
-            .unwrap();
+        assert_eq!(
+            arthur.delete_account(camille_id, "Camille", "Camille"),
+            Ok(false)
+        );
         assert_eq!(arthur.admin_accounts().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_administrator_deletes_his_own_account_only() {
+        let dir = TempDir::new().unwrap();
+        let (arthur, camille, _server) = server(&dir);
+        let camille_id = id(&account(&arthur, "Camille")["id"]);
+        let arthur_id = id(&account(&arthur, "Arthur")["id"]);
+        arthur.set_admin(camille_id, true).unwrap();
+        assert_eq!(
+            code(
+                &arthur
+                    .delete_account(camille_id, "Camille", "Camille")
+                    .unwrap_err()
+            ),
+            "serverError"
+        );
+        assert_eq!(
+            camille.delete_account(camille_id, "Camille", "Camille"),
+            Ok(true)
+        );
+        assert_eq!(
+            sent(&camille.server_status().unwrap())["address"],
+            Value::Null
+        );
+        assert_eq!(
+            code(
+                &arthur
+                    .delete_account(arthur_id, "Arthur", "Arthur")
+                    .unwrap_err()
+            ),
+            "serverError"
+        );
     }
 
     #[test]
@@ -511,7 +552,7 @@ mod tests {
         );
         for result in [
             alone.delete_everywhere("perso", "perso"),
-            alone.delete_account(id, "A", "A"),
+            alone.delete_account(id, "A", "A").map(drop),
             alone.set_admin(id, true),
             alone.revoke_device(id),
             alone.cancel_key(id),

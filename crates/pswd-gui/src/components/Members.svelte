@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import {
     deleteInvitation,
     inviteMember,
@@ -9,6 +10,7 @@
   } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
+  import { EXCHANGE_INTERVAL } from "../lib/sync";
   import { showToast } from "../lib/toast.svelte";
 
   interface Props {
@@ -17,9 +19,6 @@
   }
 
   const { name, onClose }: Props = $props();
-
-  /** Le rappel de transmettre le mot de passe reste affiché plus longtemps qu'une confirmation. */
-  const INVITED_DURATION = 8_000;
 
   let members = $state<Members | null>(null);
   let accounts = $state<Account[]>([]);
@@ -36,24 +35,40 @@
     ),
   );
 
-  async function load() {
+  /** `quiet` : relecture automatique, dont l'échec n'est pas affiché. */
+  async function load(quiet = false) {
     try {
       [members, accounts] = await Promise.all([vaultMembers(name), listAccounts()]);
-      chosen = invitable[0]?.id ?? "";
+      if (!invitable.some(({ id }) => id === chosen)) {
+        chosen = invitable[0]?.id ?? "";
+      }
     } catch (error) {
-      problem = errorMessage(error);
+      if (!quiet) {
+        problem = errorMessage(error);
+      }
     }
   }
 
   void load();
 
+  // Une invitation acceptée ailleurs fait passer le compte dans les membres, comme l'échange
+  // automatique (SPEC §7).
+  onMount(() => {
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible" && !busy) {
+        void load(true);
+      }
+    }, EXCHANGE_INTERVAL);
+    return () => clearInterval(timer);
+  });
+
   /** Une opération à la fois ; la liste est relue ensuite. */
-  async function run(action: () => Promise<string>, duration?: number) {
+  async function run(action: () => Promise<string>) {
     busy = true;
     problem = null;
     try {
       const message = await action();
-      showToast(message, duration);
+      showToast(message);
       await load();
     } catch (error) {
       problem = errorMessage(error);
@@ -70,14 +85,14 @@
     }
     await run(async () => {
       await inviteMember(name, account.id);
-      return texts.invited(account.name);
-    }, INVITED_DURATION);
+      return texts.invited;
+    });
   }
 
-  async function cancel(id: string, accountName: string) {
+  async function cancel(id: string) {
     await run(async () => {
       await deleteInvitation(id);
-      return texts.invitationCancelled(accountName);
+      return texts.invitationCancelled;
     });
   }
 </script>
@@ -105,7 +120,7 @@
           <button
             type="button"
             disabled={busy}
-            onclick={() => cancel(invitation.id, invitation.account.name)}
+            onclick={() => cancel(invitation.id)}
           >
             {texts.cancelInvitation(invitation.account.name)}
           </button>

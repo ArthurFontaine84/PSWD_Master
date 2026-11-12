@@ -24,7 +24,7 @@
       if (path === null) {
         return;
       }
-      showToast(texts.imported(await importEntries(path)), IMPORTED_DURATION);
+      showToast(texts.imported(await importEntries(path)), { duration: IMPORTED_DURATION });
       onImported();
       onClose();
     } catch (error) {

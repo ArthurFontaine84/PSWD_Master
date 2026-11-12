@@ -682,7 +682,7 @@ theme = \"dark\"
             ),
             (
                 ConfigError::InvalidVaultName(" perso".to_owned()),
-                "nom de coffre invalide : «  perso » (64 caractères au plus, sans espace au début \
+                "nom de coffre invalide : «  perso » (32 caractères au plus, sans espace au début \
                  ni à la fin)",
             ),
         ];

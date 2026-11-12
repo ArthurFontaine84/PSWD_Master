@@ -19,6 +19,7 @@ use axum::routing::{delete, get, post};
 use pswd_core::crypto::FINGERPRINT_LEN;
 use pswd_core::{ConnectionKey, MAX_VAULT_FILE_LEN, Secret, Timestamp};
 use sha2::{Digest, Sha256};
+use uuid::Uuid;
 use zeroize::Zeroizing;
 
 use crate::clock::now;
@@ -139,15 +140,16 @@ async fn client_ip(parts: &mut Parts, state: &Shared) -> Result<IpAddr, ApiError
     Ok(address.ip())
 }
 
-/// Appareil d'un compte administrateur ; les autres reçoivent 403.
-pub(super) struct Admin;
+/// Appareil d'un compte administrateur, et ce compte ; les autres reçoivent 403.
+pub(super) struct Admin(pub(super) Uuid);
 
 impl FromRequestParts<Shared> for Admin {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &Shared) -> Result<Self, ApiError> {
-        if Caller::from_request_parts(parts, state).await?.is_admin {
-            Ok(Self)
+        let caller = Caller::from_request_parts(parts, state).await?;
+        if caller.is_admin {
+            Ok(Self(caller.account))
         } else {
             Err(ApiError::Forbidden)
         }
@@ -209,9 +211,10 @@ impl From<StorageError> for ApiError {
             StorageError::NotShared | StorageError::UnknownAccount | StorageError::SharedVault => {
                 Self::BadRequest
             }
-            StorageError::AlreadyMember | StorageError::HasMembers | StorageError::LastAdmin => {
-                Self::Conflict
-            }
+            StorageError::AlreadyMember
+            | StorageError::HasMembers
+            | StorageError::LastAdmin
+            | StorageError::OtherAdmin => Self::Conflict,
             StorageError::Conflict => Self::PreconditionFailed,
             StorageError::MissingAccountName => Self::InvalidName,
             other => {

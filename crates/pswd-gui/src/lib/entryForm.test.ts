@@ -47,8 +47,14 @@ describe("entry form", () => {
     expect(note).toMatchObject({ kind: "note", username: "", notes: "", urls: "", tags: [] });
   });
 
-  it("requires a title and a valid length to generate", () => {
+  it("requires a title, a password or a note, and a valid length to generate", () => {
     expect(formProblem({ ...emptyForm(), title: "  " })).toBe("Le titre est obligatoire.");
+    expect(formProblem({ ...emptyForm(), title: "GitHub" })).toBe("Le mot de passe est obligatoire.");
+    expect(formProblem({ ...emptyForm(), title: "GitHub", password: "x" })).toBeNull();
+    expect(formProblem({ ...emptyForm(), title: "GitHub", passwordMode: "keep" })).toBeNull();
+    const note = { ...emptyForm(), kind: "note" as const, title: "Wi-Fi" };
+    expect(formProblem({ ...note, notes: "  " })).toBe("La note est obligatoire.");
+    expect(formProblem({ ...note, notes: "Box : ABCD" })).toBeNull();
     const generating = { ...emptyForm(), title: "GitHub", passwordMode: "generate" as const };
     expect(formProblem(generating)).toBeNull();
     for (const length of [8, 24]) {
@@ -59,8 +65,8 @@ describe("entry form", () => {
         "La longueur doit être un nombre entier entre 8 et 24.",
       );
     }
-    expect(formProblem({ ...generating, kind: "note", length: 3 })).toBeNull();
-    expect(formProblem({ ...emptyForm(), title: "GitHub", length: 3 })).toBeNull();
+    expect(formProblem({ ...generating, kind: "note", notes: "texte", length: 3 })).toBeNull();
+    expect(formProblem({ ...emptyForm(), title: "GitHub", password: "x", length: 3 })).toBeNull();
   });
 
   it("converts the fields for the backend", () => {
@@ -89,7 +95,6 @@ describe("entry form", () => {
       symbols: false,
     });
     expect(toInput({ ...values, passwordMode: "keep" }).password).toEqual({ mode: "keep" });
-    expect(toInput({ ...values, passwordMode: "clear" }).password).toEqual({ mode: "clear" });
     expect(toInput({ ...emptyForm(), title: "Wi-Fi" })).toMatchObject({ urls: [], tags: [] });
   });
 });

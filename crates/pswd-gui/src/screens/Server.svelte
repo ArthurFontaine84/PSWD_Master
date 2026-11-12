@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import {
     accountStatus,
     addDeviceKey,
@@ -6,6 +7,7 @@
     disconnectServer,
     downloadAgain,
     ignoredVaults,
+    refreshServer,
     serverStatus,
     syncServer,
     type AccountStatus,
@@ -15,7 +17,7 @@
   import { errorMessage, isServerUnreachable } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { verbatim } from "../lib/keyboard";
-  import { disconnectionOutcome, exchangeOutcome, type Outcome } from "../lib/sync";
+  import { disconnectionOutcome, EXCHANGE_INTERVAL, exchangeOutcome, type Outcome } from "../lib/sync";
   import { showToast } from "../lib/toast.svelte";
   import { connectionProblem } from "../lib/validation";
 
@@ -44,6 +46,8 @@
   let deviceKey = $state<string | null>(null);
   let confirming = $state(false);
   let keepLocal = $state(true);
+  /** Serveur enregistré qui ne répond pas : seuls « Retour » et « Se déconnecter » restent. */
+  const unreachable = $derived(status?.trouble != null);
 
   async function load() {
     try {
@@ -59,6 +63,30 @@
   }
 
   void load();
+
+  /**
+   * Échange automatique (SPEC §7) : l'écran suit l'état du serveur, et les actions qui demandent
+   * le serveur se débloquent dès qu'il répond de nouveau.
+   */
+  async function refresh() {
+    if (document.visibilityState !== "visible" || running !== null || status?.address == null) {
+      return;
+    }
+    const fresh = await refreshServer().catch(() => null);
+    if (fresh === null || running !== null) {
+      return;
+    }
+    const wasReachable = status.trouble === null;
+    status = fresh;
+    if (fresh.address !== null && (fresh.trouble === null) !== wasReachable) {
+      await load();
+    }
+  }
+
+  onMount(() => {
+    const timer = setInterval(() => void refresh(), EXCHANGE_INTERVAL);
+    return () => clearInterval(timer);
+  });
 
   function report(outcome: Outcome) {
     if (outcome.done.length > 0) {
@@ -130,8 +158,7 @@
 
   async function disconnect() {
     await run("disconnect", async () => {
-      const copiesKept = keepLocal && status !== null && status.vaults.length > 0;
-      const outcome = disconnectionOutcome(await disconnectServer(keepLocal), copiesKept);
+      const outcome = disconnectionOutcome(await disconnectServer(keepLocal));
       confirming = false;
       report(outcome);
       await load();
@@ -250,10 +277,12 @@
       <p role="alert">{problem}</p>
     {/if}
     <div class="actions">
-      <button type="button" class="primary" disabled={running !== null} onclick={synchronize}>
+      <button type="button" class="primary" disabled={running !== null || unreachable} onclick={synchronize}>
         {running === "sync" ? texts.synchronizing : texts.synchronize}
       </button>
-      <button type="button" disabled={running !== null} onclick={newDeviceKey}>{texts.addDevice}</button>
+      <button type="button" disabled={running !== null || unreachable} onclick={newDeviceKey}>
+        {texts.addDevice}
+      </button>
     </div>
     <div class="actions">
       <button type="button" onclick={onClose}>{texts.back}</button>

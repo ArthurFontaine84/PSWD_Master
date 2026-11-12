@@ -122,6 +122,9 @@ pub enum StorageError {
     HasMembers,
     /// Le dernier administrateur ne perd pas son rôle et n'est pas supprimé.
     LastAdmin,
+    /// Un administrateur ne supprime que son propre compte parmi les administrateurs : un autre
+    /// perd d'abord son rôle.
+    OtherAdmin,
     /// Le coffre a changé depuis la version attendue.
     Conflict,
     /// Clé de connexion inconnue, expirée ou déjà utilisée.
@@ -147,6 +150,7 @@ impl fmt::Display for StorageError {
             Self::SharedVault => f.write_str("coffre commun"),
             Self::HasMembers => f.write_str("le coffre a encore des membres"),
             Self::LastAdmin => f.write_str("dernier administrateur"),
+            Self::OtherAdmin => f.write_str("compte d'un autre administrateur"),
             Self::Conflict => f.write_str("le coffre a changé depuis la version lue"),
             Self::InvalidKey => f.write_str("clé de connexion invalide ou expirée"),
             Self::MissingAccountName => f.write_str("nom du compte manquant"),
@@ -435,6 +439,7 @@ mod tests {
             (StorageError::SharedVault, "coffre commun"),
             (StorageError::HasMembers, "le coffre a encore des membres"),
             (StorageError::LastAdmin, "dernier administrateur"),
+            (StorageError::OtherAdmin, "compte d'un autre administrateur"),
             (
                 StorageError::Conflict,
                 "le coffre a changé depuis la version lue",

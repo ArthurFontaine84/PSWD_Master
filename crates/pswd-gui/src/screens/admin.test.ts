@@ -71,8 +71,9 @@ beforeEach(() => {
 /** Le panneau, vu depuis un appareil du compte d'Arthur. */
 function show(publicAddress: string | null = null) {
   const onClose = vi.fn();
-  render(Admin, { address: "pswd.local:8443", publicAddress, accountId: "a1", onClose });
-  return onClose;
+  const onDisconnected = vi.fn();
+  render(Admin, { address: "pswd.local:8443", publicAddress, accountId: "a1", onClose, onDisconnected });
+  return Object.assign(onClose, { onDisconnected });
 }
 
 async function openTab(name: string) {
@@ -99,7 +100,7 @@ describe("Admin, accounts", () => {
     expect(revoke).toHaveTextContent(/^Révoquer$/);
     await fireEvent.click(revoke);
     expect(revokeDevice).toHaveBeenCalledWith("d1");
-    expect(await screen.findByText(/Appareil « PC » révoqué/)).toBeInTheDocument();
+    expect(await screen.findByText("« PC » révoqué.")).toBeInTheDocument();
   });
 
   it("changes roles, but keeps the last administrator", async () => {
@@ -128,13 +129,25 @@ describe("Admin, accounts", () => {
     expect(card("Arthur").getByRole("button", { name: "Nommer administrateur" })).toBeInTheDocument();
   });
 
-  it("does not delete the account of this device", async () => {
+  it("deletes the own account of an administrator who is not the last one, never another administrator", async () => {
     vi.mocked(adminAccounts).mockResolvedValue([arthur, { ...camille, isAdmin: true }]);
-    show();
+    const { onDisconnected } = show();
     await screen.findByText("Camille");
     expect(card("Arthur").getByRole("button", { name: "Retirer le rôle d'administrateur" })).toBeInTheDocument();
     expect(card("Arthur").queryByRole("button", { name: "Supprimer le compte" })).not.toBeInTheDocument();
-    expect(card("Camille").getByRole("button", { name: "Supprimer le compte" })).toBeInTheDocument();
+    expect(card("Camille").getByRole("button", { name: "Retirer le rôle d'administrateur" })).toBeInTheDocument();
+    expect(card("Camille").queryByRole("button", { name: /^Supprimer/ })).not.toBeInTheDocument();
+
+    await fireEvent.click(card("Arthur").getByRole("button", { name: "Supprimer mon compte" }));
+    expect(screen.getByRole("heading", { name: "Supprimer mon compte" })).toBeInTheDocument();
+    expect(screen.getByText(/cet appareil déconnecté ; vos coffres restent ici/)).toBeInTheDocument();
+    vi.mocked(deleteAccount).mockResolvedValue(true);
+    await fireEvent.input(screen.getByLabelText("Nom du compte"), { target: { value: "Arthur" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Supprimer" }));
+    expect(deleteAccount).toHaveBeenCalledWith("a1", "Arthur", "Arthur");
+    expect(await screen.findByText("Compte supprimé : appareil déconnecté.")).toBeInTheDocument();
+    expect(onDisconnected).toHaveBeenCalled();
+    expect(adminAccounts).toHaveBeenCalledTimes(1);
   });
 
   it("deletes an account once its name is typed again", async () => {
@@ -145,6 +158,7 @@ describe("Admin, accounts", () => {
     expect(confirm).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Retour" })).not.toBeInTheDocument();
     await fireEvent.input(screen.getByLabelText("Nom du compte"), { target: { value: "Camille" } });
+    vi.mocked(deleteAccount).mockResolvedValue(false);
     await fireEvent.click(confirm);
     expect(deleteAccount).toHaveBeenCalledWith("a2", "Camille", "Camille");
     expect(await screen.findByText("Compte « Camille » supprimé.")).toBeInTheDocument();
@@ -259,7 +273,7 @@ describe("Admin, vaults", () => {
     expect(screen.queryByRole("button", { name: "Restaurer la version 3" })).not.toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Restaurer la version 2" }));
     expect(restoreVersion).toHaveBeenCalledWith("v1", 2);
-    expect(await screen.findByText(/nouveau coffre « famille-v2 »/)).toBeInTheDocument();
+    expect(await screen.findByText("Version restaurée dans « famille-v2 ».")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retirer Arthur" })).not.toBeInTheDocument();
     vi.mocked(removeMember).mockRejectedValueOnce({ code: "serverError", detail: "injoignable" });
     const remove = await screen.findByRole("button", { name: "Retirer Camille" });
@@ -268,7 +282,7 @@ describe("Admin, vaults", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("injoignable");
     await fireEvent.click(await screen.findByRole("button", { name: "Retirer Camille" }));
     expect(removeMember).toHaveBeenLastCalledWith("v1", "a2");
-    expect(await screen.findByText("Camille a été retiré du coffre « famille ».")).toBeInTheDocument();
+    expect(await screen.findByText("Camille retiré de « famille ».")).toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Tous les coffres" }));
     expect(await screen.findByRole("button", { name: "Gérer le coffre vieux" })).toBeInTheDocument();
   });
@@ -290,7 +304,7 @@ describe("Admin, vaults", () => {
     await fireEvent.change(screen.getByLabelText("Compte à rattacher"), { target: { value: "a2" } });
     await fireEvent.click(screen.getByRole("button", { name: "Rattacher" }));
     expect(attachAccount).toHaveBeenCalledWith("v2", "a2");
-    expect(await screen.findByText("Camille est maintenant membre du coffre « vieux ».")).toBeInTheDocument();
+    expect(await screen.findByText("Camille ajouté à « vieux ».")).toBeInTheDocument();
   });
 
   it("deletes a vault from the server once its name is typed again", async () => {
@@ -425,7 +439,7 @@ describe("Admin, server", () => {
     await fireEvent.input(field, { target: { value: "" } });
     await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
     expect(setPublicAddress).toHaveBeenCalledWith("");
-    expect(await screen.findByText(/Adresse publique enregistrée/)).toBeInTheDocument();
+    expect(await screen.findByText("Adresse publique enregistrée.")).toBeInTheDocument();
     vi.mocked(setPublicAddress).mockRejectedValue({ code: "serverError", detail: "adresse publique invalide" });
     await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("adresse publique invalide");

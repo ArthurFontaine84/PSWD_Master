@@ -1216,7 +1216,8 @@ mod tests {
         let id = Uuid::nil().to_string();
         let locked = Some(UiError::vault_locked());
         let keep = || wifi_input(&json!({ "mode": "keep" }));
-        assert_eq!(state.add_entry(keep()).err(), locked);
+        let set = wifi_input(&json!({ "mode": "set", "value": "box-1234" }));
+        assert_eq!(state.add_entry(set).err(), locked);
         assert_eq!(state.update_entry(&id, keep()).err(), locked);
         assert_eq!(state.delete_entry(&id).err(), locked);
         assert_eq!(state.history(&id).err(), locked);
@@ -1361,7 +1362,7 @@ mod tests {
         file.push(".tmp");
         std::fs::create_dir(&file).unwrap();
         let error = state
-            .add_entry(wifi_input(&json!({ "mode": "clear" })))
+            .add_entry(wifi_input(&json!({ "mode": "set", "value": "box-1234" })))
             .unwrap_err();
         assert_eq!(serde_json::to_value(error).unwrap()["code"], "saveFailed");
         assert_eq!(state.entries("", None).unwrap().len(), 3);
@@ -1919,7 +1920,7 @@ mod tests {
 
         let busy = state.exclusive();
         state
-            .add_entry(wifi_input(&json!({ "mode": "clear" })))
+            .add_entry(wifi_input(&json!({ "mode": "set", "value": "box-1234" })))
             .unwrap();
         state.lock();
         drop(busy);

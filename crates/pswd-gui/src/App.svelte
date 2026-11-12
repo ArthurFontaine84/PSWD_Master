@@ -220,6 +220,7 @@
           publicAddress={screen.account.publicAddress}
           accountId={screen.account.accountId}
           onClose={() => (screen = { kind: "settings" })}
+          onDisconnected={() => (screen = { kind: "list" })}
         />
       {:else if screen.kind === "settings"}
         <Settings

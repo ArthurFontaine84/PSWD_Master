@@ -212,10 +212,10 @@ async fn accounts(State(state): State<Shared>, _: Admin) -> Result<Response, Api
 
 async fn delete_account(
     State(state): State<Shared>,
-    _: Admin,
+    Admin(by): Admin,
     Path(account): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    state.storage().delete_account(account)?;
+    state.storage().delete_account(account, by)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -519,6 +519,11 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK);
+        let camille_account = format!("/v1/admin/accounts/{camille}");
+        assert_eq!(
+            server.status("DELETE", &camille_account, None).await,
+            StatusCode::CONFLICT
+        );
         assert_eq!(
             server.status("PUT", &camille_role, role(false)).await,
             StatusCode::NO_CONTENT

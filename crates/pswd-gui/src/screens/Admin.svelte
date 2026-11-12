@@ -12,9 +12,11 @@
     /** Compte de l'appareil. */
     accountId: string;
     onClose: () => void;
+    /** Le compte de l'appareil a été supprimé : l'appareil n'est plus connecté. */
+    onDisconnected: () => void;
   }
 
-  const { address, publicAddress, accountId, onClose }: Props = $props();
+  const { address, publicAddress, accountId, onClose, onDisconnected }: Props = $props();
 
   const tabs = ["accounts", "vaults", "keys", "server"] as const;
   type Tab = (typeof tabs)[number];
@@ -45,7 +47,7 @@
   </div>
   <div role="tabpanel" aria-label={texts.adminTabs[tab]}>
     {#if tab === "accounts"}
-      <AdminAccounts {address} {accountId} onConfirming={confirm} />
+      <AdminAccounts {address} {accountId} onConfirming={confirm} {onDisconnected} />
     {:else if tab === "vaults"}
       <AdminVaults {accountId} onConfirming={confirm} />
     {:else if tab === "keys"}

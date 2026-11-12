@@ -1,6 +1,9 @@
 import type { Disconnection, Exchange, SyncReport, SyncState } from "./api";
 import { texts } from "./i18n";
 
+/** Intervalle de l'échange automatique et de la vérification du coffre ouvert (SPEC §7). */
+export const EXCHANGE_INTERVAL = 5_000;
+
 /** Messages d'une opération avec le serveur : ce qui a été fait, puis ce qui a échoué. */
 export interface Outcome {
   done: string[];
@@ -44,8 +47,8 @@ export function syncProblem(report: SyncReport): string | null {
 
 /**
  * Un seul coffre échangé est nommé ; plusieurs sont comptés en une phrase. Les problèmes et ce
- * qui demande l'attention (coffre renommé, supprimé, absent du serveur ou quitté) restent un par
- * un.
+ * qui demande l'attention (coffre renommé, supprimé ou quitté) restent un par un. Un coffre absent
+ * du compte n'est pas cité : sa pastille le signale.
  */
 export function exchangeOutcome(exchange: Exchange): Outcome {
   const each = [
@@ -66,7 +69,6 @@ export function exchangeOutcome(exchange: Exchange): Outcome {
   const done = [
     ...exchange.renamed.map(({ name, newName }) => texts.gaveWay(name, newName)),
     ...(each.length > 1 ? [texts.exchangeSummary(counts), ...renamed] : each),
-    ...(exchange.removed.length > 0 ? [texts.absentFromAccount(exchange.removed)] : []),
     ...exchange.left.map((name) => texts.leftElsewhere(name)),
     ...exchange.deleted.map((name) => texts.deletedElsewhere(name)),
   ];
@@ -78,19 +80,18 @@ export function exchangeOutcome(exchange: Exchange): Outcome {
     ...exchange.notLeft.map(({ name, reason }) => texts.notLeft(name, reason)),
     ...exchange.notDeleted.map(({ name, reason }) => texts.notDeleted(name, reason)),
   ];
-  if (done.length === 0 && problems.length === 0) {
+  if (done.length === 0 && problems.length === 0 && exchange.removed.length === 0) {
     done.push(texts.nothingToExchange);
   }
   return { done, problems };
 }
 
-/** `copiesKept` : l'utilisateur a choisi de garder les coffres, et l'appareil en a. */
-export function disconnectionOutcome(disconnection: Disconnection, copiesKept: boolean): Outcome {
-  const done = [texts.disconnected, ...disconnection.removed.map((name) => texts.removedFromDevice(name))];
-  if (copiesKept || disconnection.kept.length > 0) {
-    done.push(texts.otherAccountReminder);
-  }
-  const problems = disconnection.kept.map(({ name, reason }) => texts.keptOnDevice(name, reason));
+/** Les coffres retirés et gardés sont comptés ; seul un coffre gardé sur erreur est nommé. */
+export function disconnectionOutcome(disconnection: Disconnection): Outcome {
+  const done = [texts.disconnected(disconnection.removed.length, disconnection.kept.length)];
+  const problems = disconnection.kept.flatMap(({ name, reason }) =>
+    reason === null ? [] : [texts.keptOnDevice(name, reason)],
+  );
   if (disconnection.revokeError !== null) {
     problems.unshift(texts.tokenNotRevoked(disconnection.revokeError));
   }

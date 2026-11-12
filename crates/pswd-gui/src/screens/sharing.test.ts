@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acceptInvitation,
+  checkVault,
   createVault,
   deleteInvitation,
   deleteVaultEverywhere,
@@ -33,6 +34,7 @@ vi.mock("../lib/api", () => ({
   refreshServer: vi.fn(),
   serverStatus: vi.fn(),
   syncServer: vi.fn(),
+  checkVault: vi.fn(),
   listEntries: vi.fn(),
   listTags: vi.fn(),
   lockVault: vi.fn(),
@@ -131,11 +133,7 @@ describe("the vault list", () => {
     list();
     expect(await screen.findByText("Arthur vous invite dans le coffre « famille ».")).toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Accepter" }));
-    expect(
-      await screen.findByText(
-        "Coffre « famille » téléchargé. Demandez à Arthur le mot de passe maître du coffre pour l'ouvrir.",
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Invitation acceptée : demandez le mot de passe à Arthur.")).toBeInTheDocument();
     expect(acceptInvitation).toHaveBeenCalledWith("i1");
     expect(screen.getByRole("alert")).toHaveTextContent("Coffre « abime » du serveur non téléchargé : disque plein.");
     await vi.waitFor(() => {
@@ -148,7 +146,7 @@ describe("the vault list", () => {
     vi.mocked(listInvitations).mockResolvedValueOnce([invitation]).mockResolvedValue([]);
     list();
     await fireEvent.click(await screen.findByRole("button", { name: "Refuser" }));
-    expect(await screen.findByText("Invitation au coffre « famille » refusée.")).toBeInTheDocument();
+    expect(await screen.findByText("Invitation refusée.")).toBeInTheDocument();
     expect(deleteInvitation).toHaveBeenCalledWith("i1");
     expect(screen.queryByText(/vous invite/)).not.toBeInTheDocument();
   });
@@ -218,11 +216,7 @@ describe("the members of a shared vault", () => {
     expect(choices.map((option) => option.textContent)).toEqual(["Dominique"]);
     await fireEvent.click(screen.getByRole("button", { name: "Inviter" }));
     expect(inviteMember).toHaveBeenCalledWith("famille", "a3");
-    expect(
-      await screen.findByText(
-        "Invitation envoyée à Dominique. Transmettez-lui le mot de passe maître du coffre, sans passer par le serveur.",
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Invitation envoyée.")).toBeInTheDocument();
     expect(
       await screen.findByText("Tous les comptes du serveur sont déjà membres ou invités."),
     ).toBeInTheDocument();
@@ -237,11 +231,42 @@ describe("the members of a shared vault", () => {
     await fireEvent.click(screen.getByRole("menuitem", { name: "Membres" }));
     await fireEvent.click(await screen.findByRole("button", { name: "Annuler l'invitation de Camille" }));
     expect(deleteInvitation).toHaveBeenCalledWith("i1");
-    expect(await screen.findByText("Invitation de Camille annulée.")).toBeInTheDocument();
+    expect(await screen.findByText("Invitation annulée.")).toBeInTheDocument();
     await vi.waitFor(() => {
       expect(screen.queryByRole("list", { name: "Invitations en attente" })).not.toBeInTheDocument();
     });
     expect(screen.getByLabelText("Inviter un compte")).toHaveValue("a2");
+  });
+
+  it("follow an invitation accepted elsewhere, silently, keeping the chosen account", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    vi.mocked(checkVault).mockResolvedValue();
+    const emma = { id: "a4", name: "Emma" };
+    vi.mocked(vaultMembers).mockResolvedValue({ members: [arthur], invitations: [{ id: "i1", account: camille }] });
+    vi.mocked(listAccounts).mockResolvedValue([arthur, camille, dominique, emma]);
+    await manage("famille");
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Membres" }));
+    await screen.findByRole("list", { name: "Invitations en attente" });
+    await fireEvent.change(screen.getByLabelText("Inviter un compte"), { target: { value: "a4" } });
+
+    vi.mocked(vaultMembers).mockResolvedValue({ members: [arthur, camille], invitations: [] });
+    vi.advanceTimersByTime(5_000);
+    const members = screen.getByRole("list", { name: "Membres" });
+    expect(await within(members).findByText("Camille")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Invitations en attente" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Inviter un compte")).toHaveValue("a4");
+
+    vi.mocked(vaultMembers).mockRejectedValue({ code: "serverUnreachable", detail: null });
+    vi.advanceTimersByTime(5_000);
+    await vi.waitFor(() => {
+      expect(vaultMembers).toHaveBeenCalledTimes(3);
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    vi.advanceTimersByTime(5_000);
+    expect(vaultMembers).toHaveBeenCalledTimes(3);
+    visibility.mockRestore();
+    vi.useRealTimers();
   });
 
   it("reports the errors, then closes", async () => {
@@ -278,12 +303,12 @@ describe("leaving a shared vault", () => {
     });
     await fireEvent.click(screen.getByRole("button", { name: "Gérer le coffre" }));
     await fireEvent.click(screen.getByRole("menuitem", { name: "Quitter ce coffre" }));
-    expect(screen.getByText(/sera supprimé de cet appareil et de vos autres appareils/)).toBeInTheDocument();
+    expect(screen.getByText(/sera retiré de vos appareils ; les autres membres le gardent/)).toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Quitter" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("serveur injoignable");
     expect(onLocked).not.toHaveBeenCalled();
     await fireEvent.click(screen.getByRole("button", { name: "Quitter" }));
-    expect(await screen.findByText("Vous avez quitté le coffre « famille ».")).toBeInTheDocument();
+    expect(await screen.findByText("Vous avez quitté « famille ».")).toBeInTheDocument();
     expect(leaveVault).toHaveBeenCalledWith("famille");
     expect(onLocked).toHaveBeenCalled();
   });
@@ -323,7 +348,7 @@ describe("leaving a shared vault", () => {
     await fireEvent.click(screen.getByRole("menuitem", { name: "Quitter ce coffre" }));
     expect(screen.getByText("Chargement…")).toBeInTheDocument();
     resolve({ members: [arthur], invitations: [] });
-    expect(await screen.findByText(/Vous êtes le dernier membre du coffre « famille »/)).toBeInTheDocument();
+    expect(await screen.findByText(/Vous êtes le dernier membre : « famille » sera supprimé partout/)).toBeInTheDocument();
     expect(vaultMembers).toHaveBeenCalledWith("famille");
     expect(screen.queryByRole("button", { name: "Quitter" })).not.toBeInTheDocument();
     const confirm = screen.getByRole("button", { name: "Supprimer" });

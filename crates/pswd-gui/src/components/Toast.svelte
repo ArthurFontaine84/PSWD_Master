@@ -7,8 +7,11 @@
 
 {#if toast.message}
   {#key toast.id}
-    <p class="toast" role="status" transition:fly={{ y: 24, duration: motion(250) }}>
-      <Icon name="check" />{toast.message}
+    <p class="toast {toast.color}" role="status" transition:fly={{ y: 24, duration: motion(250) }}>
+      {#if toast.color === "green"}
+        <Icon name="check" />
+      {/if}
+      {toast.message}
     </p>
   {/key}
 {/if}
@@ -33,5 +36,15 @@
     color: var(--on-success);
     font-weight: 600;
     box-shadow: var(--shadow-raised);
+  }
+
+  .orange {
+    background: var(--warning);
+    color: var(--on-warning);
+  }
+
+  .red {
+    background: var(--danger);
+    color: var(--on-danger);
   }
 </style>

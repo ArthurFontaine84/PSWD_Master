@@ -41,7 +41,6 @@ export interface EntryDetail extends EntrySummary {
 /** Ce que devient le mot de passe ; `generate` le fait tirer par le backend. */
 export type PasswordChoice =
   | { mode: "keep" }
-  | { mode: "clear" }
   | { mode: "set"; value: string }
   | { mode: "generate"; length: number; symbols: boolean };
 
@@ -489,8 +488,9 @@ export function addMember(name: string): Promise<string> {
   return invoke<string>("add_member", { name });
 }
 
-export async function deleteAccount(id: string, name: string, confirmation: string): Promise<void> {
-  await invoke("delete_account", { id, name, confirmation });
+/** `true` : c'était le compte de l'appareil, qui est maintenant déconnecté du serveur. */
+export function deleteAccount(id: string, name: string, confirmation: string): Promise<boolean> {
+  return invoke<boolean>("delete_account", { id, name, confirmation });
 }
 
 export async function setAdmin(id: string, isAdmin: boolean): Promise<void> {

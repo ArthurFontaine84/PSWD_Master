@@ -27,7 +27,7 @@ describe("errorMessage", () => {
       [
         "invalidVaultName",
         " perso",
-        "Nom de coffre invalide : «  perso » (64 caractères au plus, sans espace au début ni à la fin).",
+        "Nom de coffre invalide : «  perso » (32 caractères au plus, sans espace au début ni à la fin).",
       ],
       ["passwordTooShort", null, "Le mot de passe maître doit contenir au moins 12 caractères."],
       [
@@ -49,6 +49,8 @@ describe("errorMessage", () => {
       ],
       ["urlNotOpened", "aucun navigateur", "Ouverture du navigateur impossible : aucun navigateur"],
       ["emptyTitle", null, "Le titre ne peut pas être vide."],
+      ["emptyPassword", null, "Le mot de passe est obligatoire."],
+      ["emptyNote", null, "La note est obligatoire."],
       ["invalidLength", null, "La longueur doit être comprise entre 8 et 24."],
       ["saveFailed", "disque plein", "Enregistrement impossible : disque plein"],
       ["wrongRecoveryKey", null, "Clé de récupération incorrecte."],

@@ -219,7 +219,7 @@ describe("deleting the vault", () => {
     const { onDeleted } = await manage();
     await fireEvent.click(screen.getByRole("menuitem", { name: "Supprimer ce coffre" }));
     expect(await screen.findByRole("radio", { name: "Supprimer partout" })).toBeChecked();
-    expect(screen.getByText(/puis de vos autres appareils à leur prochain échange/)).toBeInTheDocument();
+    expect(screen.getByText(/Effacé du serveur et de vos appareils/)).toBeInTheDocument();
     await type("Nom du coffre", "perso");
     await fireEvent.click(screen.getByRole("button", { name: "Supprimer" }));
     await vi.waitFor(() => {
@@ -242,15 +242,15 @@ describe("deleting the vault", () => {
     const { onDeleted } = await manage();
     await fireEvent.click(screen.getByRole("menuitem", { name: "Supprimer ce coffre" }));
     await fireEvent.click(await screen.findByRole("radio", { name: "Retirer de cet appareil" }));
-    expect(screen.getByText(/Le coffre reste sur le serveur et sur vos autres appareils/)).toBeInTheDocument();
+    expect(screen.getByText(/Reste sur le serveur et vos autres appareils/)).toBeInTheDocument();
     await type("Nom du coffre", "perso");
     await fireEvent.click(screen.getByRole("button", { name: "Retirer" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Le coffre « perso » a des modifications que le serveur n'a pas encore : synchronisez-le d'abord.",
+      "« perso » a des modifications non publiées : synchronisez-le d'abord.",
     );
     await fireEvent.click(screen.getByRole("button", { name: "Retirer" }));
     await vi.waitFor(() => {
-      expect(onDeleted).toHaveBeenCalledWith("Coffre « perso » retiré de cet appareil ; il reste sur le serveur.");
+      expect(onDeleted).toHaveBeenCalledWith("« perso » retiré de cet appareil.");
     });
     expect(forgetVault).toHaveBeenCalledWith("perso", "perso");
     expect(deleteVaultEverywhere).not.toHaveBeenCalled();

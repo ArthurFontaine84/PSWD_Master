@@ -8,16 +8,16 @@ const TOO_SIMPLE =
 
 describe("newVaultProblem", () => {
   it("accepts a valid form, with a free name", () => {
-    for (const name of ["Perso-2_x", "Mon coffre", "Été", "a/b", "é".repeat(64), "🔒".repeat(63)]) {
+    for (const name of ["Perso-2_x", "Mon coffre", "Été", "a/b", "é".repeat(32), "🔒".repeat(32)]) {
       expect(newVaultProblem(name, STRONG, STRONG)).toBeNull();
     }
   });
 
   it("requires a vault name of 64 characters at most", () => {
     expect(newVaultProblem("", STRONG, STRONG)).toBe("Le nom du coffre est obligatoire.");
-    for (const name of ["a".repeat(65), "🔒".repeat(64), "per\tso", "per\nso"]) {
+    for (const name of ["a".repeat(33), "🔒".repeat(33), "per\tso", "per\nso"]) {
       expect(newVaultProblem(name, STRONG, STRONG)).toBe(
-        "Nom invalide : 64 caractères au plus, sans tabulation ni retour à la ligne.",
+        "Nom invalide : 32 caractères au plus, sans tabulation ni retour à la ligne.",
       );
     }
   });

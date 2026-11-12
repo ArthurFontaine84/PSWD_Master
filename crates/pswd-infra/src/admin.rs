@@ -15,6 +15,9 @@ use crate::{Account, ServerClient};
 const UNKNOWN_VAULT: &str = "coffre inconnu du serveur";
 const UNKNOWN_ACCOUNT: &str = "compte inconnu du serveur";
 const LAST_ADMIN: &str = "le dernier administrateur garde son rôle et son compte";
+/// Même refus (`409`) pour le dernier administrateur et pour un autre administrateur.
+const ADMIN_ACCOUNT: &str =
+    "le dernier administrateur garde son compte, et un autre administrateur perd d'abord son rôle";
 
 /// Compte de l'appareil, et adresse publique du serveur.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -131,15 +134,15 @@ impl ServerClient {
     ///
     /// # Errors
     ///
-    /// Si le compte est inconnu ou est le dernier administrateur, ou si le serveur est
-    /// injoignable.
+    /// Si le compte est inconnu, est le dernier administrateur ou un autre administrateur que
+    /// celui de l'appareil, ou si le serveur est injoignable.
     pub fn delete_account(&self, account: Uuid) -> Result<(), PortError> {
         let uri = format!("/v1/admin/accounts/{account}");
         let response = self.request(&Method::DELETE, &uri, None)?;
         done(
             &response,
             &[
-                (StatusCode::CONFLICT, LAST_ADMIN),
+                (StatusCode::CONFLICT, ADMIN_ACCOUNT),
                 (StatusCode::NOT_FOUND, UNKNOWN_ACCOUNT),
             ],
         )
@@ -463,9 +466,16 @@ mod tests {
         let camille_id = account(&arthur, "Camille").id;
 
         assert_eq!(arthur.set_admin(arthur_id, false), Err(refused(LAST_ADMIN)));
-        assert_eq!(arthur.delete_account(arthur_id), Err(refused(LAST_ADMIN)));
+        assert_eq!(
+            arthur.delete_account(arthur_id),
+            Err(refused(ADMIN_ACCOUNT))
+        );
         arthur.set_admin(camille_id, true).unwrap();
         assert!(camille.admin_accounts().is_ok());
+        assert_eq!(
+            arthur.delete_account(camille_id),
+            Err(refused(ADMIN_ACCOUNT))
+        );
         arthur.set_admin(camille_id, false).unwrap();
         let unknown = Uuid::new_v4();
         assert_eq!(

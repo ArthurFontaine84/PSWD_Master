@@ -89,12 +89,21 @@ impl Vaults {
         Ok(self.client()?.0.add_member(name)?)
     }
 
+    /// Supprime le compte du serveur. Si c'est celui de l'appareil, l'appareil oublie le serveur,
+    /// comme à une déconnexion qui garde les coffres, et la fonction renvoie `true`.
+    ///
     /// # Errors
     ///
-    /// Si le compte est inconnu ou est le dernier administrateur, ou si le serveur est
-    /// injoignable.
-    pub fn delete_account(&self, account: Uuid) -> Result<(), AppError> {
-        Ok(self.client()?.0.delete_account(account)?)
+    /// Si le compte est inconnu, est le dernier administrateur ou un autre administrateur, si le
+    /// serveur est injoignable, ou si `server.toml` ne peut pas être supprimé.
+    pub fn delete_account(&self, account: Uuid) -> Result<bool, AppError> {
+        let (client, _) = self.client()?;
+        let own = client.server_info()?.account_id == account;
+        client.delete_account(account)?;
+        if own {
+            self.forget_server()?;
+        }
+        Ok(own)
     }
 
     /// # Errors
@@ -373,8 +382,29 @@ mod tests {
         let device = a.admin_accounts().unwrap()[1].devices[0].id;
         a.revoke_device(device).unwrap();
         assert!(b.server_info().is_err());
-        a.delete_account(camille).unwrap();
+        assert_eq!(a.delete_account(camille), Ok(false));
         assert_eq!(a.admin_accounts().unwrap().len(), 1);
+        assert!(a.server().unwrap().is_some());
+    }
+
+    #[test]
+    fn an_administrator_deletes_his_own_account_but_not_another_administrator() {
+        let dir = TempDir::new().unwrap();
+        let (a, b) = (device(&dir, "a"), device(&dir, "b"));
+        let server = connect_admin(&a);
+        connect(&b, &server, &a.add_member("Camille").unwrap());
+        create(&b, "perso", false);
+        b.exchange().unwrap();
+        let (arthur, camille) = (account_id(&a, "Arthur"), account_id(&a, "Camille"));
+        a.set_admin(camille, true).unwrap();
+        assert!(a.delete_account(camille).is_err());
+
+        b.forget("perso").unwrap();
+        assert_eq!(b.delete_account(camille), Ok(true));
+        assert!(b.server().unwrap().is_none());
+        assert_eq!(b.config().unwrap().ignored, Vec::<Uuid>::new());
+        assert_eq!(a.admin_accounts().unwrap().len(), 1);
+        assert!(a.delete_account(arthur).is_err());
     }
 
     #[test]
@@ -431,7 +461,7 @@ mod tests {
         assert_eq!(a.add_member("Camille").err(), Some(AppError::NotConnected));
         for result in [
             a.admin_accounts().map(drop),
-            a.delete_account(id),
+            a.delete_account(id).map(drop),
             a.set_admin(id, true),
             a.revoke_device(id),
             a.pending_keys().map(drop),

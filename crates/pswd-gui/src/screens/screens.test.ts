@@ -174,7 +174,9 @@ describe("VaultList", () => {
     const dot = await screen.findByRole("button", { name: "Absent de votre compte sur le serveur : gardé sur cet appareil" });
     expect(dot).toHaveAttribute("title", "Absent de votre compte sur le serveur : gardé sur cet appareil");
     await fireEvent.click(dot);
-    expect(await screen.findByRole("status")).toHaveTextContent("Absent de votre compte sur le serveur : gardé sur cet appareil");
+    const shown = await screen.findByRole("status");
+    expect(shown).toHaveTextContent("Absent de votre compte sur le serveur : gardé sur cet appareil");
+    expect(shown).toHaveClass("red");
     expect(onOpen).not.toHaveBeenCalled();
   });
 
@@ -230,7 +232,7 @@ describe("VaultList automatic exchange", () => {
     return render(VaultList, { onOpen: vi.fn(), onBackup: vi.fn(), onRestore: vi.fn() });
   }
 
-  it("exchanges at once, then every 30 seconds while the page is visible", async () => {
+  it("exchanges at once, then every 5 seconds while the page is visible", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     vi.mocked(listVaults).mockResolvedValue(["perso"]);
     vi.mocked(refreshServer).mockResolvedValue(connected);
@@ -238,14 +240,16 @@ describe("VaultList automatic exchange", () => {
     expect(await screen.findByRole("button", { name: "Synchronisé" })).toBeInTheDocument();
     expect(refreshServer).toHaveBeenCalledTimes(1);
     expect(serverStatus).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(4_999);
+    expect(refreshServer).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1);
     expect(refreshServer).toHaveBeenCalledTimes(2);
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
-    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(5_000);
     expect(refreshServer).toHaveBeenCalledTimes(2);
     visibility.mockReturnValue("visible");
     unmount();
-    vi.advanceTimersByTime(30_000);
+    vi.advanceTimersByTime(5_000);
     expect(refreshServer).toHaveBeenCalledTimes(2);
   });
 
@@ -282,7 +286,7 @@ describe("VaultList automatic exchange", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Configuration invalide : ligne 2");
   });
 
-  it("announces the vaults and the invitations received by the automatic exchange", async () => {
+  it("announces the vaults received by the automatic exchange, but not the invitations", async () => {
     render(Toast);
     const invitation = { id: "1", vaultName: "famille", invitedBy: "Arthur" };
     vi.mocked(listVaults).mockResolvedValue(["perso"]);
@@ -294,14 +298,13 @@ describe("VaultList automatic exchange", () => {
 
     vi.mocked(listInvitations).mockResolvedValue([invitation, { id: "2", vaultName: "club", invitedBy: "Camille" }]);
     await fireEvent.focus(window);
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "Nouvelle invitation : Camille vous invite dans le coffre « club ».",
-    );
+    expect(await screen.findByText("Camille vous invite dans le coffre « club ».")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
     vi.mocked(listVaults).mockResolvedValue(["club", "perso"]);
     await fireEvent.focus(window);
     await vi.waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent("Nouveau coffre « club » reçu du serveur.");
+      expect(screen.getByRole("status")).toHaveTextContent("Nouveau coffre « club » reçu.");
     });
 
     vi.mocked(listVaults).mockResolvedValue(["club"]);
@@ -310,7 +313,7 @@ describe("VaultList automatic exchange", () => {
     await vi.waitFor(() => {
       expect(screen.queryByRole("button", { name: "perso" })).not.toBeInTheDocument();
     });
-    expect(screen.getByRole("status")).toHaveTextContent("Nouveau coffre « club » reçu du serveur.");
+    expect(screen.getByRole("status")).toHaveTextContent("Nouveau coffre « club » reçu.");
   });
 
   it("announces a vault that gave its name away, not as a vault received", async () => {
@@ -326,7 +329,7 @@ describe("VaultList automatic exchange", () => {
     await fireEvent.focus(window);
     expect(await screen.findByRole("button", { name: "banque-2" })).toBeInTheDocument();
     const status = screen.getByRole("status");
-    expect(status).toHaveTextContent("Le serveur a déjà un coffre « banque » : celui de cet appareil devient « banque-2 ».");
+    expect(status).toHaveTextContent("« banque » renommé « banque-2 » : nom déjà pris sur le serveur.");
     expect(status).not.toHaveTextContent("Nouveau coffre");
   });
 
@@ -529,7 +532,7 @@ describe("Unlock", () => {
     expect(field("Mot de passe maître")).toBeInTheDocument();
     await fireEvent.click(screen.getByRole("button", { name: "Quitter ce coffre" }));
     await fireEvent.click(await screen.findByRole("button", { name: "Quitter" }));
-    expect(await screen.findByText("Vous avez quitté le coffre « famille ».")).toBeInTheDocument();
+    expect(await screen.findByText("Vous avez quitté « famille ».")).toBeInTheDocument();
     expect(leaveVault).toHaveBeenCalledWith("famille");
     expect(onGone).toHaveBeenCalled();
     expect(unlockVault).not.toHaveBeenCalled();

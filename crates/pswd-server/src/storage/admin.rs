@@ -145,16 +145,20 @@ impl Storage {
         Ok(details)
     }
 
-    /// Supprime le compte, ses appareils, ses clés et ses invitations. Ses coffres restent sur le
-    /// serveur ; ceux dont il était le seul membre n'en ont plus.
+    /// Supprime le compte, à la demande de l'administrateur `by`, avec ses appareils, ses clés et
+    /// ses invitations. Ses coffres restent sur le serveur ; ceux dont il était le seul membre
+    /// n'en ont plus.
     ///
     /// # Errors
     ///
     /// [`StorageError::NotFound`] si le compte n'existe pas, [`StorageError::LastAdmin`] pour le
-    /// dernier administrateur.
-    pub fn delete_account(&mut self, account: Uuid) -> Result<(), StorageError> {
+    /// dernier administrateur, [`StorageError::OtherAdmin`] pour un autre administrateur que
+    /// `by`.
+    pub fn delete_account(&mut self, account: Uuid, by: Uuid) -> Result<(), StorageError> {
         let tx = self.conn.transaction_with_behavior(Immediate)?;
-        ensure_not_last_admin(&tx, account)?;
+        if ensure_not_last_admin(&tx, account)? && account != by {
+            return Err(StorageError::OtherAdmin);
+        }
         for statement in DELETE_ACCOUNT {
             tx.execute(statement, params![account])?;
         }
@@ -397,7 +401,8 @@ impl Storage {
     }
 }
 
-fn ensure_not_last_admin(conn: &Connection, account: Uuid) -> Result<(), StorageError> {
+/// Refuse le dernier administrateur ; sinon, dit si le compte est administrateur.
+fn ensure_not_last_admin(conn: &Connection, account: Uuid) -> Result<bool, StorageError> {
     let (is_admin, admins): (bool, i64) = conn
         .query_row(ADMIN_STATUS, params![account], |row| {
             Ok((row.get(0)?, row.get(1)?))
@@ -407,7 +412,7 @@ fn ensure_not_last_admin(conn: &Connection, account: Uuid) -> Result<(), Storage
     if is_admin && admins == 1 {
         return Err(StorageError::LastAdmin);
     }
-    Ok(())
+    Ok(is_admin)
 }
 
 fn ensure_vault_exists(conn: &Connection, vault: Uuid) -> Result<(), StorageError> {
@@ -580,7 +585,9 @@ mod tests {
             .add_connection_key(b"cle", &purpose, LATER)
             .unwrap();
 
-        base.storage.delete_account(base.camille).unwrap();
+        base.storage
+            .delete_account(base.camille, base.arthur)
+            .unwrap();
         assert_eq!(base.storage.authenticate(b"Camille").unwrap(), None);
         assert_eq!(base.storage.pending_keys(NOW).unwrap(), []);
         assert_eq!(
@@ -591,7 +598,7 @@ mod tests {
         assert_eq!(vaults[0].members, [summary(base.arthur, "Arthur")]);
         assert_eq!((vaults[1].id, vaults[1].members.len()), (perso, 0));
         assert!(matches!(
-            base.storage.delete_account(base.camille),
+            base.storage.delete_account(base.camille, base.arthur),
             Err(StorageError::NotFound)
         ));
     }
@@ -600,7 +607,7 @@ mod tests {
     fn the_last_administrator_stays() {
         let mut base = base();
         assert!(matches!(
-            base.storage.delete_account(base.arthur),
+            base.storage.delete_account(base.arthur, base.arthur),
             Err(StorageError::LastAdmin)
         ));
         assert!(matches!(
@@ -625,7 +632,9 @@ mod tests {
                 .is_admin
         );
         base.storage.set_admin(base.dominique, false).unwrap();
-        base.storage.delete_account(base.arthur).unwrap();
+        base.storage
+            .delete_account(base.arthur, base.camille)
+            .unwrap();
         assert!(matches!(
             base.storage.set_admin(Uuid::new_v4(), true),
             Err(StorageError::NotFound)
@@ -633,6 +642,31 @@ mod tests {
         assert!(matches!(
             base.storage.set_admin(Uuid::new_v4(), false),
             Err(StorageError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn an_administrator_deletes_no_other_administrator_but_himself() {
+        let mut base = base();
+        base.storage.set_admin(base.camille, true).unwrap();
+        assert!(matches!(
+            base.storage.delete_account(base.arthur, base.camille),
+            Err(StorageError::OtherAdmin)
+        ));
+        assert!(matches!(
+            base.storage.delete_account(base.camille, base.arthur),
+            Err(StorageError::OtherAdmin)
+        ));
+        base.storage
+            .delete_account(base.dominique, base.camille)
+            .unwrap();
+        base.storage
+            .delete_account(base.camille, base.camille)
+            .unwrap();
+        assert_eq!(base.storage.authenticate(b"Camille").unwrap(), None);
+        assert!(matches!(
+            base.storage.delete_account(base.arthur, base.arthur),
+            Err(StorageError::LastAdmin)
         ));
     }
 
@@ -1019,7 +1053,7 @@ mod tests {
             Err(StorageError::Database(_))
         ));
         assert!(matches!(
-            base.storage.delete_account(base.camille),
+            base.storage.delete_account(base.camille, base.arthur),
             Err(StorageError::Database(_))
         ));
         base.storage.break_for_tests("devices");
@@ -1060,7 +1094,7 @@ mod tests {
         for result in [
             base.storage.set_admin(base.camille, true),
             base.storage.set_admin(base.camille, false),
-            base.storage.delete_account(base.camille),
+            base.storage.delete_account(base.camille, base.arthur),
         ] {
             assert!(matches!(result, Err(StorageError::Database(_))));
         }

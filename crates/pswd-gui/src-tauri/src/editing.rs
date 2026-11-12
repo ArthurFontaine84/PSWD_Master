@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::UiError;
 
 /// Le formulaire d'une entrée. Une note n'a ni identifiant, ni mot de passe, ni URL : ces champs
-/// sont ignorés.
+/// sont ignorés. Un mot de passe exige un mot de passe, une note exige un texte.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryInput {
@@ -33,7 +33,6 @@ enum InputKind {
 #[serde(tag = "mode", rename_all = "camelCase")]
 pub enum PasswordChoice {
     Keep,
-    Clear,
     Set { value: String },
     Generate { length: usize, symbols: bool },
 }
@@ -54,15 +53,20 @@ impl EntryInput {
             content.username = non_empty(&self.username);
             content.password = match self.password {
                 PasswordChoice::Keep => current,
-                PasswordChoice::Clear => None,
                 PasswordChoice::Set { value } => (!value.is_empty()).then(|| Secret::new(value)),
                 PasswordChoice::Generate { length, symbols } => {
                     Some(generate(PasswordOptions { length, symbols })?)
                 }
             };
+            if content.password.is_none() {
+                return Err(UiError::code("emptyPassword"));
+            }
             content.urls = self.urls.iter().filter_map(|url| non_empty(url)).collect();
         }
         content.notes = non_empty(&self.notes);
+        if kind == EntryKind::Note && content.notes.is_none() {
+            return Err(UiError::code("emptyNote"));
+        }
         content.tags = Tags::new(self.tags);
         Ok(content)
     }
@@ -144,10 +148,6 @@ mod tests {
     fn each_password_choice_is_applied() {
         let keep = login(&json!({ "mode": "keep" })).into_content(Some(current()));
         assert_eq!(keep.unwrap().password, Some(current()));
-        let clear = login(&json!({ "mode": "clear" })).into_content(Some(current()));
-        assert_eq!(clear.unwrap().password, None);
-        let empty = login(&json!({ "mode": "set", "value": "" })).into_content(Some(current()));
-        assert_eq!(empty.unwrap().password, None);
         let generated = login(&json!({ "mode": "generate", "length": 20, "symbols": false }))
             .into_content(Some(current()))
             .unwrap()
@@ -182,6 +182,34 @@ mod tests {
         assert_eq!(content.urls, Vec::<String>::new());
         assert_eq!(content.notes.as_deref(), Some("Box : ABCD"));
         assert_eq!(content.tags.as_slice(), ["maison"]);
+    }
+
+    #[test]
+    fn a_login_needs_a_password() {
+        let empty = Some(UiError::code("emptyPassword"));
+        let blank = login(&json!({ "mode": "set", "value": "" })).into_content(Some(current()));
+        assert_eq!(blank.err(), empty);
+        let kept = login(&json!({ "mode": "keep" })).into_content(None);
+        assert_eq!(kept.err(), empty);
+        let cleared = serde_json::from_value::<PasswordChoice>(json!({ "mode": "clear" }));
+        assert!(cleared.is_err());
+    }
+
+    #[test]
+    fn a_note_needs_a_text() {
+        let note = input(json!({
+            "kind": "note",
+            "title": "Wi-Fi",
+            "username": "",
+            "password": { "mode": "keep" },
+            "urls": [],
+            "notes": "   ",
+            "tags": [],
+        }));
+        assert_eq!(
+            note.into_content(None).err(),
+            Some(UiError::code("emptyNote"))
+        );
     }
 
     #[test]

@@ -429,7 +429,7 @@ pub async fn delete_account<R: Runtime>(
     id: Uuid,
     name: String,
     confirmation: String,
-) -> Result<(), UiError> {
+) -> Result<bool, UiError> {
     in_background(app, move |state| {
         state.delete_account(id, &name, &confirmation)
     })

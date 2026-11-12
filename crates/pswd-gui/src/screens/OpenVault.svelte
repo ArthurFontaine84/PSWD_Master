@@ -35,7 +35,7 @@
   import { verbatim } from "../lib/keyboard";
   import { ENTRY_LIST } from "../lib/layout";
   import { motion } from "../lib/motion";
-  import { syncMessage, syncProblem } from "../lib/sync";
+  import { EXCHANGE_INTERVAL, syncMessage, syncProblem } from "../lib/sync";
   import { showToast } from "../lib/toast.svelte";
 
   interface Props {
@@ -233,7 +233,7 @@
       if (document.visibilityState === "visible") {
         checkVault().catch(() => undefined);
       }
-    }, 30_000);
+    }, EXCHANGE_INTERVAL);
     return () => {
       clearInterval(checking);
       stopBack();

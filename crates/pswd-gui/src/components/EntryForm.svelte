@@ -34,7 +34,7 @@
   let busy = $state(false);
 
   const modes: PasswordMode[] = $derived(
-    editing ? ["keep", "set", "generate", "clear"] : ["set", "generate"],
+    editing ? ["keep", "set", "generate"] : ["set", "generate"],
   );
 
   async function submit(event: SubmitEvent) {

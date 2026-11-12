@@ -231,6 +231,7 @@ describe("the vault locking itself during a save", () => {
     await screen.findByText("1 entrée");
     await fireEvent.click(screen.getByRole("button", { name: "Nouvelle entrée" }));
     await type("Titre", "Box");
+    await type("Mot de passe", "box-1234");
     await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
     await vi.waitFor(() => {
       expect(onExpired).toHaveBeenCalled();
@@ -302,18 +303,18 @@ describe("editing an entry", () => {
     });
   });
 
-  it("can remove the password", async () => {
-    vi.mocked(updateEntry).mockResolvedValue(githubDetail);
+  it("cannot remove the password", async () => {
     await openGithub();
     await fireEvent.click(screen.getByRole("button", { name: "Modifier" }));
-    await fireEvent.click(screen.getByRole("radio", { name: "Supprimer" }));
+    expect(screen.getAllByRole("radio").map((radio) => radio.getAttribute("value"))).toEqual([
+      "keep",
+      "set",
+      "generate",
+    ]);
+    await fireEvent.click(screen.getByRole("radio", { name: "Saisir" }));
     await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
-    await vi.waitFor(() => {
-      expect(updateEntry).toHaveBeenCalledWith(
-        "1",
-        expect.objectContaining({ password: { mode: "clear" } }),
-      );
-    });
+    expect(screen.getByRole("alert")).toHaveTextContent("Le mot de passe est obligatoire.");
+    expect(updateEntry).not.toHaveBeenCalled();
   });
 });
 

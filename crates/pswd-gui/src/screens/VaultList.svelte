@@ -18,9 +18,9 @@
   import { errorMessage } from "../lib/errors";
   import { texts } from "../lib/i18n";
   import { motion } from "../lib/motion";
-  import { exchangeOutcome } from "../lib/sync";
+  import { EXCHANGE_INTERVAL, exchangeOutcome } from "../lib/sync";
   import { showToast } from "../lib/toast.svelte";
-  import { vaultDot, type VaultDot } from "../lib/vaultDot";
+  import { dotColor, vaultDot, type VaultDot } from "../lib/vaultDot";
 
   interface Props {
     notice?: string;
@@ -68,15 +68,12 @@
 
   /**
    * Un serveur injoignable n'empêche pas d'ouvrir les coffres : son erreur est signalée, sauf
-   * pendant l'échange automatique, muet.
+   * pendant l'échange automatique, muet. Une invitation reçue apparaît en haut de la liste, sans
+   * notification.
    */
   async function loadInvitations(quiet = false) {
     try {
-      const fresh = await listInvitations();
-      if (quiet) {
-        announceInvitations(fresh);
-      }
-      invitations = fresh;
+      invitations = await listInvitations();
     } catch (error) {
       if (!quiet) {
         problems = [...problems, errorMessage(error)];
@@ -103,24 +100,6 @@
     await reloadNames(renamed.map(({ newName }) => newName));
     if (connected && status.trouble === null) {
       await loadInvitations(true);
-    }
-  }
-
-  /**
-   * Invitations reçues pendant l'échange automatique, signalées une fois : celles déjà là à
-   * l'affichage de la liste sont visibles en haut, sans notification.
-   */
-  let knownInvitations: Set<string> | null = null;
-
-  function announceInvitations(fresh: Invitation[]) {
-    const known = knownInvitations;
-    knownInvitations = new Set(fresh.map((invitation) => invitation.id));
-    if (known === null) {
-      return;
-    }
-    const arrived = fresh.filter((invitation) => !known.has(invitation.id));
-    if (arrived.length > 0) {
-      showToast(arrived.map(({ vaultName, invitedBy }) => texts.newInvitation(vaultName, invitedBy)).join(" "));
     }
   }
 
@@ -156,7 +135,7 @@
 
   onMount(() => {
     void refresh();
-    const timer = setInterval(refreshIfVisible, 30_000);
+    const timer = setInterval(refreshIfVisible, EXCHANGE_INTERVAL);
     return () => clearInterval(timer);
   });
 
@@ -165,7 +144,7 @@
     problems = [];
     try {
       const outcome = exchangeOutcome(await acceptInvitation(invitation.id));
-      showToast([...outcome.done, texts.invitationAccepted(invitation.invitedBy)].join(" "));
+      showToast(texts.invitationAccepted(invitation.invitedBy));
       problems = outcome.problems;
       vaults = listVaults();
       await loadStatus();
@@ -181,7 +160,7 @@
     problems = [];
     try {
       await deleteInvitation(invitation.id);
-      showToast(texts.invitationDeclined(invitation.vaultName));
+      showToast(texts.invitationDeclined);
       await loadInvitations();
     } catch (error) {
       problems = [errorMessage(error)];
@@ -273,7 +252,7 @@
               </button>
               {#if dot}
                 {@const label = texts.vaultStates[dot]}
-                <button type="button" class="dot" aria-label={label} title={label} onclick={() => showToast(label)}>
+                <button type="button" class="dot" aria-label={label} title={label} onclick={() => showToast(label, { color: dotColor[dot] })}>
                   <StateDot {dot} />
                 </button>
               {/if}

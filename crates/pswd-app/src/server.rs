@@ -686,8 +686,7 @@ impl Vaults {
             }
         }
         report.revoke_error = client.disconnect().err();
-        self.update_config(|config| config.ignored.clear())?;
-        self.server_file().remove()?;
+        self.forget_server()?;
         for name in to_remove {
             match self.delete(&name) {
                 Ok(()) => report.removed.push(name),
@@ -695,6 +694,14 @@ impl Vaults {
             }
         }
         Ok(report)
+    }
+
+    /// L'appareil oublie le serveur : `server.toml` et la liste des coffres retirés. Les coffres
+    /// restent sur l'appareil.
+    pub(crate) fn forget_server(&self) -> Result<(), AppError> {
+        self.update_config(|config| config.ignored.clear())?;
+        self.server_file().remove()?;
+        Ok(())
     }
 }
 
@@ -799,9 +806,8 @@ fn free_name(name: &str, config: &Config, listed: &[RemoteVaultInfo]) -> String 
     }
 }
 
-/// `<nom>-<numéro>`, le nom raccourci pour ne pas dépasser 64 caractères. Il reste valide : le
-/// nom ne commence pas par une espace, et avec un suffixe de `k` caractères, `64 − k` caractères
-/// de 4 octets au plus font au total `256 − 3k` octets, donc 255 au plus.
+/// `<nom>-<numéro>`, le nom raccourci pour ne pas dépasser `MAX_VAULT_NAME_LEN` caractères. Il
+/// reste valide : le nom ne commence pas par une espace.
 fn numbered(name: &str, number: u32) -> String {
     let suffix = format!("-{number}");
     let prefix: String = name
@@ -1203,11 +1209,12 @@ mod tests {
     #[test]
     fn numbered_names_stay_valid() {
         assert_eq!(numbered("perso", 2), "perso-2");
+        let kept = MAX_VAULT_NAME_LEN - 3;
         let long = "a".repeat(MAX_VAULT_NAME_LEN);
-        assert_eq!(numbered(&long, 10), format!("{}-10", "a".repeat(61)));
-        let space_cut = format!("{} b", "a".repeat(61));
-        assert_eq!(numbered(&space_cut, 2), format!("{}-2", "a".repeat(61)));
-        let heavy = "🔒".repeat(MAX_VAULT_NAME_LEN - 1);
+        assert_eq!(numbered(&long, 10), format!("{}-10", "a".repeat(kept)));
+        let space_cut = format!("{} b", "a".repeat(kept));
+        assert_eq!(numbered(&space_cut, 2), format!("{}-2", "a".repeat(kept)));
+        let heavy = "🔒".repeat(MAX_VAULT_NAME_LEN);
         for number in [2, 10, 1000] {
             assert!(pswd_core::is_valid_vault_name(&numbered(&heavy, number)));
         }

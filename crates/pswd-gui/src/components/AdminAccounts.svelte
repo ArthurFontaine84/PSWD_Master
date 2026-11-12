@@ -11,13 +11,15 @@
   interface Props {
     /** Adresse du serveur, à transmettre avec la clé d'un nouveau membre. */
     address: string;
-    /** Compte de l'appareil : il ne peut pas être supprimé d'ici. */
+    /** Compte de l'appareil : seul administrateur que l'on supprime d'ici, s'il n'est pas le dernier. */
     accountId: string;
     /** La confirmation d'une suppression s'ouvre (`true`) ou se ferme. */
     onConfirming: (open: boolean) => void;
+    /** Le compte de l'appareil a été supprimé : l'appareil n'est plus connecté. */
+    onDisconnected: () => void;
   }
 
-  const { address, accountId, onConfirming }: Props = $props();
+  const { address, accountId, onConfirming, onDisconnected }: Props = $props();
 
   let accounts = $state<AdminAccount[] | null>(null);
   let problem = $state<string | null>(null);
@@ -54,8 +56,8 @@
 
   void load();
 
-  /** Une opération à la fois ; la liste est relue ensuite. */
-  async function run(action: () => Promise<string | null>) {
+  /** Une opération à la fois ; la liste est relue ensuite, si `reload` le permet. */
+  async function run(action: () => Promise<string | null>, reload = () => true) {
     busy = true;
     problem = null;
     try {
@@ -63,7 +65,9 @@
       if (message !== null) {
         showToast(message);
       }
-      await load();
+      if (reload()) {
+        await load();
+      }
     } catch (error) {
       problem = errorMessage(error);
     } finally {
@@ -111,11 +115,19 @@
     if (account === null) {
       return;
     }
-    await run(async () => {
-      await deleteAccount(account.id, account.name, confirmation);
-      deleting = null;
-      return texts.accountDeleted(account.name);
-    });
+    // Le compte de l'appareil supprimé, il n'y a plus de liste à relire : l'écran se ferme.
+    let disconnected = false;
+    await run(
+      async () => {
+        disconnected = await deleteAccount(account.id, account.name, confirmation);
+        deleting = null;
+        return disconnected ? texts.ownAccountDeleted : texts.accountDeleted(account.name);
+      },
+      () => !disconnected,
+    );
+    if (disconnected) {
+      onDisconnected();
+    }
   }
 </script>
 
@@ -130,9 +142,10 @@
     <button type="button" class="primary" onclick={() => (issued = null)}>{texts.close}</button>
   </div>
 {:else if deleting !== null}
-  <h3>{texts.deleteAccount}</h3>
+  {@const own = deleting.id === accountId}
+  <h3>{own ? texts.deleteOwnAccount : texts.deleteAccount}</h3>
   <form onsubmit={remove}>
-    <p>{texts.deleteAccountExplanation(deleting.name)}</p>
+    <p>{own ? texts.deleteOwnAccountExplanation : texts.deleteAccountExplanation(deleting.name)}</p>
     <label>
       {texts.accountNameConfirmation}
       <input bind:value={confirmation} {...verbatim} />
@@ -190,7 +203,11 @@
                 <button type="button" disabled={busy} onclick={() => toggleAdmin(account)}>
                   {account.isAdmin ? texts.removeAdmin : texts.makeAdmin}
                 </button>
-                {#if account.id !== accountId}
+                {#if account.id === accountId}
+                  <button type="button" class="danger" disabled={busy} onclick={() => startDeletion(account)}>
+                    {texts.deleteOwnAccount}
+                  </button>
+                {:else if !account.isAdmin}
                   <button type="button" class="danger" disabled={busy} onclick={() => startDeletion(account)}>
                     {texts.deleteAccount}
                   </button>

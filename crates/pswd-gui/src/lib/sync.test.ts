@@ -33,17 +33,11 @@ describe("syncProblem", () => {
     expect(syncProblem(report("offline", "serveur injoignable"))).toBe(
       "Synchro impossible : serveur injoignable. Les modifications seront publiées plus tard.",
     );
-    expect(syncProblem(report("removed"))).toBe(
-      "Coffre absent de votre compte sur le serveur : il n'existe que sur cet appareil. Pour le publier, appuyez sur « Synchroniser ».",
-    );
-    expect(syncProblem(report("left"))).toBe(
-      "Vous n'êtes plus membre de ce coffre : il a été supprimé de cet appareil.",
-    );
-    expect(syncProblem(report("deleted"))).toBe(
-      "Ce coffre a été supprimé partout depuis un autre appareil : il a été supprimé de cet appareil.",
-    );
+    expect(syncProblem(report("removed"))).toBe("Absent de votre compte sur le serveur : « Synchroniser » le publie.");
+    expect(syncProblem(report("left"))).toBe("Vous n'êtes plus membre : coffre retiré de cet appareil.");
+    expect(syncProblem(report("deleted"))).toBe("Coffre supprimé depuis un autre appareil.");
     expect(syncProblem(report("nameTaken"))).toBe(
-      "Le serveur a déjà un coffre de ce nom : celui-ci sera renommé puis publié au retour à la liste des coffres.",
+      "Nom déjà pris sur le serveur : ce coffre sera renommé au retour à la liste.",
     );
     expect(syncProblem(report("conflict"))).toBe(
       "Le coffre a changé sur le serveur à chaque essai : synchronisez de nouveau.",
@@ -96,20 +90,19 @@ describe("exchangeOutcome", () => {
     };
     expect(exchangeOutcome(exchange)).toEqual({
       done: [
-        "Le serveur a déjà un coffre « banque » : celui de cet appareil devient « banque-2 ». S'il s'agit du même coffre, supprimez « banque-2 ».",
+        "« banque » renommé « banque-2 » : nom déjà pris sur le serveur.",
         "2 coffres téléchargés, 1 publié, 1 envoyé au serveur, 1 mis à jour depuis le serveur.",
-        "Coffre « travail » enregistré sous le nom « travail-2 » : ce nom était déjà pris.",
-        "Coffre « ancien » absent de votre compte sur le serveur : gardé sur cet appareil. Pour le publier, ouvrez-le puis appuyez sur « Synchroniser ».",
-        "Coffre « club » supprimé de cet appareil : vous n'êtes plus membre de ce coffre.",
-        "Coffre « vieux » supprimé de cet appareil : il a été supprimé partout depuis un autre appareil.",
+        "« travail » enregistré sous « travail-2 » (nom déjà pris).",
+        "« club » retiré : vous n'êtes plus membre.",
+        "« vieux » supprimé depuis un autre appareil.",
       ],
       problems: [
         "Coffre « famille » du serveur non téléchargé : disque plein.",
         "Coffre « abime » non publié : réponse inattendue du serveur (400).",
-        "Le coffre « voiture » a été modifié ici et sur le serveur : déverrouillez-le pour terminer la synchro.",
+        "« voiture » modifié ici et sur le serveur : déverrouillez-le.",
         "Coffre « jeux » non synchronisé : fichier introuvable.",
-        "Vous n'êtes plus membre du coffre « asso », mais il n'a pas pu être supprimé de cet appareil : accès refusé.",
-        "Le coffre « garde » a été supprimé partout, mais n'a pas pu être supprimé de cet appareil : fichier verrouillé.",
+        "« asso » : vous n'êtes plus membre, mais sa suppression ici a échoué : accès refusé.",
+        "« garde » supprimé ailleurs, mais sa suppression ici a échoué : fichier verrouillé.",
       ],
     });
   });
@@ -118,7 +111,7 @@ describe("exchangeOutcome", () => {
     const one = (exchange: Partial<Exchange>) => exchangeOutcome({ ...nothing, ...exchange }).done;
     expect(one({ downloaded: [{ name: "perso", localName: "perso" }] })).toEqual(["Coffre « perso » téléchargé."]);
     expect(one({ downloaded: [{ name: "travail", localName: "travail-2" }] })).toEqual([
-      "Coffre « travail » téléchargé sous le nom « travail-2 » : ce nom était déjà pris.",
+      "« travail » téléchargé sous « travail-2 » (nom déjà pris).",
     ]);
     expect(one({ published: ["notes"] })).toEqual(["Coffre « notes » publié."]);
     expect(one({ sent: ["banque"] })).toEqual(["Coffre « banque » envoyé au serveur."]);
@@ -134,10 +127,8 @@ describe("exchangeOutcome", () => {
     expect(summary({ sent: ["a", "b"], published: ["c"] })).toEqual(["1 coffre publié, 2 envoyés au serveur."]);
   });
 
-  it("lists the vaults absent from the account in one sentence", () => {
-    expect(exchangeOutcome({ ...nothing, removed: ["perso", "travail"] }).done).toEqual([
-      "Coffres absents de votre compte sur le serveur, gardés sur cet appareil : « perso », « travail ». Pour les publier, ouvrez-les puis appuyez sur « Synchroniser ».",
-    ]);
+  it("leaves the vaults absent from the account to their dot", () => {
+    expect(exchangeOutcome({ ...nothing, removed: ["perso", "travail"] })).toEqual({ done: [], problems: [] });
   });
 
   it("does not claim that nothing was exchanged when everything failed", () => {
@@ -147,24 +138,20 @@ describe("exchangeOutcome", () => {
 });
 
 describe("disconnectionOutcome", () => {
-  it("reminds that the copies kept belong to this account", () => {
-    expect(disconnectionOutcome({ revokeError: null, removed: [], kept: [] }, true).done).toEqual([
-      "Appareil déconnecté du serveur.",
-      "Les coffres gardés sur cet appareil restent liés à ce compte : s'ils appartiennent à quelqu'un d'autre, supprimez-les avant de connecter un autre compte.",
-    ]);
+  const done = (removed: string[], kept: string[]) =>
+    disconnectionOutcome({ revokeError: null, removed, kept: kept.map((name) => ({ name, reason: null })) });
+
+  it("counts the removed and kept vaults in one sentence", () => {
+    expect(done([], [])).toEqual({ done: ["Appareil déconnecté."], problems: [] });
+    expect(done(["a"], []).done).toEqual(["Appareil déconnecté : 1 coffre retiré."]);
+    expect(done(["a", "b", "c"], []).done).toEqual(["Appareil déconnecté : 3 coffres retirés."]);
+    expect(done([], ["a"]).done).toEqual(["Appareil déconnecté : 1 coffre gardé."]);
+    expect(done([], ["a", "b"]).done).toEqual(["Appareil déconnecté : 2 coffres gardés."]);
+    expect(done(["a", "b", "c"], ["d"]).done).toEqual(["Appareil déconnecté : 3 coffres retirés, 1 gardé."]);
+    expect(done(["a"], ["b", "c"]).done).toEqual(["Appareil déconnecté : 1 coffre retiré, 2 gardés."]);
   });
 
-  it("lists the removed vaults", () => {
-    expect(disconnectionOutcome({ revokeError: null, removed: ["perso"], kept: [] }, false)).toEqual({
-      done: [
-        "Appareil déconnecté du serveur.",
-        "Coffre « perso » retiré de cet appareil ; il reste sur le serveur.",
-      ],
-      problems: [],
-    });
-  });
-
-  it("explains why vaults were kept and the token not revoked", () => {
+  it("names only the vaults kept because of an error, and an unrevoked token", () => {
     const outcome = disconnectionOutcome({
       revokeError: "serveur injoignable",
       removed: [],
@@ -172,15 +159,11 @@ describe("disconnectionOutcome", () => {
         { name: "modifie", reason: null },
         { name: "perso", reason: "serveur injoignable" },
       ],
-    }, false);
-    expect(outcome.done).toEqual([
-      "Appareil déconnecté du serveur.",
-      "Les coffres gardés sur cet appareil restent liés à ce compte : s'ils appartiennent à quelqu'un d'autre, supprimez-les avant de connecter un autre compte.",
-    ]);
+    });
+    expect(outcome.done).toEqual(["Appareil déconnecté : 2 coffres gardés."]);
     expect(outcome.problems).toEqual([
-      "Le serveur n'a pas pu être prévenu (serveur injoignable) : révoquez cet appareil depuis le panneau d'administration.",
-      "Coffre « modifie » gardé : des modifications ne sont pas encore sur le serveur.",
-      "Coffre « perso » gardé : serveur injoignable.",
+      "Serveur non prévenu (serveur injoignable) : révoquez cet appareil dans l'administration.",
+      "« perso » gardé : serveur injoignable.",
     ]);
   });
 });

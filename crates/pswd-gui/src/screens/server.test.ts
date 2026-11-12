@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/svelte";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   accountStatus,
   addDeviceKey,
@@ -228,42 +228,31 @@ describe("Server, once connected", () => {
     show(connected);
     await fireEvent.click(await screen.findByRole("button", { name: "Se déconnecter" }));
     await fireEvent.click(screen.getByRole("checkbox"));
-    expect(screen.getByText(/Seuls les coffres déjà à jour sur le serveur/)).toBeInTheDocument();
+    expect(screen.getByText(/Les coffres à jour sur le serveur seront retirés/)).toBeInTheDocument();
     vi.mocked(serverStatus).mockResolvedValue(disconnected);
     vi.mocked(disconnectServer).mockResolvedValue({
       revokeError: null,
       removed: ["perso"],
-      kept: [{ name: "modifie", reason: null }],
+      kept: [
+        { name: "modifie", reason: null },
+        { name: "abime", reason: "accès refusé" },
+      ],
     });
     await fireEvent.click(screen.getByRole("button", { name: "Se déconnecter" }));
     expect(disconnectServer).toHaveBeenCalledWith(false);
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Coffre « modifie » gardé : des modifications ne sont pas encore sur le serveur.",
-    );
-    expect(
-      await screen.findByText(
-        "Appareil déconnecté du serveur. Coffre « perso » retiré de cet appareil ; il reste sur le serveur. Les coffres gardés sur cet appareil restent liés à ce compte : s'ils appartiennent à quelqu'un d'autre, supprimez-les avant de connecter un autre compte.",
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("« abime » gardé : accès refusé.");
+    expect(await screen.findByText("Appareil déconnecté : 1 coffre retiré, 2 gardés.")).toBeInTheDocument();
     expect(await screen.findByText(/Connectez cet appareil/)).toBeInTheDocument();
   });
 
-  it("reminds that the copies kept belong to this account, only if there are some", async () => {
+  it("keeps the copies by default, with a short confirmation", async () => {
     const perso = { name: "perso", state: "synced" as const, shared: false };
-    const nobody = { revokeError: null, removed: [], kept: [] };
-    vi.mocked(disconnectServer).mockResolvedValue(nobody);
+    vi.mocked(disconnectServer).mockResolvedValue({ revokeError: null, removed: [], kept: [] });
     show({ ...connected, vaults: [perso] });
     await fireEvent.click(await screen.findByRole("button", { name: "Se déconnecter" }));
     await fireEvent.click(screen.getByRole("button", { name: "Se déconnecter" }));
     expect(disconnectServer).toHaveBeenCalledWith(true);
-    expect(await screen.findByText(/Appareil déconnecté du serveur\. Les coffres gardés/)).toBeInTheDocument();
-    cleanup();
-    render(Toast);
-
-    show(connected);
-    await fireEvent.click(await screen.findByRole("button", { name: "Se déconnecter" }));
-    await fireEvent.click(screen.getByRole("button", { name: "Se déconnecter" }));
-    expect(await screen.findByText("Appareil déconnecté du serveur.")).toBeInTheDocument();
+    expect(await screen.findByText("Appareil déconnecté.")).toBeInTheDocument();
   });
 
   it("shows a failed disconnection", async () => {
@@ -312,11 +301,63 @@ describe("Server, once connected", () => {
     expect(screen.queryByText(/Connecté au serveur/)).not.toBeInTheDocument();
     expect(accountStatus).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Se déconnecter" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Retour" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Synchroniser" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Ajouter un appareil" })).toBeDisabled();
+  });
 
-    vi.mocked(syncServer).mockResolvedValue(nothing);
-    vi.mocked(serverStatus).mockResolvedValue(connected);
-    await fireEvent.click(screen.getByRole("button", { name: "Synchroniser" }));
-    expect(await screen.findByText("Connecté au serveur pswd.local:8443.")).toBeInTheDocument();
-    expect(screen.queryByText(/Échanges impossibles/)).not.toBeInTheDocument();
+  describe("automatic exchange", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    });
+
+    it("follows the server every 5 seconds, and unlocks the actions once it answers", async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      show({ ...connected, trouble: { since: 0, reason: "serveur injoignable" } });
+      expect(await screen.findByRole("button", { name: "Synchroniser" })).toBeDisabled();
+      vi.advanceTimersByTime(5_000);
+      await vi.waitFor(() => {
+        expect(refreshServer).toHaveBeenCalledTimes(1);
+      });
+      expect(accountStatus).not.toHaveBeenCalled();
+
+      vi.mocked(serverStatus).mockResolvedValue(connected);
+      vi.advanceTimersByTime(5_000);
+      expect(await screen.findByText("Connecté au serveur pswd.local:8443.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Synchroniser" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Ajouter un appareil" })).toBeEnabled();
+      expect(await screen.findByText("Compte : Camille.")).toBeInTheDocument();
+    });
+
+    it("stays quiet while hidden, busy, disconnected, or without an answer", async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      show(disconnected);
+      await screen.findByText(/Connectez cet appareil/);
+      vi.advanceTimersByTime(5_000);
+      expect(refreshServer).not.toHaveBeenCalled();
+      await fillConnection();
+      vi.mocked(connectServer).mockReturnValue(new Promise(() => undefined));
+      await fireEvent.click(screen.getByRole("button", { name: "Se connecter" }));
+      vi.advanceTimersByTime(5_000);
+      expect(refreshServer).not.toHaveBeenCalled();
+    });
+
+    it("ignores a refused or skipped exchange, and a page in the background", async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      show(connected);
+      await screen.findByText("Connecté au serveur pswd.local:8443.");
+      const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      vi.advanceTimersByTime(5_000);
+      expect(refreshServer).not.toHaveBeenCalled();
+      visibility.mockReturnValue("visible");
+      vi.mocked(refreshServer).mockResolvedValueOnce(null).mockRejectedValueOnce({ code: "unexpected", detail: "x" });
+      vi.advanceTimersByTime(10_000);
+      await vi.waitFor(() => {
+        expect(refreshServer).toHaveBeenCalledTimes(2);
+      });
+      expect(screen.getByText("Connecté au serveur pswd.local:8443.")).toBeInTheDocument();
+      expect(serverStatus).toHaveBeenCalledTimes(1);
+    });
   });
 });

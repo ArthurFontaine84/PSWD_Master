@@ -4,7 +4,7 @@ import type { EntryDetail, EntryInput, EntryKind } from "./api";
 import { texts } from "./i18n";
 import { addTags } from "./tags";
 
-export type PasswordMode = "keep" | "clear" | "set" | "generate";
+export type PasswordMode = "keep" | "set" | "generate";
 
 export interface FormValues {
   kind: EntryKind;
@@ -62,6 +62,12 @@ export function formFrom(detail: EntryDetail): FormValues {
 export function formProblem(values: FormValues): string | null {
   if (values.title.trim() === "") {
     return texts.validation.titleRequired;
+  }
+  if (values.kind === "login" && values.passwordMode === "set" && values.password === "") {
+    return texts.validation.entryPasswordRequired;
+  }
+  if (values.kind === "note" && values.notes.trim() === "") {
+    return texts.validation.noteRequired;
   }
   const generating = values.kind === "login" && values.passwordMode === "generate";
   if (generating && !(Number.isInteger(values.length) && values.length >= MIN_LENGTH && values.length <= MAX_LENGTH)) {
