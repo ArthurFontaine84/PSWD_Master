@@ -211,6 +211,31 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
   });
 
+  it("goes back to the vault list from the application title", async () => {
+    render(App);
+    await fireEvent.click(await screen.findByRole("button", { name: "Réglages" }));
+    const home = screen.getByRole("button", { name: /^PSWD Master/ });
+    expect(home).toHaveAttribute("title", "Retour à l'accueil");
+    await fireEvent.click(home);
+    expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
+  });
+
+  it("does not leave the recovery key from the application title", async () => {
+    vi.mocked(createVault).mockResolvedValue({
+      vault: { name: "neuf", entries: 0 },
+      recoveryKey: "AAAA-BBBB",
+    });
+    render(App);
+    await fireEvent.click(await screen.findByRole("button", { name: "Nouveau coffre" }));
+    await fireEvent.input(field("Nom du coffre"), { target: { value: "neuf" } });
+    await fireEvent.input(field("Mot de passe maître"), { target: { value: "Maître-2026!" } });
+    await fireEvent.input(field("Confirmation"), { target: { value: "Maître-2026!" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Créer" }));
+    await screen.findByText("AAAA-BBBB");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/^PSWD Master/);
+    expect(screen.queryByRole("button", { name: /^PSWD Master/ })).not.toBeInTheDocument();
+  });
+
   it("unlocks a vault and locks it again", async () => {
     vi.mocked(lockVault).mockResolvedValue();
     render(App);

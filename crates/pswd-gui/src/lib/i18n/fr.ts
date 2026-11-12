@@ -61,6 +61,7 @@ const errors = {
 export const fr = {
   appTitle: "PSWD Master",
   appVersion: (version: string) => `v${version}`,
+  home: "Retour à l'accueil",
   vaults: "Coffres de mot de passe",
   noVault: "Aucun coffre sur cet appareil.",
   loading: "Chargement…",

@@ -132,10 +132,20 @@
   <!-- Un coffre ouvert garde tout l'écran pour ses entrées. -->
   {#if screen.kind !== "open"}
     <header class="app-bar">
-      <h1>
+      {#snippet brand()}
         <span class="logo"><Icon name="shield" /></span>
         {texts.appTitle}
         <span class="version">{texts.appVersion(__APP_VERSION__)}</span>
+      {/snippet}
+      <!-- La clé de récupération ne se quitte que par « Continuer » : le titre n'y mène nulle part. -->
+      <h1>
+        {#if screen.kind === "recovery"}
+          {@render brand()}
+        {:else}
+          <button type="button" class="home" title={texts.home} onclick={() => (screen = { kind: "list" })}>
+            {@render brand()}
+          </button>
+        {/if}
       </h1>
       {#if screen.kind === "list"}
         <div class="tools">
@@ -261,13 +271,26 @@
     margin-bottom: 2rem;
   }
 
-  h1 {
+  h1,
+  .home {
     display: flex;
     align-items: center;
     gap: 0.625rem;
+  }
+
+  h1 {
     margin: 0;
     font-size: 1.25rem;
     letter-spacing: -0.01em;
+  }
+
+  .home {
+    padding: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    font-weight: inherit;
+    letter-spacing: inherit;
   }
 
   .logo {
@@ -277,6 +300,21 @@
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: var(--on-accent);
     box-shadow: 0 4px 14px var(--glow-1);
+    transition:
+      box-shadow 0.2s var(--ease),
+      transform 0.2s var(--ease);
+  }
+
+  @media (hover: hover) {
+    .home:hover {
+      background: none;
+      color: var(--accent);
+    }
+
+    .home:hover .logo {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px var(--glow-2);
+    }
   }
 
   .version {
