@@ -171,7 +171,8 @@ impl ServerClient {
     ///
     /// # Errors
     ///
-    /// Si l'appareil est inconnu, ou si le serveur est injoignable.
+    /// Si l'appareil est inconnu ou appartient au dernier administrateur, ou si le serveur est
+    /// injoignable.
     pub fn revoke_device(&self, device: Uuid) -> Result<(), PortError> {
         let response = self.request(
             &Method::DELETE,
@@ -180,7 +181,13 @@ impl ServerClient {
         )?;
         done(
             &response,
-            &[(StatusCode::NOT_FOUND, "appareil inconnu du serveur")],
+            &[
+                (
+                    StatusCode::CONFLICT,
+                    "le dernier administrateur garde son dernier appareil",
+                ),
+                (StatusCode::NOT_FOUND, "appareil inconnu du serveur"),
+            ],
         )
     }
 
@@ -483,6 +490,13 @@ mod tests {
             Err(refused(UNKNOWN_ACCOUNT))
         );
 
+        let own_device = account(&arthur, "Arthur").devices[0].id;
+        assert_eq!(
+            arthur.revoke_device(own_device),
+            Err(refused(
+                "le dernier administrateur garde son dernier appareil"
+            ))
+        );
         let device = account(&arthur, "Camille").devices[0].id;
         arthur.revoke_device(device).unwrap();
         assert_eq!(

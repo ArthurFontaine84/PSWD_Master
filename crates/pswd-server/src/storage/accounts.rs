@@ -5,7 +5,12 @@ use pswd_core::Timestamp;
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use uuid::Uuid;
 
+use super::sharing::exists;
 use super::{Storage, StorageError};
+
+/// Nom déjà porté par un compte, ou réservé par la clé d'un nouveau membre.
+const NAME_TAKEN: &str = "SELECT EXISTS (SELECT 1 FROM accounts WHERE name = ?1)
+     OR EXISTS (SELECT 1 FROM connection_keys WHERE account_name = ?1)";
 
 /// Appareil authentifié par son jeton.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +45,9 @@ impl Storage {
     ///
     /// # Errors
     ///
-    /// Si l'écriture dans la base échoue.
+    /// [`StorageError::NameTaken`] si le nom d'un nouveau membre est celui d'un compte ou d'une
+    /// clé de nouveau membre encore valable (comparé à l'identique) ; sinon, si l'écriture dans
+    /// la base échoue.
     pub fn add_connection_key(
         &mut self,
         secret_hash: &[u8],
@@ -57,6 +64,11 @@ impl Storage {
             "DELETE FROM connection_keys WHERE expires_at <= ?1",
             params![now_millis()],
         )?;
+        if let Some(name) = account_name
+            && exists(&tx, NAME_TAKEN, params![name])?
+        {
+            return Err(StorageError::NameTaken);
+        }
         if *purpose == KeyPurpose::Admin {
             tx.execute(
                 "DELETE FROM connection_keys WHERE account_id IS NULL AND account_name IS NULL",
@@ -291,6 +303,38 @@ mod tests {
             )
             .unwrap();
         assert_eq!(name, "Camille");
+    }
+
+    #[test]
+    fn a_member_name_is_taken_by_an_account_or_a_valid_key() {
+        let mut storage = storage();
+        let member = |name: &str| KeyPurpose::Member {
+            name: name.to_owned(),
+        };
+        storage
+            .add_connection_key(b"cle", &member("Camille"), LATER)
+            .unwrap();
+        assert!(matches!(
+            storage.add_connection_key(b"cle2", &member("Camille"), LATER),
+            Err(StorageError::NameTaken)
+        ));
+        storage
+            .redeem_connection_key(b"cle", NOW, &device(b"jeton", None))
+            .unwrap();
+        assert!(matches!(
+            storage.add_connection_key(b"cle2", &member("Camille"), LATER),
+            Err(StorageError::NameTaken)
+        ));
+        storage
+            .add_connection_key(b"cle2", &member("camille"), LATER)
+            .unwrap();
+        storage
+            .add_connection_key(b"cle3", &member("Dominique"), Timestamp::from_millis(1))
+            .unwrap();
+        storage
+            .add_connection_key(b"cle4", &member("Dominique"), LATER)
+            .unwrap();
+        assert_eq!(key_count(&storage), 2);
     }
 
     #[test]

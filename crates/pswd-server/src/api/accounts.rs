@@ -305,6 +305,9 @@ mod tests {
         let body = Some(json!({ "name": "Dominique" }));
         let response = send(&app, request("POST", "/v1/members", Some(&member), body)).await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let body = Some(json!({ "name": "Camille" }));
+        let response = send(&app, request("POST", "/v1/members", Some(&admin), body)).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
         let body = Some(json!({ "name": "" }));
         let response = send(&app, request("POST", "/v1/members", Some(&admin), body)).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);

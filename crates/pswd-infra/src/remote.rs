@@ -207,8 +207,8 @@ impl ServerClient {
     ///
     /// # Errors
     ///
-    /// Si l'appareil n'est pas administrateur, si le nom est invalide, ou si le serveur est
-    /// injoignable.
+    /// Si l'appareil n'est pas administrateur, si le nom est invalide ou déjà pris (compte ou
+    /// clé de nouveau membre), ou si le serveur est injoignable.
     pub fn add_member(&self, name: &str) -> Result<Secret, PortError> {
         let body = serde_json::json!({ "name": name }).to_string();
         self.issue_key(&|base| {
@@ -228,6 +228,7 @@ impl ServerClient {
         match response.status() {
             StatusCode::CREATED => Ok(Secret::new(parse::<Issued>(response)?.key)),
             StatusCode::BAD_REQUEST => Err(PortError::new("nom invalide")),
+            StatusCode::CONFLICT => Err(PortError::new("ce nom est déjà pris")),
             status => Err(status_error(status)),
         }
     }
@@ -889,6 +890,10 @@ mod tests {
         assert_eq!(
             admin.add_member(" ").err(),
             Some(PortError::new("nom invalide"))
+        );
+        assert_eq!(
+            admin.add_member("Camille").err(),
+            Some(PortError::new("ce nom est déjà pris"))
         );
     }
 

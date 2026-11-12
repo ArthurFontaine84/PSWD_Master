@@ -189,7 +189,8 @@ pub enum ApiError {
     DeletedEverywhere,
     /// Coffre privé à partager ou à quitter, coffre commun à supprimer, ou compte inconnu.
     BadRequest,
-    /// Compte déjà membre ou invité, coffre qui a encore des membres, ou dernier administrateur.
+    /// Compte déjà membre ou invité, coffre qui a encore des membres, dernier administrateur, ou
+    /// nom de compte déjà pris.
     Conflict,
     PreconditionFailed,
     PreconditionRequired,
@@ -214,7 +215,8 @@ impl From<StorageError> for ApiError {
             StorageError::AlreadyMember
             | StorageError::HasMembers
             | StorageError::LastAdmin
-            | StorageError::OtherAdmin => Self::Conflict,
+            | StorageError::OtherAdmin
+            | StorageError::NameTaken => Self::Conflict,
             StorageError::Conflict => Self::PreconditionFailed,
             StorageError::MissingAccountName => Self::InvalidName,
             other => {

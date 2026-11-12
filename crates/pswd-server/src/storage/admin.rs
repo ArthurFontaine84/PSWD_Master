@@ -28,6 +28,10 @@ const DELETE_ACCOUNT: [&str; 6] = [
     "DELETE FROM former_members WHERE account_id = ?1",
     "DELETE FROM accounts WHERE id = ?1",
 ];
+/// Compte de l'appareil, et nombre d'appareils de ce compte.
+const DEVICE_ACCOUNT: &str = "SELECT account_id,
+     (SELECT COUNT(*) FROM devices o WHERE o.account_id = d.account_id)
+     FROM devices d WHERE id = ?1";
 const LIST_KEYS: &str = "SELECT k.id, k.account_name, a.name, k.expires_at
      FROM connection_keys k LEFT JOIN accounts a ON a.id = k.account_id
      WHERE k.expires_at > ?1 ORDER BY k.expires_at, k.id";
@@ -184,6 +188,29 @@ impl Storage {
         if updated == 0 {
             return Err(StorageError::NotFound);
         }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Révoque un appareil depuis le panneau d'administration. Le dernier appareil du dernier
+    /// administrateur reste : plus personne ne pourrait sinon administrer le serveur.
+    ///
+    /// # Errors
+    ///
+    /// [`StorageError::NotFound`] si l'appareil n'existe pas, [`StorageError::LastAdmin`] pour le
+    /// dernier appareil du dernier administrateur.
+    pub fn revoke_device_by_admin(&mut self, device: Uuid) -> Result<(), StorageError> {
+        let tx = self.conn.transaction_with_behavior(Immediate)?;
+        let (account, devices): (Uuid, i64) = tx
+            .query_row(DEVICE_ACCOUNT, params![device], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .optional()?
+            .ok_or(StorageError::NotFound)?;
+        if devices == 1 {
+            ensure_not_last_admin(&tx, account)?;
+        }
+        tx.execute("DELETE FROM devices WHERE id = ?1", params![device])?;
         tx.commit()?;
         Ok(())
     }
@@ -671,6 +698,33 @@ mod tests {
     }
 
     #[test]
+    fn the_last_administrator_keeps_his_last_device() {
+        let mut base = base();
+        let arthur = base.storage.authenticate(b"Arthur").unwrap().unwrap();
+        let purpose = KeyPurpose::Device {
+            account: base.arthur,
+        };
+        connect(&mut base.storage, "Arthur-2", &purpose, "ignoré");
+        let phone = base.storage.authenticate(b"Arthur-2").unwrap().unwrap();
+        base.storage.revoke_device_by_admin(phone.device).unwrap();
+        assert_eq!(base.storage.authenticate(b"Arthur-2").unwrap(), None);
+        assert!(matches!(
+            base.storage.revoke_device_by_admin(arthur.device),
+            Err(StorageError::LastAdmin)
+        ));
+        let camille = base.storage.authenticate(b"Camille").unwrap().unwrap();
+        base.storage.revoke_device_by_admin(camille.device).unwrap();
+        assert_eq!(base.storage.authenticate(b"Camille").unwrap(), None);
+        assert!(matches!(
+            base.storage.revoke_device_by_admin(camille.device),
+            Err(StorageError::NotFound)
+        ));
+        base.storage.set_admin(base.dominique, true).unwrap();
+        base.storage.revoke_device_by_admin(arthur.device).unwrap();
+        assert_eq!(base.storage.authenticate(b"Arthur").unwrap(), None);
+    }
+
+    #[test]
     fn pending_keys_are_listed_then_cancelled() {
         let mut base = base();
         let soon = Timestamp::from_millis(i64::MAX - 1);
@@ -1059,6 +1113,10 @@ mod tests {
         base.storage.break_for_tests("devices");
         assert!(matches!(
             base.storage.account_details(),
+            Err(StorageError::Database(_))
+        ));
+        assert!(matches!(
+            base.storage.revoke_device_by_admin(Uuid::new_v4()),
             Err(StorageError::Database(_))
         ));
         base.storage.break_for_tests("vault_members");

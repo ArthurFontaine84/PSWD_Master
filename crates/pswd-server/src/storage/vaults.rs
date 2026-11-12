@@ -215,7 +215,7 @@ mod tests {
 
     fn member(storage: &mut Storage, secret: &[u8]) -> Uuid {
         let purpose = KeyPurpose::Member {
-            name: "membre".to_owned(),
+            name: String::from_utf8_lossy(secret).into_owned(),
         };
         storage
             .add_connection_key(secret, &purpose, Timestamp::from_millis(i64::MAX))

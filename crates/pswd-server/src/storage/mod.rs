@@ -131,6 +131,8 @@ pub enum StorageError {
     InvalidKey,
     /// Une clé administrateur crée un compte : il lui faut un nom.
     MissingAccountName,
+    /// Le nom d'un nouveau membre est déjà celui d'un compte ou d'un autre nouveau membre.
+    NameTaken,
     RandomUnavailable,
     /// Base créée par une version plus récente du serveur.
     UnknownSchema(i64),
@@ -154,6 +156,7 @@ impl fmt::Display for StorageError {
             Self::Conflict => f.write_str("le coffre a changé depuis la version lue"),
             Self::InvalidKey => f.write_str("clé de connexion invalide ou expirée"),
             Self::MissingAccountName => f.write_str("nom du compte manquant"),
+            Self::NameTaken => f.write_str("nom de compte déjà pris"),
             Self::RandomUnavailable => f.write_str("générateur aléatoire du système indisponible"),
             Self::UnknownSchema(version) => {
                 write!(f, "base de données de version inconnue ({version})")

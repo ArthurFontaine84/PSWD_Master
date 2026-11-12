@@ -234,7 +234,7 @@ async fn revoke_device(
     _: Admin,
     Path(device): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    state.storage().revoke_device(device)?;
+    state.storage().revoke_device_by_admin(device)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -500,13 +500,18 @@ mod tests {
         assert_eq!(accounts[1]["devices"][0]["name"], "PC");
         assert!(accounts[1]["devices"][0]["created_at"].is_i64());
 
-        let (arthur, _) = server.account("Arthur").await;
+        let (arthur, arthur_device) = server.account("Arthur").await;
         let (camille, device) = server.account("Camille").await;
         let role = |is_admin: bool| Some(json!({ "is_admin": is_admin }));
         let arthur_role = format!("/v1/admin/accounts/{arthur}/admin");
         let camille_role = format!("/v1/admin/accounts/{camille}/admin");
         assert_eq!(
             server.status("PUT", &arthur_role, role(false)).await,
+            StatusCode::CONFLICT
+        );
+        let revoke_arthur = format!("/v1/admin/devices/{arthur_device}");
+        assert_eq!(
+            server.status("DELETE", &revoke_arthur, None).await,
             StatusCode::CONFLICT
         );
         assert_eq!(
