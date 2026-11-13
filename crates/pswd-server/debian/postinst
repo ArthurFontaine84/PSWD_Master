@@ -22,6 +22,9 @@ if [ "$1" = "configure" ] && [ -z "$2" ]; then
     echo "Dans PSWD Master, écran « Serveur » : saisissez cette adresse et cette clé."
     echo "Nouvelle clé, si besoin : sudo -u pswd-server pswd-server reset-admin"
     echo
+    echo "Le port se change si nécessaire dans /etc/pswd-server/config.toml, avant de connecter"
+    echo "le premier appareil. Plus d'informations : guide d'utilisation, depuis l'application PSWD Master."
+    echo
 fi
 
 #DEBHELPER#

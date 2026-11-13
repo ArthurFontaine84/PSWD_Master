@@ -14,7 +14,8 @@
     | "eye-off"
     | "server"
     | "save"
-    | "sync";
+    | "sync"
+    | "help";
 </script>
 
 <script lang="ts">
@@ -79,6 +80,9 @@
     <path d="M3 21v-5h5" />
     <path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" />
     <path d="M21 3v5h-5" />
+  {:else if name === "help"}
+    <circle cx="12" cy="12" r="10" />
+    <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01" />
   {:else}
     <path d="m9 18 6-6-6-6" />
   {/if}

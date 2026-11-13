@@ -202,6 +202,15 @@ pub fn import_entries<R: Runtime>(
     state.import_entries(&files::read(&app, &path)?)
 }
 
+/// Modèle d'import à remplir dans un tableur, embarqué à la construction.
+const CSV_TEMPLATE: &[u8] = include_bytes!("../../../../docs/template_import_pswd.csv");
+
+/// Écrit le modèle d'import dans le fichier choisi.
+#[tauri::command]
+pub fn csv_template_to_file<R: Runtime>(app: AppHandle<R>, path: String) -> Result<(), UiError> {
+    files::write(&app, &path, CSV_TEMPLATE)
+}
+
 /// Nom proposé dans la fenêtre d'enregistrement d'une sauvegarde `.pswd`.
 #[tauri::command]
 pub fn backup_file_name(state: State<'_, AppState>) -> String {
@@ -639,6 +648,7 @@ mod tests {
             recover_vault,
             delete_vault,
             import_entries,
+            csv_template_to_file,
             backup_file_name,
             backup_to_file,
             backup_file_contents,
@@ -1075,6 +1085,23 @@ mod tests {
             Ok(Value::Null)
         );
         assert_eq!(app.call("current_vault", json!({})), Ok(Value::Null));
+    }
+
+    #[test]
+    fn the_csv_template_is_written_with_a_header_the_import_accepts() {
+        let app = TestApp::new(None);
+        app.create("perso", "Maître-2026!").unwrap();
+        let file = app.dir.path().join("modele.csv").display().to_string();
+        assert_eq!(
+            app.call("csv_template_to_file", json!({ "path": file })),
+            Ok(Value::Null)
+        );
+        assert_eq!(fs::read(&file).unwrap(), CSV_TEMPLATE);
+        // Seule la ligne d'exemple, à remplacer, est refusée : l'en-tête est le bon.
+        assert_eq!(
+            app.call("import_entries", json!({ "path": file })),
+            Err(json!({ "code": "csvUnknownKind", "detail": "2" }))
+        );
     }
 
     #[test]

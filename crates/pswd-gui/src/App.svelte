@@ -18,11 +18,14 @@
   import { applyTheme } from "./lib/theme";
   import { showToast } from "./lib/toast.svelte";
   import type { VaultDot } from "./lib/vaultDot";
+  import { watchWide } from "./lib/layout";
+  import AppMenu, { type MenuItem } from "./components/AppMenu.svelte";
   import Toast from "./components/Toast.svelte";
   import Icon from "./components/Icon.svelte";
   import Admin from "./screens/Admin.svelte";
   import Backup from "./screens/Backup.svelte";
   import CreateVault from "./screens/CreateVault.svelte";
+  import Help from "./screens/Help.svelte";
   import OpenVault from "./screens/OpenVault.svelte";
   import RecoveryKey from "./screens/RecoveryKey.svelte";
   import Restore from "./screens/Restore.svelte";
@@ -41,12 +44,21 @@
     | { kind: "restore" }
     | { kind: "server" }
     | { kind: "admin"; account: AccountStatus }
-    | { kind: "settings" };
+    | { kind: "settings" }
+    | { kind: "help" };
 
   /** Intervalle minimal entre deux signaux d'activité envoyés au backend. */
   const ACTIVITY_INTERVAL = 30_000;
 
   let screen = $state<Screen>({ kind: "list" });
+
+  // Écran étroit : seul « Nouveau coffre » reste visible, les autres outils passent dans un menu.
+  let compact = $state(false);
+  const tools: MenuItem[] = [
+    { label: texts.server, icon: "server", onSelect: () => (screen = { kind: "server" }) },
+    { label: texts.settings, icon: "settings", onSelect: () => (screen = { kind: "settings" }) },
+    { label: texts.help, icon: "help", onSelect: () => (screen = { kind: "help" }) },
+  ];
 
   function showLocked() {
     screen = { kind: "list", notice: texts.lockedAutomatically };
@@ -103,6 +115,7 @@
 
   onMount(() => {
     const stopBack = onBack(back);
+    const stopWide = watchWide((wide) => (compact = !wide));
     const stopButton = deviceKind().then(
       (kind) => (kind === "mobile" ? listenBackButton() : undefined),
       () => undefined,
@@ -117,6 +130,7 @@
     const unlisten = onVaultLocked(showLocked);
     return () => {
       stopBack();
+      stopWide();
       void unlisten.then((stop) => {
         stop();
       });
@@ -158,24 +172,21 @@
           >
             <Icon name="plus" />
           </button>
-          <button
-            type="button"
-            class="icon-button"
-            aria-label={texts.server}
-            title={texts.server}
-            onclick={() => (screen = { kind: "server" })}
-          >
-            <Icon name="server" />
-          </button>
-          <button
-            type="button"
-            class="icon-button"
-            aria-label={texts.settings}
-            title={texts.settings}
-            onclick={() => (screen = { kind: "settings" })}
-          >
-            <Icon name="settings" />
-          </button>
+          {#if compact}
+            <AppMenu items={tools} />
+          {:else}
+            {#each tools as tool (tool.label)}
+              <button
+                type="button"
+                class="icon-button"
+                aria-label={tool.label}
+                title={tool.label}
+                onclick={tool.onSelect}
+              >
+                <Icon name={tool.icon} />
+              </button>
+            {/each}
+          {/if}
         </div>
       {/if}
     </header>
@@ -237,6 +248,8 @@
           onClose={() => (screen = { kind: "list" })}
           onAdmin={(account) => (screen = { kind: "admin", account })}
         />
+      {:else if screen.kind === "help"}
+        <Help onClose={() => (screen = { kind: "list" })} />
       {:else}
         <OpenVault
           vault={screen.vault}

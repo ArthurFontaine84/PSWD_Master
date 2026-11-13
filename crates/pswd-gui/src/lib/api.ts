@@ -352,6 +352,11 @@ export function importEntries(path: string): Promise<number> {
   return invoke<number>("import_entries", { path });
 }
 
+/** Le backend écrit le modèle d'import dans le fichier choisi. */
+export async function csvTemplateToFile(path: string): Promise<void> {
+  await invoke("csv_template_to_file", { path });
+}
+
 /** Nom proposé pour une sauvegarde en un seul fichier, daté par le backend. */
 export function backupFileName(): Promise<string> {
   return invoke<string>("backup_file_name");

@@ -26,6 +26,7 @@
     "allow-recover-vault",
     "allow-delete-vault",
     "allow-import-entries",
+    "allow-csv-template-to-file",
     "allow-backup-file-name",
     "allow-backup-to-file",
     "allow-backup-file-contents",

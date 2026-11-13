@@ -1,7 +1,7 @@
 import { exit, onBackButtonPress } from "@tauri-apps/api/app";
 import type { PluginListener } from "@tauri-apps/api/core";
 import { fireEvent, render, screen } from "@testing-library/svelte";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.svelte";
 import { goBack } from "./lib/back";
 import {
@@ -182,6 +182,89 @@ describe("back button", () => {
   });
 });
 
+describe("tools on a narrow screen", () => {
+  /** Écran étroit ; `widen` simule l'élargissement de la fenêtre. */
+  function narrowScreen() {
+    let listener: (event: { matches: boolean }) => void = () => undefined;
+    const query = {
+      matches: false,
+      addEventListener: vi.fn((_: string, added: typeof listener) => {
+        listener = added;
+      }),
+      removeEventListener: vi.fn(),
+    };
+    // Animations réduites : l'environnement de test ne sait pas les jouer.
+    const reduced = { matches: true };
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((media: string) => (media.includes("reduced-motion") ? reduced : query)),
+    );
+    return { widen: () => listener({ matches: true }) };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const menu = () => screen.getByRole("button", { name: "Menu" });
+
+  it("keeps « Nouveau coffre » and gathers the other tools in a menu", async () => {
+    narrowScreen();
+    render(App);
+    expect(await screen.findByRole("button", { name: "Nouveau coffre" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Serveur" })).not.toBeInTheDocument();
+    expect(menu()).toHaveAttribute("aria-expanded", "false");
+    await fireEvent.click(menu());
+    expect(menu()).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent.trim())).toEqual([
+      "Serveur",
+      "Réglages",
+      "Aide",
+    ]);
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Aide" }));
+    expect(await screen.findByRole("region", { name: "Aide" })).toBeInTheDocument();
+  });
+
+  it("closes the menu with its button, Escape, a click elsewhere or the back button", async () => {
+    narrowScreen();
+    render(App);
+    await screen.findByRole("button", { name: "perso" });
+    const closed = async () => {
+      await vi.waitFor(() => {
+        expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      });
+    };
+    await fireEvent.click(menu());
+    await fireEvent.click(menu());
+    await closed();
+    await fireEvent.click(menu());
+    await fireEvent.click(screen.getByRole("menu"));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await fireEvent.keyDown(window, { key: "Enter" });
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    await fireEvent.keyDown(window, { key: "Escape" });
+    await closed();
+    await fireEvent.click(menu());
+    await fireEvent.click(document.body);
+    await closed();
+    await fireEvent.click(menu());
+    goBack();
+    await closed();
+    expect(exit).not.toHaveBeenCalled();
+    goBack();
+    expect(exit).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows every tool again when the window widens", async () => {
+    const { widen } = narrowScreen();
+    render(App);
+    await screen.findByRole("button", { name: "perso" });
+    widen();
+    expect(await screen.findByRole("button", { name: "Serveur" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Menu" })).not.toBeInTheDocument();
+  });
+});
+
 describe("App", () => {
   it("creates a vault, shows its recovery key once, then opens it", async () => {
     vi.mocked(createVault).mockResolvedValue({
@@ -357,6 +440,17 @@ describe("App", () => {
     render(App);
     await fireEvent.click(screen.getByRole("button", { name: "Serveur" }));
     expect(await screen.findByRole("heading", { name: "Serveur maison" })).toBeInTheDocument();
+    await fireEvent.click(await screen.findByRole("button", { name: "Retour" }));
+    expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
+  });
+
+  it("opens the help from the list, and goes back to the list", async () => {
+    render(App);
+    await fireEvent.click(screen.getByRole("button", { name: "Aide" }));
+    expect(await screen.findByRole("region", { name: "Aide" })).toBeInTheDocument();
+    goBack();
+    expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Aide" }));
     await fireEvent.click(await screen.findByRole("button", { name: "Retour" }));
     expect(await screen.findByRole("button", { name: "perso" })).toBeInTheDocument();
   });

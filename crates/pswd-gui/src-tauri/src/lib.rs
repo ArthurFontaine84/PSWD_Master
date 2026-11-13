@@ -77,6 +77,7 @@ pub fn run() {
             commands::recover_vault,
             commands::delete_vault,
             commands::import_entries,
+            commands::csv_template_to_file,
             commands::backup_file_name,
             commands::backup_to_file,
             commands::backup_file_contents,

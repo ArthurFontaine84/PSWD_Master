@@ -10,6 +10,7 @@ import {
   forgetVault,
   getSettings,
   importEntries,
+  csvTemplateToFile,
   listEntries,
   listTags,
   listVaults,
@@ -23,7 +24,7 @@ import {
   accountStatus,
   type Settings as SettingsValues,
 } from "../lib/api";
-import { pickBackupDestination, pickBackupFile, pickCsvFile } from "../lib/files";
+import { pickBackupDestination, pickBackupFile, pickCsvDestination, pickCsvFile } from "../lib/files";
 import Toast from "../components/Toast.svelte";
 import { goBack } from "../lib/back";
 import Backup from "./Backup.svelte";
@@ -42,6 +43,7 @@ vi.mock("../lib/api", () => ({
   recoverVault: vi.fn(),
   changePassword: vi.fn(),
   importEntries: vi.fn(),
+  csvTemplateToFile: vi.fn(),
   deleteVault: vi.fn(),
   deleteVaultEverywhere: vi.fn(),
   forgetVault: vi.fn(),
@@ -58,6 +60,7 @@ vi.mock("../lib/api", () => ({
 }));
 vi.mock("../lib/files", () => ({
   pickCsvFile: vi.fn(),
+  pickCsvDestination: vi.fn(),
   pickBackupFile: vi.fn(),
   pickBackupDestination: vi.fn(),
 }));
@@ -154,6 +157,29 @@ describe("importing a CSV file", () => {
       expect(listEntries).toHaveBeenCalledTimes(2);
     });
     expect(screen.queryByRole("button", { name: "Choisir le fichier" })).not.toBeInTheDocument();
+  });
+
+  it("saves the template where the user chooses, and stays on the import", async () => {
+    vi.mocked(pickCsvDestination)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce("C:/modele.csv")
+      .mockResolvedValueOnce("Z:/modele.csv");
+    vi.mocked(csvTemplateToFile)
+      .mockResolvedValueOnce()
+      .mockRejectedValueOnce({ code: "fileUnwritable", detail: "lecteur absent" });
+    await manage();
+    await fireEvent.click(screen.getByRole("menuitem", { name: "Importer un CSV" }));
+    const download = screen.getByRole("button", { name: "Télécharger le modèle" });
+    await fireEvent.click(download);
+    expect(csvTemplateToFile).not.toHaveBeenCalled();
+    await fireEvent.click(download);
+    expect(await screen.findByRole("status")).toHaveTextContent("Modèle enregistré.");
+    expect(pickCsvDestination).toHaveBeenLastCalledWith("Enregistrer le modèle d'import", "modele_import_pswd.csv");
+    expect(csvTemplateToFile).toHaveBeenCalledWith("C:/modele.csv");
+    await fireEvent.click(download);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Écriture du fichier impossible : lecteur absent");
+    expect(screen.getByRole("button", { name: "Choisir le fichier" })).toBeInTheDocument();
+    expect(importEntries).not.toHaveBeenCalled();
   });
 
   it("reports an invalid file, or a lock in the meantime", async () => {

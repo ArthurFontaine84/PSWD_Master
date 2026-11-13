@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { importEntries } from "../lib/api";
+  import { csvTemplateToFile, importEntries } from "../lib/api";
   import { errorMessage, isVaultLocked } from "../lib/errors";
-  import { pickCsvFile } from "../lib/files";
+  import { pickCsvDestination, pickCsvFile } from "../lib/files";
   import { texts } from "../lib/i18n";
   import { showToast } from "../lib/toast.svelte";
 
@@ -16,6 +16,20 @@
   let problem = $state<string | null>(null);
   /** Le rappel de supprimer le fichier CSV reste affiché plus longtemps qu'une simple confirmation. */
   const IMPORTED_DURATION = 8_000;
+
+  async function downloadTemplate() {
+    problem = null;
+    try {
+      const path = await pickCsvDestination(texts.templateFileTitle, texts.templateFileName);
+      if (path === null) {
+        return;
+      }
+      await csvTemplateToFile(path);
+      showToast(texts.templateSaved);
+    } catch (error) {
+      problem = errorMessage(error);
+    }
+  }
 
   async function choose() {
     problem = null;
@@ -39,6 +53,10 @@
 
 <h3>{texts.importCsv}</h3>
 <p>{texts.importExplanation}</p>
+<p>{texts.templateExplanation}</p>
+<div class="actions">
+  <button type="button" onclick={downloadTemplate}>{texts.downloadTemplate}</button>
+</div>
 <p role="note" class="notice">{texts.importSecurity}</p>
 {#if problem}
   <p role="alert">{problem}</p>

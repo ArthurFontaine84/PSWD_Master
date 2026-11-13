@@ -19,7 +19,14 @@ export function pickServerBackupDestination(title: string, defaultPath: string):
   return save({ title, defaultPath, filters: [{ name: "SQLite", extensions: ["db"] }] });
 }
 
+const CSV_FILTER = { name: "CSV", extensions: ["csv"] };
+
 /** Un fichier CSV choisi par l'utilisateur, ou `null` s'il a annulé. */
 export function pickCsvFile(title: string): Promise<string | null> {
-  return open({ title, multiple: false, filters: [{ name: "CSV", extensions: ["csv"] }] });
+  return open({ title, multiple: false, filters: [CSV_FILTER] });
+}
+
+/** L'emplacement où enregistrer un fichier CSV, ou `null` si l'utilisateur a annulé. */
+export function pickCsvDestination(title: string, defaultPath: string): Promise<string | null> {
+  return save({ title, defaultPath, filters: [CSV_FILTER] });
 }

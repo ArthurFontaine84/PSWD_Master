@@ -156,6 +156,11 @@ export const fr = {
   importSecurity:
     "Sécurité : ce fichier contient vos mots de passe en clair. Une fois l'import terminé, supprimez-le et videz la corbeille ; ne le laissez pas dans un dossier synchronisé (OneDrive, Google Drive…).",
   chooseFile: "Choisir le fichier",
+  templateExplanation: "Partez du modèle : ouvrez-le dans un tableur, remplacez sa ligne d'exemple par vos entrées.",
+  downloadTemplate: "Télécharger le modèle",
+  templateFileTitle: "Enregistrer le modèle d'import",
+  templateFileName: "modele_import_pswd.csv",
+  templateSaved: "Modèle enregistré.",
   imported: (count: number) =>
     `${count <= 1 ? `${count} entrée importée` : `${count} entrées importées`}. Supprimez maintenant le fichier CSV : il contient vos mots de passe en clair.`,
   deleteVault: "Supprimer ce coffre",
@@ -198,6 +203,8 @@ export const fr = {
   theme: "Thème",
   themes: { auto: "Comme le système", light: "Clair", dark: "Sombre" },
   settingsSaved: "Réglages enregistrés.",
+  help: "Aide",
+  menu: "Menu",
   lockedAutomatically: "Coffre verrouillé automatiquement.",
   server: "Serveur",
   serverTitle: "Serveur maison",

@@ -1,6 +1,12 @@
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { describe, expect, it, vi } from "vitest";
-import { pickBackupDestination, pickBackupFile, pickCsvFile, pickServerBackupDestination } from "./files";
+import {
+  pickBackupDestination,
+  pickBackupFile,
+  pickCsvDestination,
+  pickCsvFile,
+  pickServerBackupDestination,
+} from "./files";
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
@@ -11,6 +17,16 @@ describe("files", () => {
     expect(vi.mocked(open).mock.calls).toEqual([
       [{ title: "Importer", multiple: false, filters: [{ name: "CSV", extensions: ["csv"] }] }],
     ]);
+  });
+
+  it("asks the system where to write a CSV file", async () => {
+    vi.mocked(save).mockResolvedValueOnce("C:/modele.csv");
+    await expect(pickCsvDestination("Enregistrer", "modele.csv")).resolves.toBe("C:/modele.csv");
+    expect(save).toHaveBeenLastCalledWith({
+      title: "Enregistrer",
+      defaultPath: "modele.csv",
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
   });
 
   it("asks the system for a backup file to read or to write", async () => {

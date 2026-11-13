@@ -15,6 +15,7 @@ import {
   deleteVault,
   getSettings,
   importEntries,
+  csvTemplateToFile,
   recoverVault,
   backupFileName,
   backupToFile,
@@ -113,6 +114,7 @@ describe("api", () => {
     await recoverVault("perso", "AAAA", "nouveau");
     await deleteVault("perso", "perso");
     await importEntries("C:/import.csv");
+    await csvTemplateToFile("C:/modele.csv");
     await backupFileName();
     await backupToFile("E:/s.pswd", ["perso"]);
     await backupFileContents("E:/s.pswd");
@@ -184,6 +186,7 @@ describe("api", () => {
       ["recover_vault", { name: "perso", recoveryKey: "AAAA", password: "nouveau" }],
       ["delete_vault", { name: "perso", confirmation: "perso" }],
       ["import_entries", { path: "C:/import.csv" }],
+      ["csv_template_to_file", { path: "C:/modele.csv" }],
       ["backup_file_name"],
       ["backup_to_file", { path: "E:/s.pswd", names: ["perso"] }],
       ["backup_file_contents", { path: "E:/s.pswd" }],

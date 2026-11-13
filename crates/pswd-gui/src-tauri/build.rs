@@ -26,6 +26,7 @@ const COMMANDS: &[&str] = &[
     "recover_vault",
     "delete_vault",
     "import_entries",
+    "csv_template_to_file",
     "backup_file_name",
     "backup_to_file",
     "backup_file_contents",

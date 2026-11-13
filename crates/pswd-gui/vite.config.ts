@@ -10,9 +10,16 @@ const host = process.env.TAURI_DEV_HOST;
 // La version de l'application, celle des installateurs, fixée à la construction.
 const { version } = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf-8")) as { version: string };
 
+// L'aide de l'application : le README et le guide du dépôt (`src/lib/help.ts`).
+const markdown = (path: string) => JSON.stringify(readFileSync(path, "utf-8"));
+
 export default defineConfig({
   plugins: [svelte(), svelteTesting()],
-  define: { __APP_VERSION__: JSON.stringify(version) },
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
+    __HELP_README__: markdown("../../README.md"),
+    __HELP_GUIDE__: markdown("../../docs/GUIDE.md"),
+  },
   clearScreen: false,
   server: {
     port: 1420,
