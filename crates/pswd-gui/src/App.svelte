@@ -292,9 +292,11 @@
   }
 
   h1 {
+    flex-shrink: 0;
     margin: 0;
-    font-size: 1.25rem;
+    font-size: 1.125rem;
     letter-spacing: -0.01em;
+    white-space: nowrap;
   }
 
   .home {
