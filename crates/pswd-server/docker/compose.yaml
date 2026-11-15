@@ -1,0 +1,24 @@
+# pswd-server en conteneur (docs/SERVEUR.md, § 7). Seul fichier à copier sur le serveur ;
+# l'image est construite ailleurs puis chargée par `docker load`.
+name: pswd-server
+
+services:
+  pswd-server:
+    image: pswd-server
+    # L'image est locale : ne jamais en télécharger une du même nom.
+    pull_policy: never
+    restart: unless-stopped
+    # Port de la machine (à gauche) vers le port du serveur dans le conteneur.
+    ports:
+      - "8543:8443"
+    volumes:
+      - /srv/pswd-server/donnees:/var/lib/pswd-server
+      - /srv/pswd-server/sauvegardes:/sauvegardes
+    # Mêmes protections que le service systemd : rien d'autre en écriture, aucun privilège.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
