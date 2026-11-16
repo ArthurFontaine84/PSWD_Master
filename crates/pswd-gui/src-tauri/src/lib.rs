@@ -141,11 +141,16 @@ fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
     }
 }
 
-/// Sur le bureau, les dossiers de la CLI : les deux programmes voient les mêmes coffres.
+/// Sur le bureau, les dossiers de la CLI : les deux programmes voient les mêmes coffres. La
+/// version de développement (`npm run tauri dev`) a les siens.
 #[cfg(desktop)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn locations(_: &tauri::AppHandle) -> Result<Locations, Box<dyn Error>> {
-    Ok(Locations::system()?)
+    if cfg!(debug_assertions) {
+        Ok(Locations::system_dev()?)
+    } else {
+        Ok(Locations::system()?)
+    }
 }
 
 /// Sur mobile, le dossier privé de l'application.

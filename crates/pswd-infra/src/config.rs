@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::FileStore;
 
 const APP_DIR: &str = "pswd";
+const DEV_APP_DIR: &str = "pswd-dev";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
@@ -58,12 +59,26 @@ impl Locations {
     ///
     /// [`ConfigError::NoHomeDirectory`] si le dossier personnel est introuvable.
     pub fn system() -> Result<Self, ConfigError> {
+        Self::system_in(APP_DIR)
+    }
+
+    /// Mêmes dossiers de l'utilisateur, sous `pswd-dev` : une version de développement ne
+    /// touche jamais les coffres de la version installée.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::NoHomeDirectory`] si le dossier personnel est introuvable.
+    pub fn system_dev() -> Result<Self, ConfigError> {
+        Self::system_in(DEV_APP_DIR)
+    }
+
+    fn system_in(app_dir: &str) -> Result<Self, ConfigError> {
         let base = etcetera::choose_base_strategy()
             .ok()
             .ok_or(ConfigError::NoHomeDirectory)?;
         Ok(Self::new(
-            &base.config_dir().join(APP_DIR),
-            &base.data_dir().join(APP_DIR),
+            &base.config_dir().join(app_dir),
+            &base.data_dir().join(app_dir),
         ))
     }
 
@@ -386,6 +401,30 @@ mod tests {
                 .parent()
                 .unwrap()
                 .ends_with(Path::new("pswd").join("vaults"))
+        );
+    }
+
+    #[test]
+    fn dev_locations_are_beside_the_system_ones() {
+        let system = Locations::system().unwrap();
+        let dev = Locations::system_dev().unwrap();
+        assert_eq!(
+            dev.config_file(),
+            system
+                .config_file()
+                .parent()
+                .unwrap()
+                .with_file_name("pswd-dev")
+                .join("config.toml")
+        );
+        assert_eq!(
+            dev.server_file(),
+            system
+                .server_file()
+                .parent()
+                .unwrap()
+                .with_file_name("pswd-dev")
+                .join("server.toml")
         );
     }
 
