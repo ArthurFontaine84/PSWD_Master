@@ -1,10 +1,10 @@
 # Installer le serveur maison `pswd-server`
 
-Le serveur synchronise vos coffres entre vos appareils et permet les coffres communs. Il ne garde que des coffres chiffrés : il ne connaît aucun mot de passe maître. Cible : **Ubuntu Server 26.04 LTS** (x86_64), d'abord dans une machine virtuelle pour essayer, puis sur un vrai PC. Conception détaillée : `docs/SPEC.md` § 11.
+Le serveur synchronise vos coffres entre vos appareils et permet les coffres communs. Il ne garde que des coffres chiffrés : il ne connaît aucun mot de passe maître. Cible : **Ubuntu Server 26.04 LTS** (x86_64), d'abord dans une machine virtuelle pour essayer, puis sur un vrai PC. Pour un autre Linux ou une machine Windows : conteneur Docker (section 7). Conception détaillée : `docs/SPEC.md` § 11.
 
 ## 1. Construire le paquet `.deb`
 
-Sur la machine Ubuntu elle-même (le paquet se construit sous Linux) :
+Le paquet se construit sous Linux (Debian ou Ubuntu) : directement sur le serveur, ou sur un autre ordinateur dans WSL ou une machine virtuelle, puis le copier sur le serveur (`scp`). Un paquet construit sur une version d'Ubuntu s'installe sur la même version ou une plus récente.
 
 ```sh
 sudo apt install build-essential git curl
@@ -89,3 +89,75 @@ Le certificat restauré est le même : les appareils se reconnectent sans rien r
 | Tout effacer, données comprises | `sudo apt purge pswd-server` |
 
 La nouvelle clé administrateur crée un **nouveau** compte administrateur à la connexion ; l'ancien compte reste, à supprimer depuis le panneau si besoin.
+
+## 7. Variante : en conteneur Docker
+
+À la place du paquet `.deb` (sections 1, 2, 5 et 6), le serveur peut tourner dans un conteneur Docker Le conteneur est joignable sur le port 8543 de la machine, et non 8443 comme le paquet (à modifier selon la configuration)
+
+L'image est construite puis envoyée au serveur : le serveur n'a besoin ni du dépôt ni de Rust, seulement de Docker et du fichier `compose.yaml`.
+
+### Ce qui protège la machine
+
+Le moteur Docker tourne en `root`, mais le conteneur est bridé (`compose.yaml`) :
+
+- le serveur y tourne sous un utilisateur ordinaire (numéro 10001), jamais en `root` ;
+- tout est en lecture seule, sauf les données et les sauvegardes ;
+- aucune capacité système (`cap_drop: ALL`) et aucun moyen d'en regagner (`no-new-privileges`) ;
+
+Sous Linux, piloter Docker revient à être `root` : les commandes `docker` se lancent avec `sudo`, et on n'ajoute **jamais** son compte au groupe `docker` (ce serait donner les droits `root` sans mot de passe).
+
+### Construire l'image (sur l'ordinateur où se trouve le dépôt)
+
+```sh
+docker build -f crates/pswd-server/docker/Dockerfile -t pswd-server .   # quelques minutes
+docker save -o pswd-server.tar pswd-server
+```
+
+Copier ensuite `pswd-server.tar` et `crates/pswd-server/docker/compose.yaml` sur le serveur (`scp`, clé USB, dossier partagé), dans un même dossier.
+
+`docker save -o` écrit le fichier lui-même.
+
+### Installer Docker (sur le serveur)
+
+Par exemple sous Ubuntu : `sudo apt install docker.io docker-compose-v2`
+
+Toutes les commandes `docker` qui suivent se lancent dans le dossier de `compose.yaml` ; sous Linux, les précéder de `sudo`.
+
+### Charger l'image et démarrer
+
+```sh
+docker load -i pswd-server.tar             # puis supprimer pswd-server.tar
+docker compose run --rm pswd-server reset-admin
+docker compose up -d
+```
+
+`reset-admin` crée la base, le certificat et affiche la clé administrateur, avant le premier démarrage. Le conteneur redémarre ensuite avec Docker (`restart: unless-stopped`).
+
+La première commande `run` doit annoncer la création des volumes `pswd-server_donnees` et `pswd-server_sauvegardes`. 
+
+Les données sont dans deux **volumes** Docker, `pswd-server_donnees` (base et certificat) et `pswd-server_sauvegardes`, rangés par Docker hors du conteneur : supprimer ou reconstruire le conteneur ne les touche pas, et ils appartiennent déjà au bon utilisateur, sans rien préparer.
+
+Adresse du serveur : la première de `hostname -I` (Linux) ou l'« Adresse IPv4 » de `ipconfig` (Windows), port 8543. Le port se change dans `compose.yaml` (`"8543:8443"` : seul le nombre de gauche change).
+
+### Pare-feu
+
+- **Linux** : un port publié par Docker n'est **pas** filtré par `ufw` : il est ouvert dès le démarrage du conteneur, quoi que dise `ufw`.
+- **Windows** : autoriser le port dans le pare-feu, dans un PowerShell lancé en administrateur :
+
+  ```powershell
+  New-NetFirewallRule -DisplayName "pswd-server" -Direction Inbound -Protocol TCP -LocalPort 8543 -Action Allow
+  ```
+
+Sans redirection de port dans la box (section 4, avec le port 8543), le serveur n'est joignable que depuis le réseau de la maison.
+
+### Au quotidien
+
+| Besoin | Commande |
+|---|---|
+| État | `docker compose ps` |
+| Journal | `docker compose logs pswd-server` |
+| Nouvelle clé administrateur | `docker compose exec pswd-server pswd-server reset-admin` |
+| Sauvegarder | `docker compose exec pswd-server pswd-server backup /sauvegardes`, puis `docker compose cp pswd-server:/sauvegardes/<fichier>.db .` et ranger ce fichier hors de la machine |
+| Mettre à jour | reconstruire et copier l'image (voir plus haut), `docker load -i pswd-server.tar`, puis `docker compose up -d` : les données sont gardées |
+| Arrêter | `docker compose down` (les volumes, donc les données, restent) |
+| Tout effacer, données comprises | `docker compose down -v --rmi all` |

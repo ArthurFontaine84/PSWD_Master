@@ -10,11 +10,11 @@ services:
     restart: unless-stopped
     # Port de la machine (à gauche) vers le port du serveur dans le conteneur.
     ports:
-      - "8543:8443"
+      - "8543:8443" # à modifier si le port 8543 est déjà utilisé sur le serveur
+    # Volumes nommés : mêmes sous Linux et Windows, créés avec le propriétaire de l'image (10001).
     volumes:
-      - /srv/pswd-server/donnees:/var/lib/pswd-server
-      - /srv/pswd-server/sauvegardes:/sauvegardes
-    # Mêmes protections que le service systemd : rien d'autre en écriture, aucun privilège.
+      - donnees:/var/lib/pswd-server
+      - sauvegardes:/sauvegardes
     read_only: true
     tmpfs:
       - /tmp
@@ -22,3 +22,7 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  donnees:
+  sauvegardes:
