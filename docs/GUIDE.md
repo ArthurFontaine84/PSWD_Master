@@ -157,7 +157,7 @@ Le compte créé avec la clé administrateur est **administrateur**. Le panneau 
 | **Comptes** | **Ajouter un membre** (une clé s'affiche : transmettez-la avec l'adresse du serveur), voir les appareils de chacun, **révoquer** un appareil perdu ou volé, nommer un autre administrateur, supprimer un compte |
 | **Coffres** | Voir les membres de chaque coffre, **restaurer une version** (le serveur garde les 15 dernières), supprimer un coffre du serveur |
 | **Clés** | Voir les clés de connexion pas encore utilisées, les annuler |
-| **Serveur** | Adresse publique (§ 5.3), sauvegarde du serveur (§ 5.4) |
+| **Serveur** | Adresse publique (grisée : arrivera dans une prochaine version, § 5.3), sauvegarde du serveur (§ 5.4) |
 
 **Restaurer une version** sert à rattraper une erreur : une entrée supprimée par mégarde, un mot de passe de coffre commun oublié… La version choisie devient un nouveau coffre (`<nom>-v<numéro>`), avec les mêmes membres ; le coffre actuel ne change pas.
 
@@ -197,7 +197,9 @@ sudo systemctl restart pswd-server
 
 Dans l'application, saisissez alors l'adresse avec le port, par exemple `192.168.1.10:42443` (l'adresse affichée à l'installation indique encore 8443).
 
-### 5.3 Accéder au serveur hors de chez soi (arrivera plus tard)
+### 5.3 Accéder au serveur hors de chez soi (prochaine version)
+
+Pas encore disponible : l'accès au serveur depuis l'extérieur de la maison arrivera dans une prochaine version. Pour l'instant, vos appareils se synchronisent quand ils sont connectés au réseau de la maison ; ailleurs, ils fonctionnent normalement et rattrapent les modifications à leur retour.
 
 
 ### 5.4 Sauvegarder le serveur

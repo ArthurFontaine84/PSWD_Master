@@ -420,9 +420,8 @@ export const fr = {
     `Le contenu du coffre « ${name} » et ses versions seront effacés du serveur. Les copies des appareils sont gardées : un membre pourra republier la sienne. Pour confirmer, retapez son nom.`,
   serverVaultDeleted: (name: string) => `Coffre « ${name} » supprimé du serveur.`,
   publicAddress: "Adresse publique",
-  publicAddressHint:
-    "Nom DNS ou adresse IP pour joindre le serveur hors de chez vous, par exemple maison.duckdns.org. Laissez vide pour l'effacer.",
-  publicAddressSaved: "Adresse publique enregistrée.",
+  publicAddressComingSoon:
+    "Bientôt disponible : l'accès au serveur depuis l'extérieur de la maison arrivera dans une prochaine version.",
   serverBackup: "Sauvegarder le serveur",
   serverBackupExplanation:
     "Copie complète du serveur : comptes, coffres chiffrés et clé privée de son certificat. Rangez-la en lieu sûr, hors de cette machine.",

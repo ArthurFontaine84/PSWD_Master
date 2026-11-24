@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { backupServerToFile, serverBackupFileName, setPublicAddress } from "../lib/api";
+  import { backupServerToFile, serverBackupFileName } from "../lib/api";
   import { errorMessage } from "../lib/errors";
   import { pickServerBackupDestination } from "../lib/files";
   import { texts } from "../lib/i18n";
-  import { verbatim } from "../lib/keyboard";
-  import { showToast } from "../lib/toast.svelte";
+    import { showToast } from "../lib/toast.svelte";
   import Icon from "./Icon.svelte";
 
   interface Props {
@@ -13,67 +12,44 @@
 
   const { publicAddress }: Props = $props();
 
-  // Valeur de départ du champ : l'adresse connue à l'ouverture du panneau.
-  // svelte-ignore state_referenced_locally
-  let address = $state(publicAddress ?? "");
   let problem = $state<string | null>(null);
-  let running = $state<"address" | "backup" | null>(null);
-
-  async function run(task: "address" | "backup", action: () => Promise<void>) {
-    running = task;
-    problem = null;
-    try {
-      await action();
-    } catch (error) {
-      problem = errorMessage(error);
-    } finally {
-      running = null;
-    }
-  }
-
-  async function saveAddress(event: SubmitEvent) {
-    event.preventDefault();
-    await run("address", async () => {
-      await setPublicAddress(address);
-      showToast(texts.publicAddressSaved);
-    });
-  }
+  let running = $state(false);
 
   async function backup() {
-    await run("backup", async () => {
+    running = true;
+    problem = null;
+    try {
       const path = await pickServerBackupDestination(texts.serverBackupFileTitle, await serverBackupFileName());
       if (path !== null) {
         await backupServerToFile(path);
         showToast(texts.serverBackedUp);
       }
-    });
+    } catch (error) {
+      problem = errorMessage(error);
+    } finally {
+      running = false;
+    }
   }
 </script>
 
 {#if problem}
   <p role="alert">{problem}</p>
 {/if}
-<form onsubmit={saveAddress} novalidate>
-  <label>
-    {texts.publicAddress}
-    <input bind:value={address} {...verbatim} />
-    <small>{texts.publicAddressHint}</small>
-  </label>
-  <div class="actions">
-    <button type="submit" class="primary" disabled={running !== null}>
-      {running === "address" ? texts.saving : texts.save}
-    </button>
-  </div>
-</form>
+<!-- EXTENSION(acces-exterieur): rendre le champ modifiable (`setPublicAddress`) quand l'accès depuis l'extérieur sera prêt. -->
+<label>
+  {texts.publicAddress}
+  <input value={publicAddress ?? ""} disabled />
+  <small>{texts.publicAddressComingSoon}</small>
+</label>
 <div class="backup">
   <h3>{texts.serverBackup}</h3>
   <button
     type="button"
     class="icon-button"
     aria-label={texts.serverBackup}
-    title={running === "backup" ? texts.backingUp : texts.serverBackup}
-    aria-busy={running === "backup"}
-    disabled={running !== null}
+    title={running ? texts.backingUp : texts.serverBackup}
+    aria-busy={running}
+    disabled={running}
     onclick={backup}
   >
     <Icon name="save" />
@@ -82,6 +58,11 @@
 <p class="muted">{texts.serverBackupExplanation}</p>
 
 <style>
+  input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
   .backup {
     display: flex;
     align-items: center;

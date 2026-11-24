@@ -26,9 +26,11 @@ La plupart des gestionnaires de mots de passe gardent vos données sur les serve
 
 On peut commencer seul et ajouter le serveur plus tard : les coffres existants le rejoignent.
 
+Pour l'instant, la synchronisation se fait sur le réseau de la maison. L'accès au serveur depuis l'extérieur arrivera dans une prochaine version.
+
 ## Disponible sur
 
-Windows, Linux, macOS et Android. iOS
+Windows, Linux, macOS et Android. iOS arrivera plus tard.
 
 ## Avant de commencer
 

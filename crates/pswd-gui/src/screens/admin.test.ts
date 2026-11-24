@@ -636,18 +636,15 @@ describe("Admin, pages on a wide screen", () => {
 });
 
 describe("Admin, server", () => {
-  it("saves the public address", async () => {
+  it("shows the public address as coming in a future version", async () => {
     show("maison:8443");
     await openTab("Serveur");
     const field = screen.getByLabelText("Adresse publique", { exact: false });
     expect(field).toHaveValue("maison:8443");
-    await fireEvent.input(field, { target: { value: "" } });
-    await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
-    expect(setPublicAddress).toHaveBeenCalledWith("");
-    expect(await screen.findByText("Adresse publique enregistrée.")).toBeInTheDocument();
-    vi.mocked(setPublicAddress).mockRejectedValue({ code: "serverError", detail: "adresse publique invalide" });
-    await fireEvent.click(screen.getByRole("button", { name: "Enregistrer" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("adresse publique invalide");
+    expect(field).toBeDisabled();
+    expect(screen.getByText(/arrivera dans une prochaine version/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Enregistrer" })).not.toBeInTheDocument();
+    expect(setPublicAddress).not.toHaveBeenCalled();
   });
 
   it("backs the server up into the chosen file", async () => {

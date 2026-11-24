@@ -44,16 +44,9 @@ Tout se fait depuis PSWD Master :
 - **un membre de la famille** : écran Serveur → Administration → Comptes → « Ajouter un membre ». Transmettez-lui l'adresse et la clé affichées ;
 - **un autre de vos appareils** : écran Serveur → « Ajouter un appareil », puis connectez le nouvel appareil avec cette clé.
 
-## 4. Accès depuis l'extérieur
+## 4. Accès depuis l'extérieur (prochaine version)
 
-Par défaut, le serveur n'est joignable que sur le réseau de la maison. Pour l'atteindre ailleurs :
-
-1. Donnez au serveur une adresse fixe sur le réseau local (réservation DHCP dans la box).
-2. Dans la box, redirigez un port externe (par exemple 8443) vers le port 8443 de ce serveur.
-3. Donnez un nom à votre connexion, de préférence un nom DNS dynamique (par exemple DuckDNS) : l'adresse IP de la box peut changer.
-4. Dans PSWD Master : Administration → Serveur → « Adresse publique », par exemple `maison.duckdns.org:8443`. Les appareils la reçoivent au prochain échange, et l'essaient quand l'adresse locale ne répond pas.
-
-Le certificat est vérifié quelle que soit l'adresse : un autre serveur à la même adresse serait refusé. Un VPN (WireGuard, Tailscale) est une alternative à la redirection de port.
+> **Pas encore disponible.** L'accès au serveur depuis l'extérieur de la maison n'est pas encore implémenté : il arrivera dans une prochaine version. En attendant, le serveur n'est joignable que sur le réseau de la maison, et les appareils se synchronisent quand ils y sont connectés.
 
 ## 5. Sauvegarder et restaurer
 
@@ -148,7 +141,7 @@ Adresse du serveur : la première de `hostname -I` (Linux) ou l'« Adresse IPv4 
   New-NetFirewallRule -DisplayName "pswd-server" -Direction Inbound -Protocol TCP -LocalPort 8543 -Action Allow
   ```
 
-Sans redirection de port dans la box (section 4, avec le port 8543), le serveur n'est joignable que depuis le réseau de la maison.
+Le serveur n'est joignable que depuis le réseau de la maison : l'accès depuis l'extérieur arrivera dans une prochaine version (section 4).
 
 ### Au quotidien
 
