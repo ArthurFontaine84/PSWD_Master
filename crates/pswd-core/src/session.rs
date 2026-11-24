@@ -263,7 +263,7 @@ impl<L: LocalStore> Session<L> {
         Ok(SyncStatus::Conflict)
     }
 
-    /// Fusionne la copie locale si un autre programme (CLI, interface graphique) l'a réécrite :
+    /// Fusionne la copie locale si un autre programme (une autre instance de l'application) l'a réécrite :
     /// l'écriture suivante ne perd rien de ce qu'il a enregistré. Notre propre écriture n'est pas
     /// refusionnée : plus ancienne que le coffre en mémoire, elle pourrait, à date égale, annuler
     /// la dernière modification. Un fichier disparu ou inutilisable n'est jamais remplacé.

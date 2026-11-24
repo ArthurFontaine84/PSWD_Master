@@ -1,6 +1,6 @@
-# Installer PSWD Master et pswd, créer son premier coffre
+# Installer PSWD Master et créer son premier coffre
 
-Ce guide part d'une machine sans Rust et aboutit à un coffre utilisable en local, avec l'application graphique **PSWD Master** (§ 2), la ligne de commande **`pswd`** (§ 3 à 6), ou les deux : sur un ordinateur, elles voient les mêmes coffres.
+Ce guide part d'une machine sans Rust et aboutit à un coffre utilisable en local avec l'application **PSWD Master** (§ 2).
 
 ## 1. Prérequis
 
@@ -86,116 +86,32 @@ L'APK signé est `src-tauri/gen/android/app/build/outputs/apk/universal/release/
 
 ### Premier coffre
 
-1. **Nouveau coffre** : un nom (lettres, chiffres, `-` et `_`) et un mot de passe maître d'au moins 12 caractères mélangeant au moins 3 types parmi minuscules, majuscules, chiffres et symboles.
+1. **Nouveau coffre** : un nom (32 caractères au plus) et un mot de passe maître d'au moins 12 caractères mélangeant au moins 3 types parmi minuscules, majuscules, chiffres et symboles.
 2. La **clé de récupération** s'affiche une seule fois : la recopier sur papier, cocher la case, puis **Continuer**. Elle permet de choisir un nouveau mot de passe en cas d'oubli (« Mot de passe oublié ? » à l'ouverture).
 3. Le coffre est ouvert : **Nouvelle entrée** pour ajouter un mot de passe ou une note sécurisée, la recherche et le filtre par tag pour retrouver une entrée, **Copier** pour copier son mot de passe (effacé du presse-papiers après 20 s).
 
-Le coffre se verrouille après 10 minutes sans action, ou avec **Verrouiller**. **Gérer le coffre** permet de changer le mot de passe maître, d'importer un fichier CSV (format : `docs/SPEC.md` § 8) ou de supprimer le coffre. Depuis la liste des coffres : **Sauvegarder** écrit les coffres cochés dans un fichier `.pswd` (même format qu'au § 6), **Restaurer** rajoute ceux qu'on coche dans un tel fichier, **Réglages** choisit le thème.
+Le coffre se verrouille après 10 minutes sans action, ou avec **Verrouiller**. **Gérer le coffre** permet de changer le mot de passe maître, d'importer un fichier CSV (format : `docs/SPEC.md` § 8) ou de supprimer le coffre. Depuis la liste des coffres : **Sauvegarder** écrit les coffres cochés dans un fichier `.pswd` (§ 3), **Restaurer** rajoute ceux qu'on coche dans un tel fichier, **Réglages** choisit le thème.
 
-## 3. Installer la ligne de commande
+## 3. Sauvegarder sur une clé USB
 
-Depuis le dossier du projet :
+Brancher la clé, puis, depuis la liste des coffres : **Sauvegarder**, cocher les coffres voulus et confirmer. La fenêtre d'enregistrement du système propose un nom comme `pswd-sauvegarde_2026-10-23_14-30-00.pswd` (heure UTC) : choisir la clé comme emplacement.
 
-```sh
-cargo build --release -p pswd-cli
-```
+Les coffres sont copiés, toujours chiffrés : aucun mot de passe n'est demandé et rien n'est lisible dans le fichier. C'est le même format sur ordinateur et sur téléphone ; il sert aussi à passer ses coffres d'un appareil à l'autre. Supprimer les sauvegardes les plus anciennes est à faire à la main.
 
-La première compilation prend quelques minutes. Le programme obtenu est un fichier unique :
+Pour restaurer, sur cet appareil ou un autre : **Restaurer**, choisir le fichier `.pswd`, cocher les coffres voulus et confirmer. Chaque coffre est ajouté comme nouveau coffre ; si le nom est déjà pris, il devient `perso-sauvegarde-2026-10-23` : un coffre existant n'est jamais remplacé. Il s'ouvre avec le mot de passe maître en vigueur au moment de la sauvegarde.
 
-- Windows : `target\release\pswd.exe`
-- Linux / macOS : `target/release/pswd`
-
-Pour pouvoir taper `pswd` depuis n'importe quel dossier, l'installer dans `~/.cargo/bin` (déjà dans le `PATH` après l'installation de Rust) :
-
-```sh
-cargo install --path crates/pswd-cli
-pswd --version
-```
-
-Pour mettre à jour après un `git pull`, relancer la même commande `cargo install`.
-
-## 4. Créer le coffre
-
-```sh
-pswd init perso
-```
-
-`perso` est le nom du coffre : lettres, chiffres, `-` et `_`. Le programme demande un **nouveau mot de passe maître**, saisi deux fois et masqué. Il doit avoir au moins 12 caractères et mélanger au moins 3 types parmi minuscules, majuscules, chiffres et symboles ; il doit aussi être unique : c'est la seule chose à retenir.
-
-Le coffre est créé et chiffré. La **clé de récupération** s'affiche alors, **une seule fois** :
-
-```
-    000G-40R4-0M30-E209-185G-R38E-1W81-24GK-2GAH-C5RR-34D1-P70X-3RFG
-```
-
-Recopier cette clé sur papier et la ranger en lieu sûr, à l'écart du mot de passe. Elle permet de choisir un nouveau mot de passe maître en cas d'oubli (`pswd recover perso`).
-
-> ⚠ Mot de passe maître **et** clé de récupération perdus = coffre perdu. Personne ne peut le déchiffrer.
-
-## 5. Utiliser le coffre
-
-```sh
-pswd open perso
-```
-
-Après le mot de passe maître, un shell s'ouvre (`help` pour l'aide) :
-
-| Commande | Effet |
-|---|---|
-| `add` / `add --generate` | Ajoute une entrée, champ par champ ; `--generate` crée un mot de passe de 24 caractères. |
-| `list [--tag t]` | Liste les entrées. |
-| `search <texte>` | Cherche dans les titres, identifiants, URLs et tags. |
-| `show <entrée> [--show]` | Affiche une entrée ; mot de passe masqué sauf avec `--show`. |
-| `copy <entrée>` | Copie le mot de passe ; effacé du presse-papiers après 20 s. |
-| `edit <entrée>` | Modifie une entrée : réponse vide = inchangé, `-` = effacer. |
-| `rm <entrée>` | Supprime une entrée (confirmation demandée). |
-| `history <entrée>` | Versions précédentes. |
-| `tags` | Tags et nombre d'entrées. |
-| `gen [--length N] [--no-symbols]` | Génère un mot de passe. |
-| `quit` / `lock` | Ferme le coffre. |
-
-Une entrée se désigne par son titre (`show github`, `show "code wi-fi"`) ou par le début de son identifiant affiché par `list`. Chaque modification est enregistrée immédiatement. Sans commande pendant 10 minutes, le coffre se verrouille.
-
-Commandes ponctuelles :
-
-```sh
-pswd passwd perso                # changer le mot de passe maître
-pswd recover perso               # nouveau mot de passe grâce à la clé de récupération
-pswd import perso fichier.csv    # importer (format : docs/SPEC.md § 8)
-pswd delete essai                # supprimer un coffre (nom à retaper)
-```
-
-## 6. Sauvegarder sur une clé USB
-
-Brancher la clé (ici `E:`), puis :
-
-```sh
-pswd backup E:\                  # tous les coffres ; --vault perso pour un seul
-```
-
-Les coffres sont copiés, toujours chiffrés, dans un nouveau fichier : `E:\pswd-sauvegarde_2026-10-23_14-30-00.pswd` (heure UTC). C'est le même format que l'application PSWD Master, sur ordinateur comme sur téléphone. Les sauvegardes précédentes ne sont jamais modifiées ; supprimer les plus anciennes est à faire à la main.
-
-Pour restaurer, sur cette machine ou une autre :
-
-```sh
-pswd restore E:\pswd-sauvegarde_2026-10-23_14-30-00.pswd          # liste les coffres et demande lequel
-pswd restore E:\pswd-sauvegarde_2026-10-23_14-30-00.pswd perso    # directement
-```
-
-Le coffre est ajouté comme nouveau coffre. Si le nom est déjà pris, il devient `perso-sauvegarde-2026-10-23` : le coffre existant n'est jamais remplacé. Il s'ouvre avec le mot de passe maître en vigueur au moment de la sauvegarde.
-
-## 7. Où sont les fichiers
+## 4. Où sont les fichiers
 
 | Élément | Windows | Linux / macOS |
 |---|---|---|
 | Configuration | `%APPDATA%\pswd\config.toml` | `~/.config/pswd/config.toml` |
-| Coffres | `%APPDATA%\pswd\vaults\<nom>\` | `~/.local/share/pswd/vaults/<nom>/` |
+| Coffres | `%APPDATA%\pswd\vaults\<identifiant>\` | `~/.local/share/pswd/vaults/<identifiant>/` |
 
-Ces emplacements sont communs à `pswd` et à PSWD Master sur un ordinateur ; les deux peuvent modifier le même coffre en même temps. Chaque dossier de coffre contient `vault.enc`, le coffre chiffré. Dans `config.toml`, on peut régler `auto_lock_minutes` (0 = jamais) et `clipboard_clear_seconds` ; `theme` est réglé par PSWD Master.
+Chaque dossier de coffre contient `vault.enc`, le coffre chiffré. Dans `config.toml`, on peut régler `auto_lock_minutes` (0 = jamais) et `clipboard_clear_seconds` ; `theme` est réglé par PSWD Master. La version de développement (`npm run tauri dev`) utilise des dossiers à part, `pswd-dev`, et ne touche jamais les coffres de la version installée.
 
 **Venant d'une version précédente** : retirer les lignes `url = …` et `default_vault = …` de `config.toml` (sinon : `configuration invalide`). Les dossiers `repo.git` et les jetons `pswd` du trousseau ne servent plus et peuvent être supprimés.
 
-## 8. Serveur local pour le développement
+## 5. Serveur local pour le développement
 
 > ⚠ Réservé au développement : le serveur tourne au premier plan, sur la machine de développement, et n'écoute que sur elle. L'installation réelle (paquet `.deb`, service `systemd`) est décrite dans `docs/SERVEUR.md`.
 
@@ -207,14 +123,14 @@ cargo run -p pswd-server -- --data-dir C:\pswd-test-server reset-admin   # crée
 cargo run -p pswd-server -- --data-dir C:\pswd-test-server serve --listen 127.0.0.1:8443   # Ctrl+C pour l'arrêter
 ```
 
-La clé administrateur ne sert qu'une fois et expire dans 7 jours ; `reset-admin` en donne une nouvelle. Dans PSWD Master, écran **Serveur** : adresse `127.0.0.1` (le port 8443 est ajouté), puis la clé. À la connexion, tous les coffres de l'appareil sont publiés sur ce serveur : faire d'abord une sauvegarde (§ 6) si des coffres réels s'y trouvent. Pour repartir de zéro, arrêter le serveur et vider le dossier.
+La clé administrateur ne sert qu'une fois et expire dans 7 jours ; `reset-admin` en donne une nouvelle. Dans PSWD Master, écran **Serveur** : adresse `127.0.0.1` (le port 8443 est ajouté), puis la clé. À la connexion, tous les coffres de l'appareil sont publiés sur ce serveur : faire d'abord une sauvegarde (§ 3) si des coffres réels s'y trouvent. Pour repartir de zéro, arrêter le serveur et vider le dossier.
 
-## 9. En cas de problème
+## 6. En cas de problème
 
 | Message | Cause et solution |
 |---|---|
-| `un coffre nommé … existe déjà` | Ce nom est pris sur cette machine : en choisir un autre. |
-| `mot de passe maître incorrect` | Réessayer, ou `pswd recover <nom>` avec la clé de récupération. |
-| ``configuration invalide : unknown field `url` `` (ou `default_vault`) | Configuration d'une version précédente : voir § 7. |
+| « Un coffre nommé … existe déjà. » | Ce nom est pris sur cet appareil : en choisir un autre. |
+| « Mot de passe maître incorrect. » | Réessayer, ou « Mot de passe oublié ? » avec la clé de récupération. |
+| ``configuration invalide : unknown field `url` `` (ou `default_vault`) | Configuration d'une version précédente : voir § 4. |
 
-**Supprimer un coffre de cette machine** : `pswd delete <nom>`, puis retaper le nom pour confirmer. Faire d'abord une sauvegarde (§ 6) pour pouvoir le restaurer.
+**Supprimer un coffre de cet appareil** : **Gérer le coffre** → **Supprimer ce coffre**, puis retaper le nom pour confirmer. Faire d'abord une sauvegarde (§ 3) pour pouvoir le restaurer.

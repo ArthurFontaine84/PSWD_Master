@@ -141,8 +141,7 @@ fn on_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {
     }
 }
 
-/// Sur le bureau, les dossiers de la CLI : les deux programmes voient les mêmes coffres. La
-/// version de développement (`npm run tauri dev`) a les siens.
+/// Sur le bureau, les dossiers standard du système (SPEC §7). La version de développement (`npm run tauri dev`) a les siens.
 #[cfg(desktop)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn locations(_: &tauri::AppHandle) -> Result<Locations, Box<dyn Error>> {

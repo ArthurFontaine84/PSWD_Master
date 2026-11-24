@@ -1,5 +1,5 @@
 //! Vrai serveur HTTPS lancé dans un thread, pour tester les clients (`pswd-infra`, `pswd-app`,
-//! `pswd-cli`). Réservé aux tests : une erreur y est une panique.
+//! `pswd-gui`). Réservé aux tests : une erreur y est une panique.
 #![allow(clippy::expect_used)]
 
 use std::net::TcpListener;

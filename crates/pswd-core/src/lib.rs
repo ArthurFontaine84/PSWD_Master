@@ -34,7 +34,7 @@ pub use secret::Secret;
 pub use session::{Credentials, Session, SessionError, SyncStatus};
 pub use tags::Tags;
 pub use timestamp::Timestamp;
-pub use utc::{backup_day, backup_file_name, format_timestamp, server_backup_file_name};
+pub use utc::{backup_day, backup_file_name, server_backup_file_name};
 pub use vault::{Vault, VaultError};
 pub use vault_name::{MAX_VAULT_NAME_LEN, is_valid_vault_name};
 

@@ -452,6 +452,7 @@ mod tests {
                 "clé de connexion invalide ou expirée",
             ),
             (StorageError::MissingAccountName, "nom du compte manquant"),
+            (StorageError::NameTaken, "nom de compte déjà pris"),
             (
                 StorageError::RandomUnavailable,
                 "générateur aléatoire du système indisponible",

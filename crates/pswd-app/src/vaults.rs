@@ -61,15 +61,6 @@ impl Vaults {
         Ok(config)
     }
 
-    /// Vérifie, avant de demander quoi que ce soit, qu'un coffre peut être créé sous ce nom.
-    ///
-    /// # Errors
-    ///
-    /// Si le nom est invalide ou déjà pris.
-    pub fn check_new_name(&self, name: &str) -> Result<(), AppError> {
-        Ok(self.config()?.ensure_available(name)?)
-    }
-
     /// Crée un coffre privé vide et l'enregistre. Renvoie aussi sa clé de récupération, à
     /// montrer une seule fois. Un essai raté ne laisse rien derrière lui.
     ///
@@ -395,14 +386,7 @@ mod tests {
     fn creation_checks_the_name_and_the_password() {
         let dir = TempDir::new().unwrap();
         let vaults = device(&dir, "a");
-        assert_eq!(vaults.check_new_name("perso"), Ok(()));
         create(&vaults, "perso");
-        assert_eq!(
-            vaults.check_new_name("perso"),
-            Err(AppError::Config(ConfigError::VaultExists(
-                "perso".to_owned()
-            )))
-        );
         assert_eq!(
             vaults.create("perso", &secret("x"), fast(), at(0)).err(),
             Some(AppError::Config(ConfigError::VaultExists(
@@ -439,8 +423,10 @@ mod tests {
         folders.dedup();
         assert_eq!(folders.len(), 4);
         assert_eq!(
-            vaults.check_new_name("Été "),
-            Err(AppError::Config(ConfigError::InvalidVaultName(
+            vaults
+                .create("Été ", &secret("Maître-2026!"), fast(), at(0))
+                .err(),
+            Some(AppError::Config(ConfigError::InvalidVaultName(
                 "Été ".to_owned()
             )))
         );

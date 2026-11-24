@@ -1,16 +1,6 @@
-//! Dates affichées et noms des sauvegardes, en UTC : aucun fuseau horaire à connaître.
+//! Noms et dates des sauvegardes, en UTC : aucun fuseau horaire à connaître.
 
 use crate::Timestamp;
-
-/// Date et heure UTC, à la minute : `2026-10-22 14:05 UTC`.
-#[must_use]
-pub fn format_timestamp(timestamp: Timestamp) -> String {
-    let time = UtcTime::new(timestamp);
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
-        time.year, time.month, time.day, time.hour, time.minute
-    )
-}
 
 /// Nom proposé pour un fichier de sauvegarde : `pswd-sauvegarde_2026-10-22_14-05-09.pswd`.
 #[must_use]
@@ -91,17 +81,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn timestamps_are_formatted_in_utc() {
+    fn timestamps_are_read_in_utc() {
         let cases = [
-            (0, "1970-01-01 00:00 UTC"),
-            (951_782_400_000, "2000-02-29 00:00 UTC"),
-            (1_735_689_599_999, "2024-12-31 23:59 UTC"),
-            (1_767_225_600_000, "2026-01-01 00:00 UTC"),
-            (4_102_444_800_000, "2100-01-01 00:00 UTC"),
-            (-1, "1969-12-31 23:59 UTC"),
+            (0, "1970-01-01_00-00-00"),
+            (951_782_400_000, "2000-02-29_00-00-00"),
+            (1_735_689_599_999, "2024-12-31_23-59-59"),
+            (1_767_225_600_000, "2026-01-01_00-00-00"),
+            (4_102_444_800_000, "2100-01-01_00-00-00"),
+            (-1, "1969-12-31_23-59-59"),
         ];
         for (millis, expected) in cases {
-            assert_eq!(format_timestamp(Timestamp::from_millis(millis)), expected);
+            assert_eq!(backup_stamp(Timestamp::from_millis(millis)), expected);
         }
     }
 

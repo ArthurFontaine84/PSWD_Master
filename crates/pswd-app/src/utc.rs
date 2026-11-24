@@ -1,9 +1,9 @@
-//! Heure courante. Le formatage des dates est dans `pswd-core`, partagé avec le serveur.
+//! Heure courante. Les noms datés des sauvegardes sont dans `pswd-core`, partagés avec le serveur.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use pswd_core::Timestamp;
-pub use pswd_core::{backup_day, backup_file_name, format_timestamp, server_backup_file_name};
+pub use pswd_core::{backup_day, backup_file_name, server_backup_file_name};
 
 /// Heure courante : `pswd-core` ne lit jamais l'horloge lui-même.
 #[must_use]

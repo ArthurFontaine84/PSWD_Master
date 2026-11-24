@@ -1,4 +1,4 @@
-//! Cas d'usage partagés par la CLI et l'interface graphique. Aucune fonction ne pose de
+//! Cas d'usage de l'application, indépendants de l'interface. Aucune fonction ne pose de
 //! question à l'utilisateur : chacune reçoit ce qu'il faut et renvoie un résultat.
 
 #![forbid(unsafe_code)]
@@ -27,7 +27,7 @@ pub use random::generate;
 pub use server::{
     DEFAULT_PORT, Disconnected, Exchange, KeptReason, SyncOutcome, Update, VaultResults, VaultState,
 };
-pub use utc::{backup_file_name, format_timestamp, now, server_backup_file_name};
+pub use utc::{backup_file_name, now, server_backup_file_name};
 pub use vaults::Vaults;
 
 /// Coffre ouvert, enregistré dans un fichier local.

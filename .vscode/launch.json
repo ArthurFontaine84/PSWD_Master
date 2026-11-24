@@ -75,31 +75,6 @@
             }
         },
         {
-            "name": "Debug executable 'pswd'",
-            "type": "lldb",
-            "request": "launch",
-            "cargo": {
-                "args": [
-                    "run",
-                    "--bin=pswd",
-                    "--package=pswd-cli"
-                ]
-            },
-            "args": []
-        },
-        {
-            "name": "Debug unit tests in executable 'pswd'",
-            "type": "lldb",
-            "request": "launch",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--bin=pswd",
-                    "--package=pswd-cli"
-                ]
-            }
-        },
-        {
             "name": "Debug unit tests in library 'pswd_gui_lib'",
             "type": "lldb",
             "request": "launch",
