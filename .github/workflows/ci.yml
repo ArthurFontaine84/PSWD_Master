@@ -35,8 +35,10 @@ jobs:
           npm ci
           npm run build
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Même version qu'en local : une nouvelle version de Rust s'adopte des deux côtés à la fois.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.99.1"
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
