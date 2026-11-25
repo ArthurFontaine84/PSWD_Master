@@ -264,7 +264,7 @@ Modèle à remplir : `docs/template_import_pswd.csv` (sa ligne d'exemple est à 
   - CSP stricte (ressources de l'application seulement, ni script externe, ni `eval`, ni réseau) ; capacités Tauri limitées à nos commandes (aucun accès fichiers ou shell depuis JS) ; les adresses d'une entrée s'ouvrent dans le navigateur du système, jamais dans la webview : un clic appelle la commande `open_url`, qui n'accepte qu'une adresse `http` ou `https` avec un nom d'hôte et sans identifiant (`https://moi@site` déguise le vrai site) ; une adresse sans protocole (`exemple.fr`) s'ouvre en `https`. Le backend seul appelle le plugin `opener` (module `links.rs`) ; l'interface n'a aucune de ses permissions (vérifié par un test). Le plugin est fixé à la version 2.7.2.
 - **Mobile** : écran masqué dans les applications récentes et captures interdites (Android `FLAG_SECURE`, écran neutre sur iOS).
 
-## 10. Points d'extension à préparer
+## 10. Points d'extension à préparer (idées à trier)
 
 Chaque point est marqué dans le code par un commentaire `// EXTENSION(<nom>): …` à l'endroit exact où il se branchera, dès que cet endroit existe.
 

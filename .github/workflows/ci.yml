@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust (fmt, clippy, tests)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # `tauri::generate_context!` exige l'interface construite (`crates/pswd-gui/dist`).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/pswd-gui/package-lock.json
+      - name: Construire l'interface
+        working-directory: crates/pswd-gui
+        run: |
+          npm ci
+          npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Formatage
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic
+      - name: Tests
+        run: cargo nextest run --workspace
+
+  frontend:
+    name: Interface (svelte-check, ESLint, Vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/pswd-gui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/pswd-gui/package-lock.json
+      - run: npm ci
+      - name: svelte-check et ESLint
+        run: npm run check
+      - name: Vitest avec couverture
+        run: npm test
+
+  deny:
+    name: Dépendances (cargo deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
