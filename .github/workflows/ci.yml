@@ -50,7 +50,11 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic
       - name: Tests
-        run: cargo nextest run --workspace
+        id: tests
+        run: cargo nextest run --workspace --profile ci
+      - name: Résumé des tests
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        run: ./.github/scripts/nextest-summary.ps1
 
   frontend:
     name: Interface (svelte-check, ESLint, Vitest)
